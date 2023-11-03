@@ -124,6 +124,8 @@ if (noElectron) {
     '4242',
     '--api-cors',
     'http://localhost:*',
+    '--api-host',
+    '0.0.0.0',
     '--logfile',
     `${path.join(logDir, 'backend.log')}`
   ];

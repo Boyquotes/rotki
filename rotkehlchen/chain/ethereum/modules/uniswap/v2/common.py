@@ -1,10 +1,10 @@
 import dataclasses
 import logging
-from typing import TYPE_CHECKING, Callable, Literal, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Literal
 
 from web3 import Web3
 
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import CryptoAsset, EvmToken, UnderlyingToken
 from rotkehlchen.assets.utils import (
     TokenEncounterInfo,
@@ -34,6 +34,7 @@ from rotkehlchen.errors.misc import NotERC20Conformant
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.fval import FVal
 from rotkehlchen.globaldb.handler import GlobalDBHandler
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import (
     SUSHISWAP_PROTOCOL,
@@ -46,9 +47,9 @@ from rotkehlchen.types import (
 from rotkehlchen.utils.misc import hex_or_bytes_to_address, hex_or_bytes_to_int
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.evm_event import EvmEvent
     from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.history.events.structures.evm_event import EvmEvent
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -206,8 +207,8 @@ def decode_uniswap_like_deposit_and_withdrawals(
     amount0_raw = hex_or_bytes_to_int(tx_log.data[:32])
     amount1_raw = hex_or_bytes_to_int(tx_log.data[32:64])
 
-    token0: Optional[EvmToken] = None
-    token1: Optional[EvmToken] = None
+    token0: EvmToken | None = None
+    token1: EvmToken | None = None
     event0_idx = event1_idx = None
 
     if event_action_type == 'addition':

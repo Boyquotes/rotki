@@ -1,7 +1,8 @@
 import logging
 import random
 from collections import defaultdict
-from typing import TYPE_CHECKING, Callable, NamedTuple
+from collections.abc import Callable
+from typing import TYPE_CHECKING, NamedTuple
 
 import gevent
 
@@ -11,7 +12,8 @@ from rotkehlchen.chain.bitcoin.xpub import XpubManager
 from rotkehlchen.chain.constants import LAST_EVM_ACCOUNTS_DETECT_KEY
 from rotkehlchen.chain.ethereum.modules.eth2.constants import (
     LAST_PRODUCED_BLOCKS_QUERY_TS,
-    LAST_WITHDRAWALS_QUERY_TS,
+    LAST_WITHDRAWALS_EXIT_QUERY_TS,
+    WITHDRAWALS_TS_PREFIX,
 )
 from rotkehlchen.chain.ethereum.modules.makerdao.cache import (
     query_ilk_registry_and_maybe_update_cache,
@@ -23,6 +25,7 @@ from rotkehlchen.constants.timing import (
     DAY_IN_SECONDS,
     EVM_ACCOUNTS_DETECTION_REFRESH,
     HOUR_IN_SECONDS,
+    SPAM_ASSETS_DETECTION_REFRESH,
 )
 from rotkehlchen.db.constants import LAST_DATA_UPDATES_KEY
 from rotkehlchen.db.evmtx import DBEvmTx
@@ -35,6 +38,7 @@ from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.history.types import HistoricalPriceOracle
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.premium.premium import Premium, premium_create_and_verify
+from rotkehlchen.tasks.assets import LAST_SPAM_ASSETS_DETECT_KEY, autodetect_spam_assets_in_db
 from rotkehlchen.tasks.utils import query_missing_prices_of_base_entries, should_run_periodic_task
 from rotkehlchen.types import (
     EVM_CHAINS_WITH_TRANSACTIONS,
@@ -149,6 +153,8 @@ class TaskManager:
             self._maybe_query_produced_blocks,
             self._maybe_query_withdrawals,
             self._maybe_run_events_processing,
+            self._maybe_detect_withdrawal_exits,
+            self._maybe_detect_new_spam_tokens,
         ]
         if self.premium_sync_manager is not None:
             self.potential_tasks.append(self._maybe_schedule_db_upload)
@@ -421,7 +427,6 @@ class TaskManager:
         random.shuffle(shuffled_chains)
         for blockchain in shuffled_chains:
             number_of_tx_to_decode = dbevmtx.count_hashes_not_decoded(
-                addresses=None,
                 chain_id=blockchain.to_chain_id(),
             )
             if number_of_tx_to_decode == 0:
@@ -562,10 +567,21 @@ class TaskManager:
             return None  # already running
 
         now = ts_now()
+        addresses = self.chains_aggregator.accounts.eth
         with self.database.conn.read_ctx() as cursor:
-            result = self.database.get_used_query_range(cursor, LAST_WITHDRAWALS_QUERY_TS)
-            if result is not None and now - result[1] <= DAY_IN_SECONDS:
-                return None
+            end_timestamps = cursor.execute('SELECT end_ts FROM used_query_ranges WHERE name LIKE ?', (f'{WITHDRAWALS_TS_PREFIX}%',)).fetchall()  # noqa: E501
+
+        should_query = False
+        if len(end_timestamps) != len(addresses):
+            should_query = True
+        else:
+            for entry in end_timestamps:
+                if now - entry[0] >= HOUR_IN_SECONDS * 3:
+                    should_query = True
+                    break
+
+        if not should_query:
+            return None
 
         task_name = 'Periodically query ethereum withdrawals'
         log.debug(f'Scheduling task to {task_name}')
@@ -574,7 +590,31 @@ class TaskManager:
             task_name=task_name,
             exception_is_error=True,
             method=eth2.query_services_for_validator_withdrawals,
+            addresses=addresses,
             to_ts=now,
+        )]
+
+    def _maybe_detect_withdrawal_exits(self) -> Optional[list[gevent.Greenlet]]:
+        """Schedules the task that detects if any of the withdrawals should be exits
+
+        Not putting a lock as it should probably not be a too heavy task?
+        """
+        eth2 = self.chains_aggregator.get_module('eth2')
+        if eth2 is None:
+            return None
+
+        with self.database.conn.read_ctx() as cursor:
+            result = self.database.get_used_query_range(cursor, LAST_WITHDRAWALS_EXIT_QUERY_TS)
+            if result is not None and ts_now() - result[1] <= HOUR_IN_SECONDS * 2:
+                return None
+
+        task_name = 'Periodically detect withdrawal exits'
+        log.debug(f'Scheduling task to {task_name}')
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name=task_name,
+            exception_is_error=True,
+            method=eth2.detect_exited_validators,
         )]
 
     def _maybe_run_events_processing(self) -> Optional[list[gevent.Greenlet]]:
@@ -638,6 +678,8 @@ class TaskManager:
             task_name='Detect EVM accounts',
             exception_is_error=True,
             method=self.chains_aggregator.detect_evm_accounts,
+            progress_handler=None,
+            chains=self.database.get_chains_to_detect_evm_accounts(),
         )]
 
     def _maybe_update_ilk_cache(self) -> Optional[list[gevent.Greenlet]]:
@@ -651,6 +693,22 @@ class TaskManager:
             )]
 
         return None
+
+    def _maybe_detect_new_spam_tokens(self) -> Optional[list[gevent.Greenlet]]:
+        """
+        This function queries the globaldb looking for assets that look like spam tokens
+        and ignores them in addition to marking them as spam tokens
+        """
+        if should_run_periodic_task(self.database, LAST_SPAM_ASSETS_DETECT_KEY, SPAM_ASSETS_DETECTION_REFRESH) is False:  # noqa: E501
+            return None
+
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name='Detect spam assets in globaldb',
+            exception_is_error=True,
+            method=autodetect_spam_assets_in_db,
+            user_db=self.database,
+        )]
 
     def _schedule(self) -> None:
         """Schedules background tasks"""

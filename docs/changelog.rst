@@ -2,10 +2,26 @@
 Changelog
 =========
 
-* :fix:`6548` Users will no longer be blocked by a persistent modal dialog while premium sync is uploading.
-* :fix:`-` Replaces snowtrace.io with avascan.info as the default explorer for Avalanche C-Chain
+* :bug:`7009` PnL reports with an old type of event (such as DailyStats) following a swap will no longer fail with an exception.
+* :bug:`6998` If a username contains a '.' the user will now be able to log in properly again.
+* :feature:`6885` Users can now specify EVM chains for which no activity will be auto-detected by rotki.
+* :bug:`-` The welcome message at first login after a version upgrade will now have the correct link to the release notes.
+* :feature:`4841` The rotki data directory is now more organized.
+* :bug:`-` Creating, editing and deleting accounting rules will now update warnings when rendered events get affected in the history view.
+
+* :release:`1.31.0 <2023-11-24>`
+* :feature:`-` Oneinch v3 swaps should be supported in Ethereum mainnet.
+* :feature:`-` Attestation events for the Ethereum Attestation service in Mainnet, Optimism, Arbitrum One and Base will be properly shown to the user.
+* :feature:`-` Compound v3 reward claims should now be shown properly
+* :bug:`-` Uniswap Swaps with the Universal router would be decoded correctly.
+* :bug:`-` There will be no duplicated balances in cases where the native token balance is zero.
+* :bug:`-` Fix the issue where users sometimes encounter timeout errors when importing assets from a zip archive.
+* :bug:`6871` Ethereum staking withdrawals querying should now work fine again.
+* :feature:`6439` Users can filter historical events to display only customized events.
+* :bug:`6548` Users will no longer be blocked by a persistent modal dialog while premium sync is uploading.
+* :bug:`-` Replaces snowtrace.io with avascan.info as the default explorer for Avalanche C-Chain
 * :feature:`-` Users will be able to create custom rules for accounting.
-* :fix:`-` Fix the issue where pinned PnL report errors (missing acquisitions and missing prices) become empty when the user moves to another page.
+* :bug:`-` Fix the issue where pinned PnL report errors (missing acquisitions and missing prices) become empty when the user moves to another page.
 * :feature:`-` Migrating MATIC to POL in ethereum mainnet is now properly decoded.
 * :feature:`-` Users can now see if any of their addresses have vCOW available to claim from the CoW Protocol airdrop.
 * :feature:`-` Golem's GNT->GLM migration events will now be properly detected.
@@ -33,6 +49,9 @@ Changelog
 * :bug:`-` Aave v2 accounting for deposit interest profit and borrow payback loss should now work correctly again.
 * :bug:`6717` Fixes an issue causing the graph for some multichain assets to not be displayed correctly.
 * :bug:`6169` Handle some kraken event categories better and show them in the UI. Categories like failed withdrawals, moving funds from/to staking and credits of forked assets or delisted asset trades.
+* :bug:`-` Users will be able to import custom assets from the assets backup file.
+* :bug:`-` Fix issue for some users where the datepicker field is not automatically filled with current datetime
+* :bug:`-` Fix issue with editing ledger entries whose rate is not set.
 
 * :release:`1.30.2 <2023-09-21>`
 * :feature:`-` Improved support for importing Binance CSV files.

@@ -517,7 +517,8 @@ CREATE TABLE IF NOT EXISTS skipped_external_events (
     identifier INTEGER NOT NULL PRIMARY KEY,
     data TEXT NOT NULL,
     location CHAR(1) NOT NULL DEFAULT('A') REFERENCES location(location),
-    extra_data TEXT
+    extra_data TEXT,
+    UNIQUE(data, location)
 );
 """
 
@@ -686,6 +687,16 @@ CREATE TABLE IF NOT EXISTS linked_rules_properties(
 );
 """
 
+DB_CREATE_UNRESOLVED_REMOTE_CONFLICTS = """
+CREATE TABLE IF NOT EXISTS unresolved_remote_conflicts(
+    identifier INTEGER PRIMARY KEY NOT NULL,
+    local_id INTEGER NOT NULL,
+    remote_data TEXT NOT NULL,
+    type INTEGER NOT NULL
+);
+"""
+
+
 DB_SCRIPT_CREATE_TABLES = f"""
 PRAGMA foreign_keys=off;
 BEGIN TRANSACTION;
@@ -738,6 +749,7 @@ BEGIN TRANSACTION;
 {DB_CREATE_SKIPPED_EXTERNAL_EVENTS}
 {DB_CREATE_ACCOUNTING_RULE}
 {DB_CREATE_MAPPED_ACCOUNTING_RULES}
+{DB_CREATE_UNRESOLVED_REMOTE_CONFLICTS}
 COMMIT;
 PRAGMA foreign_keys=on;
 """

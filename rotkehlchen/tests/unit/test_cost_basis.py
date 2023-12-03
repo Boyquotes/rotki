@@ -14,8 +14,6 @@ from rotkehlchen.accounting.mixins.event import AccountingEventType
 from rotkehlchen.accounting.pnl import PNL, PnlTotals
 from rotkehlchen.accounting.pot import AccountingPot
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.accounting.types import MissingAcquisition
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.chain.ethereum.modules.uniswap.constants import CPT_UNISWAP_V2
@@ -25,6 +23,8 @@ from rotkehlchen.constants.assets import A_3CRV, A_BTC, A_ETH, A_EUR, A_WETH
 from rotkehlchen.db.settings import DBSettings
 from rotkehlchen.exchanges.data_structures import Trade
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.accounting import accounting_history_process
 from rotkehlchen.tests.utils.factories import make_evm_address, make_evm_tx_hash
 from rotkehlchen.types import (
@@ -1164,7 +1164,7 @@ def test_fees(accountant: 'Accountant', expected_pnls: list[FVal]):
         end_ts=Timestamp(1677593077),
         history_list=history,  # type: ignore[arg-type]  # invariant problem
     )
-    for event, expected_pnl in zip(accountant.pots[0].processed_events, expected_pnls):
+    for event, expected_pnl in zip(accountant.pots[0].processed_events, expected_pnls, strict=True):  # noqa: E501
         assert event.pnl.taxable == expected_pnl
 
 

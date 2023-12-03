@@ -1,24 +1,21 @@
 import random
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import requests
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.eth2 import EthWithdrawalEvent
-from rotkehlchen.accounting.structures.evm_event import SUB_SWAPS_DETAILS, EvmEvent
-from rotkehlchen.accounting.structures.types import (
-    ActionType,
-    HistoryEventSubType,
-    HistoryEventType,
-)
+from rotkehlchen.accounting.structures.types import ActionType
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants.assets import A_ETH, A_SUSHI, A_USDT
 from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.db.filtering import HistoryEventFilterQuery
 from rotkehlchen.db.history_events import DBHistoryEvents
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.eth2 import EthWithdrawalEvent
+from rotkehlchen.history.events.structures.evm_event import SUB_SWAPS_DETAILS, EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
@@ -45,8 +42,8 @@ from rotkehlchen.types import (
 from rotkehlchen.utils.misc import ts_sec_to_ms
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.base import HistoryBaseEntry
     from rotkehlchen.api.server import APIServer
+    from rotkehlchen.history.events.structures.base import HistoryBaseEntry
 
 
 def assert_editing_works(
@@ -54,7 +51,7 @@ def assert_editing_works(
         rotkehlchen_api_server: 'APIServer',
         events_db: 'DBHistoryEvents',
         sequence_index: int,
-        autoedited: Optional[dict[str, Any]] = None,
+        autoedited: dict[str, Any] | None = None,
 ):
     """A function to assert editing works per entry type. If autoedited is given
     then we check that some fields, given in autoedited, were automatically edited
@@ -371,6 +368,7 @@ def test_event_with_details(rotkehlchen_api_server: 'APIServer'):
     assert result == {SUB_SWAPS_DETAILS: event2.extra_data[SUB_SWAPS_DETAILS]}  # type: ignore[index]  # extra_data is not None here
 
 
+@pytest.mark.parametrize('initialize_accounting_rules', [True])
 def test_get_events(rotkehlchen_api_server: 'APIServer'):
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
     entries = add_entries(events_db=DBHistoryEvents(rotki.data.db))
@@ -404,6 +402,9 @@ def test_get_events(rotkehlchen_api_server: 'APIServer'):
         else:
             assert 'ignored_in_accounting' not in event
 
+    # check if the accounting rule check is respected
+    assert 'missing_accounting_rule' not in result['entries'][1]
+
     # now try with grouping
     response = requests.post(
         api_url_for(
@@ -417,6 +418,9 @@ def test_get_events(rotkehlchen_api_server: 'APIServer'):
     assert result['entries_limit'] == 100
     assert result['entries_total'] == 6
     assert len(result['entries']) == 6
+
+    # check also that in groups we add the missing_accounting_rule key
+    assert 'missing_accounting_rule' not in result['entries'][1]
 
     # now try with grouping and pagination
     response = requests.post(

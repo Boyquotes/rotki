@@ -1,9 +1,9 @@
 import abc
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Optional
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import Asset, EvmToken
 from rotkehlchen.chain.ethereum.utils import asset_normalized_value
 from rotkehlchen.chain.evm.constants import ETH_SPECIAL_ADDRESS
@@ -20,15 +20,16 @@ from rotkehlchen.chain.evm.structures import EvmTxReceiptLog, SwapData
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.resolver import evm_address_to_identifier
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import ChecksumEvmAddress, EvmTokenKind, EvmTransaction
 from rotkehlchen.utils.misc import hex_or_bytes_to_address, hex_or_bytes_to_int
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.evm_event import EvmEvent
     from rotkehlchen.chain.evm.decoding.base import BaseDecoderTools
     from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
     from rotkehlchen.fval import FVal
+    from rotkehlchen.history.events.structures.evm_event import EvmEvent
     from rotkehlchen.user_messages import MessagesAggregator
 
 logger = logging.getLogger(__name__)
@@ -182,7 +183,7 @@ class CowswapCommonDecoder(DecoderInterface, metaclass=abc.ABCMeta):
             ):
                 related_transfer_events[(event.event_type, event.asset, event.balance.amount)] = event  # noqa: E501
 
-        trades_events: list[tuple[EvmEvent, EvmEvent, Optional[EvmEvent], SwapData]] = []
+        trades_events: list[tuple[EvmEvent, EvmEvent, EvmEvent | None, SwapData]] = []
         for swap_data in all_swap_data:
             receive_event = related_transfer_events.get((HistoryEventType.RECEIVE, swap_data.to_asset, swap_data.to_amount))  # noqa: E501
             if receive_event is None:
@@ -217,7 +218,7 @@ class CowswapCommonDecoder(DecoderInterface, metaclass=abc.ABCMeta):
                 fee_event = self.base.make_event_next_index(
                     tx_hash=transaction.tx_hash,
                     timestamp=transaction.timestamp,
-                    event_type=HistoryEventType.SPEND,
+                    event_type=HistoryEventType.TRADE,
                     event_subtype=HistoryEventSubType.FEE,
                     asset=swap_data.from_asset,
                     balance=Balance(amount=swap_data.fee_amount),
@@ -265,7 +266,7 @@ class CowswapCommonDecoder(DecoderInterface, metaclass=abc.ABCMeta):
             spend_event.notes = f'Swap {spend_event.balance.amount} {spend_event.asset.symbol_or_name()} in cowswap'  # noqa: E501
             receive_event.notes = f'Receive {receive_event.balance.amount} {receive_event.asset.symbol_or_name()} as the result of a swap in cowswap'  # noqa: E501
             maybe_reshuffle_events(
-                ordered_events=[spend_event, fee_event, receive_event],
+                ordered_events=[spend_event, receive_event, fee_event],
                 events_list=decoded_events,
             )
 

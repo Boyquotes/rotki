@@ -78,8 +78,8 @@ const expand = (item: Report) => {
 </script>
 
 <template>
-  <Card>
-    <template #title>
+  <RuiCard>
+    <template #header>
       {{ t('profit_loss_reports.title') }}
     </template>
     <DataTable
@@ -109,6 +109,7 @@ const expand = (item: Report) => {
       <template #item.free="{ item }">
         <AmountDisplay
           force-currency
+          show-currency="symbol"
           pnl
           :value="calculateTotalProfitLoss(item).free"
           :fiat-currency="item.settings.profitCurrency"
@@ -117,6 +118,7 @@ const expand = (item: Report) => {
       <template #item.taxable="{ item }">
         <AmountDisplay
           force-currency
+          show-currency="symbol"
           pnl
           :value="calculateTotalProfitLoss(item).taxable"
           :fiat-currency="item.settings.profitCurrency"
@@ -152,13 +154,12 @@ const expand = (item: Report) => {
         </div>
       </template>
       <template #expanded-item="{ headers, item }">
-        <TableExpandContainer visible :colspan="headers.length">
+        <td :colspan="headers.length" class="py-4">
           <ProfitLossOverview
-            flat
             :report="item"
             :symbol="item.settings.profitCurrency"
           />
-        </TableExpandContainer>
+        </td>
       </template>
       <template #item.expand="{ item }">
         <RowExpander
@@ -167,5 +168,5 @@ const expand = (item: Report) => {
         />
       </template>
     </DataTable>
-  </Card>
+  </RuiCard>
 </template>

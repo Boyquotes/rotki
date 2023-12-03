@@ -1,7 +1,7 @@
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field, fields
-from typing import Any, Literal, NamedTuple, Optional, Union
+from typing import Any, Literal, NamedTuple, Optional
 
 from rotkehlchen.assets.asset import Asset, AssetWithOracles
 from rotkehlchen.chain.constants import LAST_EVM_ACCOUNTS_DETECT_KEY
@@ -18,6 +18,7 @@ from rotkehlchen.types import (
     DEFAULT_ADDRESS_NAME_PRIORITY,
     DEFAULT_OFF_MODULES,
     AddressNameSource,
+    ChainID,
     CostBasisMethod,
     ExchangeLocationID,
     ModuleName,
@@ -60,6 +61,7 @@ JSON_KEYS = (
     'current_price_oracles',
     'historical_price_oracles',
     'non_syncing_exchanges',
+    'evmchains_to_skip_detection',
 )
 BOOLEAN_KEYS = (
     'have_premium',
@@ -127,6 +129,7 @@ CachedDBSettingsFieldNames = Literal[
     'ssf_graph_multiplier',
     'last_data_migration',
     'non_syncing_exchanges',
+    'evmchains_to_skip_detection',
     'cost_basis_method',
     'treat_eth2_as_eth',
     'eth_staking_taxable_after_withdrawal_enabled',
@@ -138,19 +141,19 @@ CachedDBSettingsFieldNames = Literal[
     'read_timeout',
 ]
 
-DBSettingsFieldTypes = Union[
-    bool,
-    int,
-    Timestamp,
-    str,
-    Asset,
-    Sequence[ModuleName],
-    Sequence[CurrentPriceOracle],
-    Sequence[HistoricalPriceOracle],
-    Sequence[ExchangeLocationID],
-    CostBasisMethod,
-    Sequence[AddressNameSource],
-]
+DBSettingsFieldTypes = (
+    bool |
+    int |
+    Timestamp |
+    str |
+    Asset |
+    Sequence[ModuleName] |
+    Sequence[CurrentPriceOracle] |
+    Sequence[HistoricalPriceOracle] |
+    Sequence[ExchangeLocationID] |
+    CostBasisMethod |
+    Sequence[AddressNameSource]
+)
 
 
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
@@ -162,7 +165,7 @@ class DBSettings:
     include_crypto2crypto: bool = DEFAULT_INCLUDE_CRYPTO2CRYPTO
     last_data_upload_ts: Timestamp = field(default=Timestamp(0))
     ui_floating_precision: int = DEFAULT_UI_FLOATING_PRECISION
-    taxfree_after_period: Optional[int] = DEFAULT_TAXFREE_AFTER_PERIOD
+    taxfree_after_period: int | None = DEFAULT_TAXFREE_AFTER_PERIOD
     balance_save_frequency: int = DEFAULT_BALANCE_SAVE_FREQUENCY
     include_gas_costs: bool = DEFAULT_INCLUDE_GAS_COSTS
     ksm_rpc_endpoint: str = 'http://localhost:9933'
@@ -184,6 +187,7 @@ class DBSettings:
     ssf_graph_multiplier: int = DEFAULT_SSF_GRAPH_MULTIPLIER
     last_data_migration: int = DEFAULT_LAST_DATA_MIGRATION
     non_syncing_exchanges: Sequence[ExchangeLocationID] = field(default_factory=list)
+    evmchains_to_skip_detection: Sequence[ChainID] = field(default_factory=list)
     cost_basis_method: CostBasisMethod = DEFAULT_COST_BASIS_METHOD
     treat_eth2_as_eth: bool = DEFAULT_TREAT_ETH2_AS_ETH
     eth_staking_taxable_after_withdrawal_enabled: bool = DEFAULT_ETH_STAKING_TAXABLE_AFTER_WITHDRAWAL_ENABLED  # noqa: E501
@@ -213,38 +217,39 @@ class DBSettings:
 
 
 class ModifiableDBSettings(NamedTuple):
-    premium_should_sync: Optional[bool] = None
-    include_crypto2crypto: Optional[bool] = None
-    ui_floating_precision: Optional[int] = None
-    taxfree_after_period: Optional[int] = None
-    balance_save_frequency: Optional[int] = None
-    include_gas_costs: Optional[bool] = None
-    ksm_rpc_endpoint: Optional[str] = None
-    dot_rpc_endpoint: Optional[str] = None
-    main_currency: Optional[AssetWithOracles] = None
-    date_display_format: Optional[str] = None
-    submit_usage_analytics: Optional[bool] = None
-    active_modules: Optional[list[ModuleName]] = None
-    frontend_settings: Optional[str] = None
-    account_for_assets_movements: Optional[bool] = None
-    btc_derivation_gap_limit: Optional[int] = None
-    calculate_past_cost_basis: Optional[bool] = None
-    display_date_in_localtime: Optional[bool] = None
-    current_price_oracles: Optional[list[CurrentPriceOracle]] = None
-    historical_price_oracles: Optional[list[HistoricalPriceOracle]] = None
-    pnl_csv_with_formulas: Optional[bool] = None
-    pnl_csv_have_summary: Optional[bool] = None
-    ssf_graph_multiplier: Optional[int] = None
-    non_syncing_exchanges: Optional[list[ExchangeLocationID]] = None
-    cost_basis_method: Optional[CostBasisMethod] = None
-    treat_eth2_as_eth: Optional[bool] = None
-    eth_staking_taxable_after_withdrawal_enabled: Optional[bool] = None
-    address_name_priority: Optional[list[AddressNameSource]] = None
-    include_fees_in_cost_basis: Optional[bool] = None
-    infer_zero_timed_balances: Optional[bool] = None
-    query_retry_limit: Optional[int] = None
-    connect_timeout: Optional[int] = None
-    read_timeout: Optional[int] = None
+    premium_should_sync: bool | None = None
+    include_crypto2crypto: bool | None = None
+    ui_floating_precision: int | None = None
+    taxfree_after_period: int | None = None
+    balance_save_frequency: int | None = None
+    include_gas_costs: bool | None = None
+    ksm_rpc_endpoint: str | None = None
+    dot_rpc_endpoint: str | None = None
+    main_currency: AssetWithOracles | None = None
+    date_display_format: str | None = None
+    submit_usage_analytics: bool | None = None
+    active_modules: list[ModuleName] | None = None
+    frontend_settings: str | None = None
+    account_for_assets_movements: bool | None = None
+    btc_derivation_gap_limit: int | None = None
+    calculate_past_cost_basis: bool | None = None
+    display_date_in_localtime: bool | None = None
+    current_price_oracles: list[CurrentPriceOracle] | None = None
+    historical_price_oracles: list[HistoricalPriceOracle] | None = None
+    pnl_csv_with_formulas: bool | None = None
+    pnl_csv_have_summary: bool | None = None
+    ssf_graph_multiplier: int | None = None
+    non_syncing_exchanges: list[ExchangeLocationID] | None = None
+    evmchains_to_skip_detection: list[ChainID] | None = None
+    cost_basis_method: CostBasisMethod | None = None
+    treat_eth2_as_eth: bool | None = None
+    eth_staking_taxable_after_withdrawal_enabled: bool | None = None
+    address_name_priority: list[AddressNameSource] | None = None
+    include_fees_in_cost_basis: bool | None = None
+    infer_zero_timed_balances: bool | None = None
+    query_retry_limit: int | None = None
+    connect_timeout: int | None = None
+    read_timeout: int | None = None
 
     def serialize(self) -> dict[str, Any]:
         settings_dict = {}
@@ -260,7 +265,7 @@ class ModifiableDBSettings(NamedTuple):
         return settings_dict
 
 
-def read_boolean(value: Union[str, bool]) -> bool:
+def read_boolean(value: str | bool) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -315,6 +320,9 @@ def db_settings_from_dict(
         elif key == 'non_syncing_exchanges':
             values = json.loads(value)
             specified_args[key] = [ExchangeLocationID.deserialize(x) for x in values]
+        elif key == 'evmchains_to_skip_detection':
+            values = json.loads(value)
+            specified_args[key] = [ChainID.deserialize_from_name(x) for x in values]
         elif key == 'cost_basis_method':
             specified_args[key] = CostBasisMethod.deserialize(value)
         elif key == 'address_name_priority':
@@ -351,6 +359,11 @@ def serialize_db_setting(
         value = value.serialize()  # pylint: disable=no-member
     elif setting == 'address_name_priority' and is_modifiable is True:
         value = json.dumps(value)
+    elif setting == 'evmchains_to_skip_detection':
+        if is_modifiable is True:
+            value = json.dumps([x.to_name() for x in value])
+        else:
+            value = [x.to_name() for x in value]
     elif setting in JSON_KEYS:
         if is_modifiable is True:
             value = json.dumps([x.serialize() for x in value])
@@ -397,7 +410,7 @@ class CachedSettings:
     def get_entry(self, attr: CachedDBSettingsFieldNames) -> DBSettingsFieldTypes:
         return getattr(self._settings, attr)
 
-    def get_settings(self) -> Optional[DBSettings]:
+    def get_settings(self) -> DBSettings | None:
         return self._settings
 
     # commonly used settings with their own get function

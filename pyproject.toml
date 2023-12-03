@@ -35,7 +35,7 @@ rotkehlchen = "rotkehlchen.__main__:main"
 dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools_scm]
-fallback_version = "1.30.2"
+fallback_version = "1.31.0"
 
 [tool.setuptools.package-data]
 "rotkehlchen.data" = ["*"]
@@ -169,6 +169,7 @@ ignore = [
     "PLR0912", # too many branches -- we dont care
     "PLR6201", # Doesn't work only for constants: https://github.com/astral-sh/ruff/issues/8322
     "PLR6301", # could be a staticmethod or function -- breaks for interfaces
+    "PLC0415", # we need to fix non top level imports and enable this
     "PLC1901", # we prefer direct comparison to empty string for explicitness
     # Some bandit rules we don't check for
     "S101",  # asserts are fine
@@ -212,7 +213,7 @@ exclude = [
 ]
 # Allow unused variables when underscore-prefixed.
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.per-file-ignores]
 

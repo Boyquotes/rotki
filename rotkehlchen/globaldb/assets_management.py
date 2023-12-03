@@ -2,7 +2,7 @@ import json
 import logging
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from rotkehlchen.assets.asset import Asset, AssetWithNameAndType
@@ -33,8 +33,11 @@ def import_assets_from_file(
     - InputError: If the version of the file is not valid for the current
     globaldb version
     """
-    with open(path, encoding='utf8') as f:
-        data = ExportedAssetsSchema().loads(f.read())
+    try:
+        with open(path, encoding='utf8') as f:
+            data = ExportedAssetsSchema().loads(f.read())
+    except UnicodeDecodeError as e:
+        raise InputError(f'Provided file at {path} could not be decoded as utf-8 properly') from e
 
     if int(data['version']) not in ASSETS_FILE_IMPORT_ACCEPTED_GLOBALDB_VERSIONS:
         raise InputError(
@@ -48,7 +51,7 @@ def import_assets_from_file(
     for asset_data in data['assets']:
         asset: AssetWithNameAndType = asset_data['asset']
         if asset.exists():
-            msg_aggregator.add_warning(
+            log.warning(
                 f'Tried to import existing asset {asset.identifier} with '
                 f'name {asset.name}',
             )
@@ -72,7 +75,7 @@ def import_assets_from_file(
 
 
 def export_assets_from_file(
-        dirpath: Optional[Path],
+        dirpath: Path | None,
         db_handler: 'DBHandler',
 ) -> Path:
     """

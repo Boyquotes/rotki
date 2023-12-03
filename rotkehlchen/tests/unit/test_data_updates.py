@@ -1,10 +1,9 @@
 import json
+from collections.abc import Callable
 from contextlib import ExitStack
-from typing import Callable, Optional
 from unittest.mock import patch
 
 import pytest
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 
 from rotkehlchen.assets.asset import EvmToken
 from rotkehlchen.constants.resolver import evm_address_to_identifier
@@ -14,6 +13,7 @@ from rotkehlchen.db.filtering import AccountingRulesFilterQuery, AddressbookFilt
 from rotkehlchen.db.updates import RotkiDataUpdater, UpdateType
 from rotkehlchen.errors.asset import UnknownAsset
 from rotkehlchen.globaldb.handler import GlobalDBHandler
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.factories import make_evm_address
 from rotkehlchen.tests.utils.mock import MockResponse
 from rotkehlchen.types import (
@@ -183,7 +183,7 @@ def make_single_mock_github_data_response(target: UpdateType):
     return mock_github_data_response
 
 
-def make_mock_github_response(latest: int, min_version: Optional[str] = None, max_version: Optional[str] = None) -> Callable:  # noqa: E501
+def make_mock_github_response(latest: int, min_version: str | None = None, max_version: str | None = None) -> Callable:  # noqa: E501
     """Creates a mocking function for all update types for github requests."""
     def mock_github_response(url, timeout):  # pylint: disable=unused-argument
         if 'info' in url:

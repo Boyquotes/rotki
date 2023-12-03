@@ -1,12 +1,13 @@
-from collections.abc import Iterator
 from enum import auto
-from typing import TYPE_CHECKING, Any, Optional, Protocol, Union
+from typing import TYPE_CHECKING, Any, Protocol
 
 from rotkehlchen.utils.mixins.enums import DBCharEnumMixIn
 
 if TYPE_CHECKING:
+    from more_itertools import peekable
+
     from rotkehlchen.accounting.pot import AccountingPot
-    from rotkehlchen.accounting.structures.evm_event import EvmEvent
+    from rotkehlchen.history.events.structures.evm_event import EvmEvent
 
 
 class EventsAccountantCallback(Protocol):
@@ -15,26 +16,26 @@ class EventsAccountantCallback(Protocol):
             self,
             pot: 'AccountingPot',
             event: 'EvmEvent',
-            other_events: Iterator['EvmEvent'],
-    ) -> None:
+            other_events: "peekable['EvmEvent']",
+    ) -> int:
         """
         Callback to be called by the accounting module.
         If the callback expects more than 1 events, it is supposed to iterate over the
         `other_events` iterator to get them.
         Note that events consumed by the callback from the iterator will not be re-processed later.
+        It returns the number of events processed by the callback.
         """
 
 
 class TxAccountingTreatment(DBCharEnumMixIn):
     SWAP = auto()
-    SWAP_WITH_FEE = auto()
 
 
 ACCOUNTING_SETTING_DB_TUPLE = tuple[
     int,  # taxable
     int,  # count_entire_amount_spend
     int,  # count_cost_basis_pnl
-    Union[str, None],  # accounting_treatment
+    str | None,  # accounting_treatment
 ]
 
 
@@ -45,7 +46,7 @@ class BaseEventSettings:
             taxable: bool,
             count_entire_amount_spend: bool,
             count_cost_basis_pnl: bool,
-            accounting_treatment: Optional[TxAccountingTreatment] = None,
+            accounting_treatment: TxAccountingTreatment | None = None,
     ):
         self.taxable = taxable
         self.count_entire_amount_spend = count_entire_amount_spend
@@ -77,6 +78,12 @@ class BaseEventSettings:
             'accounting_treatment': self.accounting_treatment,
         }
 
+    def __hash__(self) -> int:
+        return hash(f'{self.taxable}{self.count_entire_amount_spend}{self.count_cost_basis_pnl}{self.accounting_treatment!s}')  # noqa: E501
+
+    def __eq__(self, other: object) -> bool:
+        return hash(self) == hash(other)
+
 
 class TxEventSettings(BaseEventSettings):
     """Accounting settings for EVM transaction events"""
@@ -85,8 +92,8 @@ class TxEventSettings(BaseEventSettings):
             taxable: bool,
             count_entire_amount_spend: bool,
             count_cost_basis_pnl: bool,
-            accounting_treatment: Optional[TxAccountingTreatment] = None,
-            accountant_cb: Optional[EventsAccountantCallback] = None,
+            accounting_treatment: TxAccountingTreatment | None = None,
+            accountant_cb: EventsAccountantCallback | None = None,
     ):
         super().__init__(
             taxable=taxable,

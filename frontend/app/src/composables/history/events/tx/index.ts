@@ -3,23 +3,15 @@ import { groupBy } from 'lodash-es';
 import { Section, Status } from '@/types/status';
 import {
   type AddTransactionHashPayload,
-  type AddressesAndEvmChainPayload,
   type EvmChainAddress,
-  type EvmChainAndTxHash,
   OnlineHistoryEventsQueryType,
-  type TransactionHashAndEvmChainPayload,
   type TransactionRequestPayload
 } from '@/types/history/events';
 import { TaskType } from '@/types/task-type';
-import {
-  BackendCancelledTaskError,
-  type PendingTask,
-  type TaskMeta
-} from '@/types/task';
+import { BackendCancelledTaskError, type TaskMeta } from '@/types/task';
 import { Module } from '@/types/modules';
 import { type ActionStatus } from '@/types/action';
 import { ApiValidationError, type ValidationErrors } from '@/types/api/errors';
-import { type Writeable } from '@/types';
 
 export const useHistoryTransactions = createSharedComposable(() => {
   const { t } = useI18n();
@@ -28,24 +20,25 @@ export const useHistoryTransactions = createSharedComposable(() => {
 
   const {
     fetchEvmTransactionsTask,
-    decodeHistoryEvents,
-    reDecodeMissingTransactionEvents,
     addTransactionHash: addTransactionHashCaller,
     queryOnlineHistoryEvents
   } = useHistoryEventsApi();
 
+  const { resetEvmUndecodedTransactionsStatus } = useHistoryStore();
   const { awaitTask, isTaskRunning } = useTaskStore();
   const { removeQueryStatus, resetQueryStatus } = useTxQueryStatusStore();
-  const { txEvmChains, getEvmChainName, supportsTransactions } =
-    useSupportedChains();
+  const { getEvmChainName, supportsTransactions } = useSupportedChains();
   const { accounts } = useAccountBalances();
   const { setStatus, resetStatus, fetchDisabled } = useStatusUpdater(
     Section.HISTORY_EVENT
   );
 
+  const { reDecodeMissingTransactionEventsTask } =
+    useHistoryTransactionDecoding();
+
   const syncTransactionTask = async (
     account: EvmChainAddress
-  ): Promise<boolean> => {
+  ): Promise<void> => {
     const taskType = TaskType.TX;
     const defaults: TransactionRequestPayload = {
       limit: 0,
@@ -67,7 +60,6 @@ export const useHistoryTransactions = createSharedComposable(() => {
 
     try {
       await awaitTask<boolean, TaskMeta>(taskId, taskType, taskMeta, true);
-      return true;
     } catch (e: any) {
       if (e instanceof BackendCancelledTaskError) {
         logger.debug(e);
@@ -88,28 +80,22 @@ export const useHistoryTransactions = createSharedComposable(() => {
         get(isTaskRunning(taskType)) ? Status.REFRESHING : Status.LOADED
       );
     }
-    return false;
   };
 
-  const syncAndRedecode = async (account: EvmChainAddress): Promise<void> => {
-    const success = await syncTransactionTask(account);
-    if (success) {
-      queue.queue(account.address + account.evmChain, () =>
-        reDecodeMissingTransactionEventsTask(account)
-      );
-    }
-  };
-
-  const refreshTransactions = async (
-    chains: Blockchain[],
-    userInitiated = false
+  const syncAndRedecode = async (
+    evmChain: string,
+    accounts: EvmChainAddress[]
   ): Promise<void> => {
-    if (fetchDisabled(userInitiated)) {
-      logger.info('skipping transaction refresh');
-      return;
-    }
+    await awaitParallelExecution(
+      accounts,
+      item => item.evmChain + item.address,
+      syncTransactionTask
+    );
+    queue.queue(evmChain, () => reDecodeMissingTransactionEventsTask(evmChain));
+  };
 
-    const txAccounts: EvmChainAddress[] = get(accounts)
+  const getTxAccounts = (chains: Blockchain[] = []) =>
+    get(accounts)
       .filter(
         ({ chain }) =>
           supportsTransactions(chain) &&
@@ -120,23 +106,50 @@ export const useHistoryTransactions = createSharedComposable(() => {
         evmChain: getEvmChainName(chain)!
       }));
 
-    setStatus(Status.REFRESHING);
-    resetQueryStatus();
+  const refreshTransactions = async (
+    chains: Blockchain[],
+    disableEvmEvents = false,
+    userInitiated = false
+  ): Promise<void> => {
+    if (fetchDisabled(userInitiated)) {
+      logger.info('skipping transaction refresh');
+      return;
+    }
+
+    const txAccounts: EvmChainAddress[] = disableEvmEvents
+      ? []
+      : getTxAccounts(chains);
+
+    if (txAccounts.length > 0) {
+      setStatus(Status.REFRESHING);
+      resetQueryStatus();
+      resetEvmUndecodedTransactionsStatus();
+    }
+
+    const grouppedByEvmChain = Object.entries(
+      groupBy(txAccounts, account => account.evmChain)
+    ).map(([evmChain, data]) => ({
+      evmChain,
+      data
+    }));
 
     try {
       await Promise.all([
         awaitParallelExecution(
-          txAccounts,
-          item => item.address + item.evmChain,
-          syncAndRedecode
+          grouppedByEvmChain,
+          item => item.evmChain,
+          item => syncAndRedecode(item.evmChain, item.data)
         ),
         queryOnlineEvent(OnlineHistoryEventsQueryType.ETH_WITHDRAWALS),
         queryOnlineEvent(OnlineHistoryEventsQueryType.BLOCK_PRODUCTIONS),
         queryOnlineEvent(OnlineHistoryEventsQueryType.EXCHANGES)
       ]);
-      setStatus(
-        get(isTaskRunning(TaskType.TX)) ? Status.REFRESHING : Status.LOADED
-      );
+
+      if (txAccounts.length > 0) {
+        setStatus(
+          get(isTaskRunning(TaskType.TX)) ? Status.REFRESHING : Status.LOADED
+        );
+      }
     } catch (e) {
       logger.error(e);
       resetStatus();
@@ -185,125 +198,6 @@ export const useHistoryTransactions = createSharedComposable(() => {
     }
   };
 
-  const clearDependedSection = () => {
-    resetStatus(Section.DEFI_LIQUITY_STAKING);
-    resetStatus(Section.DEFI_LIQUITY_STAKING_POOLS);
-    resetStatus(Section.DEFI_LIQUITY_STATISTICS);
-  };
-
-  const reDecodeMissingTransactionEventsTask = async (
-    account: EvmChainAddress
-  ) => {
-    const taskType = TaskType.HISTORY_EVENTS;
-    const payload: AddressesAndEvmChainPayload = {
-      evmChain: account.evmChain,
-      addresses: [account.address]
-    };
-
-    if (get(isTaskRunning(taskType, payload))) {
-      return;
-    }
-
-    try {
-      const { taskId } = await reDecodeMissingTransactionEvents<PendingTask>([
-        payload
-      ]);
-
-      const taskMeta = {
-        title: t('actions.transactions_redecode_missing.task.title'),
-        description: t(
-          'actions.transactions_redecode_missing.task.description',
-          account
-        ),
-        ...payload
-      };
-
-      await awaitTask(taskId, taskType, taskMeta, true);
-      clearDependedSection();
-    } catch (e) {
-      logger.error(e);
-      notify({
-        title: t('actions.transactions_redecode_missing.error.title'),
-        message: t('actions.transactions_redecode_missing.error.description', {
-          error: e,
-          ...account
-        }),
-        display: true
-      });
-    }
-  };
-
-  const fetchTransactionEvents = async (
-    transactions: EvmChainAndTxHash[] | { evmChain: string }[] | null,
-    ignoreCache = false
-  ): Promise<void> => {
-    const isFetchAll = transactions === null;
-    let payloads: TransactionHashAndEvmChainPayload[] = [];
-
-    if (isFetchAll) {
-      payloads = get(txEvmChains).map(chain => ({
-        evmChain: chain.evmChainName
-      }));
-    } else {
-      if (transactions.length === 0) {
-        return;
-      }
-
-      payloads = Object.entries(groupBy(transactions, 'evmChain')).map(
-        ([evmChain, item]: [
-          evmChain: string,
-          item: EvmChainAndTxHash[] | { evmChain: string }[]
-        ]) => {
-          const payload: Writeable<TransactionHashAndEvmChainPayload> = {
-            evmChain
-          };
-
-          const txHashes = item
-            .map(data => ('txHash' in data ? data.txHash : ''))
-            .filter(item => !!item);
-
-          if (txHashes.length > 0) {
-            payload.txHashes = txHashes;
-          }
-
-          return payload;
-        }
-      );
-    }
-
-    try {
-      const taskType = TaskType.HISTORY_EVENTS;
-      const { taskId } = await decodeHistoryEvents({
-        data: payloads,
-        ignoreCache
-      });
-      const taskMeta = {
-        title: t('actions.transactions_redecode.task.title'),
-        description: t('actions.transactions_redecode.task.description')
-      };
-
-      const { result } = await awaitTask<boolean, TaskMeta>(
-        taskId,
-        taskType,
-        taskMeta,
-        true
-      );
-
-      if (result) {
-        clearDependedSection();
-      }
-    } catch (e: any) {
-      logger.error(e);
-      notify({
-        title: t('actions.transactions_redecode.error.title'),
-        message: t('actions.transactions_redecode.error.description', {
-          error: e
-        }),
-        display: true
-      });
-    }
-  };
-
   const addTransactionHash = async (
     payload: AddTransactionHashPayload
   ): Promise<ActionStatus<ValidationErrors | string>> => {
@@ -324,7 +218,6 @@ export const useHistoryTransactions = createSharedComposable(() => {
 
   return {
     refreshTransactions,
-    fetchTransactionEvents,
     addTransactionHash
   };
 });

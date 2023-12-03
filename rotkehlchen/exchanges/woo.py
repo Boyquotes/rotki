@@ -3,9 +3,10 @@ import hmac
 import logging
 import urllib
 from collections import defaultdict
+from collections.abc import Callable
 from http import HTTPStatus
 from json.decoder import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Callable, Literal, NamedTuple, Optional, Union, overload
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 
 import requests
 
@@ -39,8 +40,8 @@ from rotkehlchen.utils.mixins.cacheable import cache_response_timewise
 from rotkehlchen.utils.mixins.lockable import protect_with_lock
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.base import HistoryEvent
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.history.events.structures.base import HistoryEvent
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -181,6 +182,7 @@ class Woo(ExchangeInterface):
     ) -> tuple[list[Trade], tuple[Timestamp, Timestamp]]:
         """Return trade history on Woo in a range of time."""
         start_ts = max(start_ts, MIN_TIMESTAMP)
+        end_ts = max(end_ts, MIN_TIMESTAMP)
         trades: list[Trade] = self._api_query_paginated(
             endpoint='v1/client/hist_trades',
             options={
@@ -203,7 +205,7 @@ class Woo(ExchangeInterface):
         movements: list[AssetMovement] = self._api_query_paginated(
             endpoint='v1/asset/history',
             options={
-                'end_t': ts_sec_to_ms(end_ts),
+                'end_t': ts_sec_to_ms(max(end_ts, MIN_TIMESTAMP)),
                 'page': 1,
                 'size': API_MAX_LIMIT,
                 'start_t': ts_sec_to_ms(max(start_ts, MIN_TIMESTAMP)),
@@ -227,7 +229,7 @@ class Woo(ExchangeInterface):
             self,
             endpoint: str,
             method: Literal['GET', 'POST'] = 'GET',
-            options: Optional[dict[str, Any]] = None,
+            options: dict[str, Any] | None = None,
     ) -> dict:
         """
         Query a  Woo API endpoint
@@ -303,7 +305,7 @@ class Woo(ExchangeInterface):
             options: dict[str, Any],
             deserialization_method: Callable[[dict[str, Any]], Any],
             entries_key: Literal['data', 'rows'],
-    ) -> Union[list[Trade], list[AssetMovement], list]:
+    ) -> list[Trade] | (list[AssetMovement] | list):
         """Request a Woo API endpoint paginating via an options attribute."""
         assert list(options.keys()) == sorted(options.keys())  # options need to be in alphabetic order as stated in their api: https://docs.woo.org/#example  # noqa: E501
         results = []

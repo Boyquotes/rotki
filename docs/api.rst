@@ -493,7 +493,7 @@ Getting or modifying external services API credentials
       }
 
    :reqjson list services: The services parameter is a list of services along with their api keys.
-   :reqjsonarr string name: Each entry in the list should have a name for the service. Valid ones are ``"etherscan"``, ``"cryptocompare"``, ``"beaconchain"``, ``"loopring"``, ``"covalent"`` and ``"opensea"``.
+   :reqjsonarr string name: Each entry in the list should have a name for the service. Valid ones are ``"etherscan"``, ``"cryptocompare"``, ``"beaconchain"``, ``"loopring"``, ``"covalent"``, ``"opensea"`` and ``blockscout``.
    :reqjsonarr string api_key: Each entry in the list should have an api_key entry
 
    **Example Response**:
@@ -1937,15 +1937,10 @@ Decode transactions that haven't been decoded yet
 
       {
           "async_query": false,
-          "data": [{
-              "evm_chain": "ethereum",
-              "addresses": ["0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12", "0xed8Bdb5895B8B7f9Fdb3C087628FD8410E853D48"]
-          }, {
-              "evm_chain": "optimism"
-          }]
+          "evm_chains": ["ethereum", "optimism"]
       }
 
-   :reqjson list data: A list of data explaining what transactions to decode. Each data entry consists of an ``"evm_chain"`` key specifying the evm chain for which to decode tx_hashes and an ``"addresses"`` key which is an optional list of addresses for which to request decoding of pending transactions in that chain. If the list of addresses is not passed or is null then all transactions for that chain are decoded. Passing an empty list is not allowed.
+   :reqjson list evm_chains: A list specifying the evm chains for which to decode tx_hashes. The possible values are limited to the chains with evm transactions. If the list is not provided all transactions from all the chains will be decoded. 
 
    **Example Response**:
 
@@ -1959,6 +1954,38 @@ Decode transactions that haven't been decoded yet
    :resjson object decoded_tx_number: A mapping of how many transactions were decoded per requested chain. If a chain was not requested no key will exist in the mapping.
    :statuscode 200: Transactions successfully decoded.
    :statuscode 409: User is not logged in or some other error. Check error message for details.
+   :statuscode 500: Internal rotki error
+
+.. http:get:: /api/(version)/blockchains/evm/transactions/decode
+
+   Doing a GET on the transactions decoding endpoint will return a breakdown of the number of transactions that are not decoded. 
+
+   .. note::
+      This endpoint can also be queried asynchronously by using ``"async_query": true``
+
+   **Example Request**:
+
+   .. http:example:: curl wget httpie python-requests
+
+      GET /api/1/blockchains/evm/transactions/decode HTTP/1.1
+      Host: localhost:5042
+      Content-Type: application/json;charset=UTF-8
+
+      {"async_query": false}
+
+   **Example Response**:
+
+   .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      { "result": {"ethereum": 2, "optimism": 1, "base": 1}, "message": "" }
+
+   :resjson object result: A mapping of the EVM chain name to the number of transactions missing the decoding.
+
+   :statuscode 200: Transactions successfully counted.
+   :statuscode 409: User is not logged in. Check error message for details.
    :statuscode 500: Internal rotki error
 
 
@@ -4529,6 +4556,7 @@ Dealing with History Events
    :reqjson int limit: This signifies the limit of records to return as per the `sql spec <https://www.sqlite.org/lang_select.html#limitoffset>`__.
    :reqjson int offset: This signifies the offset from which to start the return of records per the `sql spec <https://www.sqlite.org/lang_select.html#limitoffset>`__.
    :reqjson object otherargs: Check the documentation of the remaining arguments `here <filter-request-args-label_>`_.
+   :reqjson bool customized_events_only: Optional. If enabled the search is performed only for manually customized events. Default false.
 
    **Example Response**:
 
@@ -4554,6 +4582,7 @@ Dealing with History Events
                       "notes": "Burned 0.00863351371344 ETH for gas",
                       "sequence_index": 0,
                       "timestamp": 1642802807,
+                      "missing_accounting_rule": true,
 		      "tx_hash": "0x8d822b87407698dd869e830699782291155d0276c5a7e5179cb173608554e41f",
 		      "address": null,
 		      "product": null
@@ -4578,6 +4607,7 @@ Dealing with History Events
                       "notes": "Burned 0.00863351371344 ETH for gas",
                       "sequence_index": 0,
                       "timestamp": 1642802807,
+                      "missing_accounting_rule": true,
 		      "tx_hash": "0x1c822b87407698dd869e830699782291155d0276c5a7e5179cb173608554e41f",
 		      "address": null,
 		      "product": null
@@ -4600,6 +4630,7 @@ Dealing with History Events
                       "notes": "Withdrew 0.00163351371344 ETH from validator 1454",
                       "sequence_index": 0,
                       "timestamp": 1652802807,
+                      "missing_accounting_rule": true,
 		      "validator_index": 1454,
 		      "is_exit": false
                   },
@@ -4622,6 +4653,7 @@ Dealing with History Events
                       "notes": "Validator 1454 produced block 15534342 with 0.00163351371344 going to 0xce15887E2CEC81434C16D587709f64603b39b545 as the block reward",
                       "sequence_index": 0,
                       "timestamp": 1652802807,
+                      "missing_accounting_rule": true,
 		      "validator_index": 1454,
 		      "block_number": 15534342
                   },
@@ -4644,6 +4676,7 @@ Dealing with History Events
                       "notes": "Deposit 32 ETH to validator 4242",
                       "sequence_index": 15,
                       "timestamp": 1642802807,
+                      "missing_accounting_rule": true,
 		      "tx_hash": "0x2c822b87407698dd869e830699782291155d0276c5a7e5179cb173608554e41f",
 		      "address": "0x00000000219ab540356cBB839Cbe05303d7705Fa",
 		      "product": "staking",
@@ -4667,6 +4700,7 @@ Dealing with History Events
    :resjson string event_identifier: Common key. An event identifier grouping multiple events under a common group. This is how we group transaction events under a transaction, staking related events under block production etc.
    :resjson int sequence_index: Common key. This is an index that tries to provide the order of history entries for a single event_identifier.
    :resjson int timestamp: Common key. The timestamp of the entry
+   :resjson bool missing_accounting_rule: Common key. Present and `True` if the event is not processed by any accounting rule.
    :resjson string location: Common key. The location of the entry. Such as "ethereum", "optimism", etc.
    :resjson string asset: Common key. The asset involved in the event.
    :resjson object balance: Common key. The balance of the asset involved in the event.
@@ -4746,6 +4780,7 @@ Dealing with History Events
             {
                "entry_type": "evm event",
                "tx_hash": "0x64f1982504ab714037467fdd45d3ecf5a6356361403fc97dd325101d8c038c4e",
+               "event_identifier": "10x64f1982504ab714037467fdd45d3ecf5a6356361403fc97dd325101d8c038c4e",
                "sequence_index": 162,
                "timestamp": 1569924574,
                "location": "ethereum",
@@ -4760,6 +4795,7 @@ Dealing with History Events
             }
 
          :reqjson string tx_hash: This is the transaction hash of the evm event
+         :reqjson string[optional] event_identifier: The event identifier to be used for the event.
          :reqjson int sequence_index: This is an index that tries to provide the order of history entries for a single event_identifier.
          :reqjson string location: The location of the entry. Such as "ethereum", "optimism", etc.
          :reqjson string asset: The asset identifier for this entry
@@ -4785,6 +4821,7 @@ Dealing with History Events
 
             {
                "entry_type": "eth block event",
+               "event_identifier": "BLOCK_11",
                "timestamp": 1569924574,
                "balance": {"amount": "1.542", "usd_value": "1.675"},
                "block_number": 11,
@@ -4793,6 +4830,7 @@ Dealing with History Events
                "is_mev_reward": true
             }
 
+         :reqjson string[optional] event_identifier: The event identifier to be used for the event.
          :reqjson int block_number: This is the number of the block where the event took place.
          :reqjson int validator_index: This is the index of the validator.
          :reqjson string fee_recipient: an evm address field to specify the fee recipient in an "eth block event".
@@ -4825,7 +4863,7 @@ Dealing with History Events
          :reqjson string tx_hash: This is the transaction hash of the evm event
          :reqjson int sequence_index: This is an index that tries to provide the order of history entries for a single event_identifier.
          :reqjson int validator_index: This is the index of the validator.
-         :reqjson string event_identifier: The event identifier to be used for the event.
+         :reqjson string[optional] event_identifier: The event identifier to be used for the event.
          :reqjson string depositor: an evm address field to specify the depositor in an "eth deposit event".
          :reqjson object[optional] extra_data: An object containing any other data to be stored.
 
@@ -4847,9 +4885,11 @@ Dealing with History Events
                "balance": {"amount": "1.542", "usd_value": "1.675"},
                "is_exit": true,
                "validator_index": 1,
-               "withdrawal_address": "0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12"
+               "withdrawal_address": "0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12",
+               "event_identifier": "EW_XX_XXXXX"
             }
 
+         :reqjson string[optional] event_identifier: The event identifier to be used for the event.
          :reqjson int validator_index: This is the index of the validator.
          :reqjson string withdrawal_address: an evm address field to specify the withdrawer in an "eth withdrawal event".
          :reqjson bool is_exit: true if the "eth withdrawal event" is an exit event.
@@ -5308,6 +5348,7 @@ Export PnL report debug data
                 "ssf_graph_multiplier": 0,
                 "last_data_migration": 3,
                 "non_syncing_exchanges": []
+                "evmchains_to_skip_detection": []
             },
             "ignored_events_ids": {
                 "trade": ["X124-JYI", "2325"],
@@ -9670,9 +9711,9 @@ Getting watchers
       }
 
    :resjson object result: An list containing all the watcher results.
-   :reqjsonarr string identifier: The identifier with which to identify this vault. It's unique per user and vault args + watcher combination. The client needs to keep this identifier. If the entry is edited, the identifier changes.
-   :reqjsonarr string type: The type of the watcher. Valid types are: "makervault_collateralization_ratio".
-   :reqjsonarr object args: An object containing the args for the vault. Depending on the vault type different args are possible. Check `here <watcher_types_section_>`__ to see the different options.
+   :reqjson string identifier: The identifier with which to identify this vault. It's unique per user and vault args + watcher combination. The client needs to keep this identifier. If the entry is edited, the identifier changes.
+   :reqjson string type: The type of the watcher. Valid types are: "makervault_collateralization_ratio".
+   :reqjson object args: An object containing the args for the vault. Depending on the vault type different args are possible. Check `here <watcher_types_section_>`__ to see the different options.
    :statuscode 200: Watchers successfully queried
    :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription.
    :statuscode 500: Internal rotki error
@@ -10793,6 +10834,9 @@ Import assets added by the user
 
    .. note::
       If doing a POST the `action` field is not required.
+
+   .. note::
+      This endpoint can be called asynchronously.
 
    **Example Request**:
 
@@ -12767,3 +12811,116 @@ Accounting rules linkable properties
 
   :statuscode 200: All okay
   :statuscode 500: Internal rotki error
+
+
+Solving conflicts in accounting rules
+========================================
+.. http:post:: /api/(version)/accounting/rules/conflicts
+
+   Doing a POST on this endpoint will return the list of conflicts for accounting rules providing the local version and remote version to compare them. It allows pagination by ``limit`` and ``offset``.
+
+  **Example Request**
+
+  .. http:example:: curl wget httpie python-requests
+
+      POST /api/1/accounting/rules/conflicts HTTP/1.1
+      Host: localhost:5042
+
+  **Example Response**
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+      "result":{
+         "entries":[
+            {
+               "local_id": 1,
+               "local_data":{
+                  "taxable":{
+                     "value":true,
+                     "linked_setting":"include_crypto2crypto"
+                  },
+                  "count_cost_basis_pnl":{
+                     "value":true
+                  },
+                  "count_entire_amount_spend":{
+                     "value":false,
+                     "linked_setting":"include_crypto2crypto"
+                  },
+                  "accounting_treatment":"None",
+                  "event_type":"spend",
+                  "event_subtype":"return wrapped",
+                  "counterparty":"compound"
+               },
+               "remote_data":{
+                  "taxable":{
+                     "value":false
+                  },
+                  "count_cost_basis_pnl":{
+                     "value":false
+                  },
+                  "count_entire_amount_spend":{
+                     "value":false
+                  },
+                  "accounting_treatment":"swap",
+                  "event_type":"spend",
+                  "event_subtype":"return wrapped",
+                  "counterparty":"compound"
+               }
+            }
+         ],
+         "entries_found":1,
+         "entries_total":1,
+         "entries_limit":-1
+      },
+      "message":""
+      }
+
+
+  :resjson object result: An object, mapping identifiers to the local and remote version of the conflict.
+
+  :statuscode 200: All okay
+  :statuscode 409: No user is currently logged in
+  :statuscode 500: Internal rotki error
+
+
+.. http:patch:: /api/(version)/accounting/rules/conflicts
+
+   Doing a PATCH on this endpoint will apply a conflict resolution method for the selected accounting rules.
+
+  **Example Request**
+
+  .. note::
+     Either ``conflicts`` or ``solve_all_using`` need to be provided but not both together.
+
+  .. http:example:: curl wget httpie python-requests
+
+      PATH /api/1/accounting/rules/conflicts HTTP/1.1
+      Host: localhost:5042
+
+      {"conflicts": [{"local_id": "1", "solve_using": "remote"}]}
+
+
+  :reqjsonarr string local_id: The identifier of the rule that will be updated.
+  :reqjsonarr string solve_using: Either ``remote`` or ``local``.
+  :reqjsonarr string solve_all_using: Either ``remote`` or ``local``. If this is given it should be the only key in the request.
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+        "result": true,
+        "message": ""
+      }
+
+  :resjson bool result: Boolean denoting success or failure.
+  :statuscode 200: Conflicts resolved succesfully.
+  :statuscode 409: No user is currently logged in. Couldn't find the rule locally.
+  :statuscode 500: Internal rotki error.

@@ -1,19 +1,10 @@
-from typing import Any, Union
+from typing import Any
 
 from hexbytes import HexBytes
 from web3.datastructures import AttributeDict
 
 from rotkehlchen.accounting.mixins.event import AccountingEventType
 from rotkehlchen.accounting.structures.balance import AssetBalance, Balance, BalanceType
-from rotkehlchen.accounting.structures.base import HistoryBaseEntryType, StakingEvent
-from rotkehlchen.accounting.structures.evm_event import EvmProduct
-from rotkehlchen.accounting.structures.types import (
-    EventCategory,
-    EventCategoryDetails,
-    EventDirection,
-    HistoryEventSubType,
-    HistoryEventType,
-)
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.balances.manual import ManuallyTrackedBalanceWithValue
 from rotkehlchen.chain.accounts import BlockchainAccountData, SingleBlockchainAccountData
@@ -41,7 +32,7 @@ from rotkehlchen.chain.ethereum.modules.balancer import (
     BalancerPoolEventsBalance,
     BalancerPoolTokenBalance,
 )
-from rotkehlchen.chain.ethereum.modules.compound.compound import CompoundBalance
+from rotkehlchen.chain.ethereum.modules.compound.v2.compound import CompoundBalance
 from rotkehlchen.chain.ethereum.modules.liquity.trove import Trove
 from rotkehlchen.chain.ethereum.modules.makerdao.dsr import DSRAccountReport, DSRCurrentBalances
 from rotkehlchen.chain.ethereum.modules.makerdao.vaults import (
@@ -66,6 +57,15 @@ from rotkehlchen.db.utils import DBAssetBalance, LocationData, SingleDBAssetBala
 from rotkehlchen.exchanges.data_structures import Trade
 from rotkehlchen.exchanges.kraken import KrakenAccountType
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.base import HistoryBaseEntryType
+from rotkehlchen.history.events.structures.evm_event import EvmProduct
+from rotkehlchen.history.events.structures.types import (
+    EventCategory,
+    EventCategoryDetails,
+    EventDirection,
+    HistoryEventSubType,
+    HistoryEventType,
+)
 from rotkehlchen.history.types import HistoricalPriceOracle
 from rotkehlchen.inquirer import CurrentPriceOracle
 from rotkehlchen.types import (
@@ -84,18 +84,18 @@ from rotkehlchen.types import (
 from rotkehlchen.utils.version_check import VersionCheckResult
 
 
-def _process_entry(entry: Any) -> Union[str, list[Any], dict[str, Any], Any]:
+def _process_entry(entry: Any) -> str | (list[Any] | (dict[str, Any] | Any)):
     if isinstance(entry, FVal):
         return str(entry)
     if isinstance(entry, list):
         return [_process_entry(x) for x in entry]
 
-    if isinstance(entry, (dict, AttributeDict)):
+    if isinstance(entry, dict | AttributeDict):
         new_dict = {}
         for k, v in entry.items():
             if isinstance(k, Asset) is True:
                 k = k.identifier  # noqa: PLW2901
-            elif isinstance(k, (HistoryEventType, HistoryEventSubType, EventCategory, Location, AccountingEventType)) is True:  # noqa: E501
+            elif isinstance(k, HistoryEventType | HistoryEventSubType | EventCategory | Location | AccountingEventType) is True:  # noqa: E501
                 k = _process_entry(k)  # noqa: PLW2901
             new_dict[k] = _process_entry(v)
         return new_dict
@@ -123,67 +123,65 @@ def _process_entry(entry: Any) -> Union[str, list[Any], dict[str, Any], Any]:
             'usd_value': str(entry.usd_value),
         }
     if isinstance(entry, (
-            AddressbookEntry,
-            AssetBalance,
-            DefiProtocol,
-            MakerdaoVault,
-            XpubData,
-            StakingEvent,
-            NodeName,
-            NodeName,
-            ChainID,
-            SingleBlockchainAccountData,
-            SupportedBlockchain,
-            HistoryEventType,
-            HistoryEventSubType,
-            EventDirection,
-            LocationDetails,
-            EvmProduct,
-            DBSettings,
-            TxAccountingTreatment,
-            EventCategoryDetails,
+            AddressbookEntry |
+            AssetBalance |
+            DefiProtocol |
+            MakerdaoVault |
+            XpubData |
+            NodeName |
+            NodeName |
+            SingleBlockchainAccountData |
+            SupportedBlockchain |
+            HistoryEventType |
+            HistoryEventSubType |
+            EventDirection |
+            LocationDetails |
+            EvmProduct |
+            DBSettings |
+            TxAccountingTreatment |
+            EventCategoryDetails
     )):
         return entry.serialize()
     if isinstance(entry, (
-            Trade,
-            EvmTransaction,
-            OptimismTransaction,
-            MakerdaoVault,
-            DSRAccountReport,
-            Balance,
-            AaveLendingBalance,
-            AaveBorrowingBalance,
-            CompoundBalance,
-            YearnVaultEvent,
-            YearnVaultBalance,
-            LiquidityPool,
-            LiquidityPoolAsset,
-            LiquidityPoolEventsBalance,
-            BalancerBPTEventPoolToken,
-            BalancerEvent,
-            BalancerPoolEventsBalance,
-            BalancerPoolBalance,
-            BalancerPoolTokenBalance,
-            ManuallyTrackedBalanceWithValue,
-            Trove,
-            DillBalance,
-            NFTResult,
-            ExchangeLocationID,
-            WeightedNode,
+            Trade |
+            EvmTransaction |
+            OptimismTransaction |
+            MakerdaoVault |
+            DSRAccountReport |
+            Balance |
+            AaveLendingBalance |
+            AaveBorrowingBalance |
+            CompoundBalance |
+            YearnVaultEvent |
+            YearnVaultBalance |
+            LiquidityPool |
+            LiquidityPoolAsset |
+            LiquidityPoolEventsBalance |
+            BalancerBPTEventPoolToken |
+            BalancerEvent |
+            BalancerPoolEventsBalance |
+            BalancerPoolBalance |
+            BalancerPoolTokenBalance |
+            ManuallyTrackedBalanceWithValue |
+            Trove |
+            DillBalance |
+            NFTResult |
+            ExchangeLocationID |
+            WeightedNode
     )):
         return process_result(entry.serialize())
     if isinstance(entry, (
-            VersionCheckResult,
-            DSRCurrentBalances,
-            VaultEvent,
-            MakerdaoVaultDetails,
-            AaveBalances,
-            DefiBalance,
-            DefiProtocolBalances,
-            YearnVaultHistory,
-            BlockchainAccountData,
-            CounterpartyDetails,
-            AaveStats,
+            VersionCheckResult |
+            DSRCurrentBalances |
+            VaultEvent |
+            MakerdaoVaultDetails |
+            AaveBalances |
+            DefiBalance |
+            DefiProtocolBalances |
+            YearnVaultHistory |
+            BlockchainAccountData |
+            CounterpartyDetails |
+            AaveStats
     )):
         return process_result(entry._asdict())
     if isinstance(entry, tuple):
@@ -191,22 +189,24 @@ def _process_entry(entry: Any) -> Union[str, list[Any], dict[str, Any], Any]:
     if isinstance(entry, Asset):
         return entry.identifier
     if isinstance(entry, (
-            TradeType,
-            Location,
-            KrakenAccountType,
-            Location,
-            VaultEventType,
-            AssetMovementCategory,
-            CurrentPriceOracle,
-            HistoricalPriceOracle,
-            BalanceType,
-            CostBasisMethod,
-            EvmTokenKind,
-            HistoryBaseEntryType,
-            EventCategory,
-            AccountingEventType,
+            TradeType |
+            Location |
+            KrakenAccountType |
+            Location |
+            VaultEventType |
+            AssetMovementCategory |
+            CurrentPriceOracle |
+            HistoricalPriceOracle |
+            BalanceType |
+            CostBasisMethod |
+            EvmTokenKind |
+            HistoryBaseEntryType |
+            EventCategory |
+            AccountingEventType
     )):
         return str(entry)
+    if isinstance(entry, ChainID):
+        return entry.to_name()
 
     # else
     return entry
@@ -223,7 +223,7 @@ def process_result(result: Any) -> dict[Any, Any]:
         - all enums and more
     """
     processed_result = _process_entry(result)
-    assert isinstance(processed_result, (dict, AttributeDict))  # pylint: disable=isinstance-second-argument-not-valid-type
+    assert isinstance(processed_result, dict | AttributeDict)  # pylint: disable=isinstance-second-argument-not-valid-type
     return processed_result  # type: ignore
 
 

@@ -167,7 +167,8 @@ export const useBlockchainAccounts = () => {
     blockchain: Exclude<
       Blockchain,
       Blockchain.BTC | Blockchain.BCH | Blockchain.ETH2
-    >
+    >,
+    refreshEns: boolean = false
   ): Promise<string[] | null> => {
     try {
       const accounts = await queryAccounts(blockchain);
@@ -177,15 +178,15 @@ export const useBlockchainAccounts = () => {
         updateChain(blockchain, accounts);
       }
 
-      const namesPayload: AddressBookSimplePayload[] = accounts.map(
-        ({ address }) => ({
-          address,
-          blockchain
-        })
-      );
-
       if (isEvm(blockchain)) {
-        startPromise(fetchEnsNames(namesPayload));
+        const namesPayload: AddressBookSimplePayload[] = accounts.map(
+          ({ address }) => ({
+            address,
+            blockchain
+          })
+        );
+
+        startPromise(fetchEnsNames(namesPayload, refreshEns));
       }
       return accounts.map(account => account.address);
     } catch (e: any) {
@@ -221,11 +222,11 @@ export const useBlockchainAccounts = () => {
     }
   };
 
-  const fetch = async (blockchain: Blockchain) => {
+  const fetch = async (blockchain: Blockchain, refreshEns: boolean = false) => {
     if (isBtcChain(blockchain)) {
       return fetchBtcAccounts(blockchain);
     } else if (isRestChain(blockchain) || blockchain === Blockchain.ETH) {
-      return fetchBlockchainAccounts(blockchain);
+      return fetchBlockchainAccounts(blockchain, refreshEns);
     } else if (blockchain === Blockchain.ETH2) {
       return fetchEth2Validators();
     }

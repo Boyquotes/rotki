@@ -1,19 +1,19 @@
 import base64
 import random
 import string
-from typing import Any, Optional
+from typing import Any
 
 from eth_utils.address import to_checksum_address
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.evm_event import EvmEvent, EvmProduct
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import CryptoAsset, EvmToken
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants import ONE, ZERO
 from rotkehlchen.constants.assets import A_ETH, A_USDC
 from rotkehlchen.exchanges.data_structures import Trade
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.evm_event import EvmEvent, EvmProduct
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.types import (
     AddressbookEntry,
     ApiKey,
@@ -56,8 +56,8 @@ def make_random_positive_fval(max_num: int = 1000000) -> FVal:
 
 
 def make_random_timestamp(
-        start: Optional[Timestamp] = DEFAULT_START_TS,
-        end: Optional[Timestamp] = None,
+        start: Timestamp | None = DEFAULT_START_TS,
+        end: Timestamp | None = None,
 ) -> Timestamp:
     if end is None:
         end = ts_now()
@@ -83,8 +83,8 @@ def make_evm_tx_hash() -> EVMTxHash:
 
 
 def make_ethereum_transaction(
-        tx_hash: Optional[bytes] = None,
-        timestamp: Optional[Timestamp] = None,
+        tx_hash: bytes | None = None,
+        timestamp: Timestamp | None = None,
 ) -> EvmTransaction:
     if tx_hash is None:
         tx_hash = make_random_bytes(42)
@@ -123,15 +123,15 @@ CUSTOM_USDT = EvmToken.initialize(
 
 def make_ethereum_event(
         index: int,
-        tx_hash: Optional[bytes] = None,
-        location_label: Optional[str] = None,
+        tx_hash: bytes | None = None,
+        location_label: str | None = None,
         asset: CryptoAsset = CUSTOM_USDT,
-        counterparty: Optional[str] = None,
+        counterparty: str | None = None,
         event_type: HistoryEventType = HistoryEventType.INFORMATIONAL,
         event_subtype: HistoryEventSubType = HistoryEventSubType.NONE,
         timestamp: TimestampMS = ZERO_TIMESTAMP_MS,
-        address: Optional[ChecksumEvmAddress] = None,
-        product: Optional[EvmProduct] = None,
+        address: ChecksumEvmAddress | None = None,
+        product: EvmProduct | None = None,
 ) -> EvmEvent:
     if tx_hash is None:
         tx_hash = make_random_bytes(32)

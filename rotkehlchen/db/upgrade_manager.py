@@ -3,11 +3,12 @@ import os
 import shutil
 import traceback
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from pysqlcipher3 import dbapi2 as sqlcipher
 
 from rotkehlchen.api.websockets.typedefs import WSMessageType
+from rotkehlchen.constants.misc import USERDB_NAME
 from rotkehlchen.db.settings import ROTKEHLCHEN_DB_VERSION
 from rotkehlchen.db.upgrades.v26_v27 import upgrade_v26_to_v27
 from rotkehlchen.db.upgrades.v27_v28 import upgrade_v27_to_v28
@@ -101,7 +102,7 @@ UPGRADES_LIST = [
 class DBUpgradeProgressHandler(ProgressUpdater):
     """Class to notify users through websockets about progress of upgrading the database."""
 
-    def _notify_frontend(self, step_name: Optional[str] = None) -> None:
+    def _notify_frontend(self, step_name: str | None = None) -> None:
         """Sends to the user through websockets all information about db upgrading progress."""
         self.messages_aggregator.add_message(
             message_type=WSMessageType.DB_UPGRADE_STATUS,
@@ -195,7 +196,7 @@ class DBUpgradeManager:
             tmp_db_filename = f'{ts_now()}_rotkehlchen_db_v{upgrade.from_version}.backup'
             tmp_db_path = os.path.join(tmpdirname, tmp_db_filename)
             shutil.copyfile(
-                os.path.join(self.db.user_data_dir, 'rotkehlchen.db'),
+                os.path.join(self.db.user_data_dir, USERDB_NAME),
                 tmp_db_path,
             )
 
@@ -220,7 +221,7 @@ class DBUpgradeManager:
                 log.error(f'{error_message}\n{stacktrace}')
                 shutil.copyfile(
                     tmp_db_path,
-                    os.path.join(self.db.user_data_dir, 'rotkehlchen.db'),
+                    os.path.join(self.db.user_data_dir, USERDB_NAME),
                 )
                 raise DBUpgradeError(error_message) from e
 

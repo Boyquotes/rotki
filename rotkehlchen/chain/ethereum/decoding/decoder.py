@@ -1,8 +1,7 @@
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import EvmToken
 from rotkehlchen.chain.ethereum.abi import decode_event_data_abi_str
 from rotkehlchen.chain.ethereum.constants import CPT_KRAKEN
@@ -22,6 +21,7 @@ from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants.assets import A_1INCH, A_ETH, A_GTC
 from rotkehlchen.errors.asset import UnknownAsset, WrongAssetType
 from rotkehlchen.errors.serialization import DeserializationError
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import ChecksumEvmAddress, EvmTransaction
 
@@ -37,10 +37,10 @@ from .constants import (
 )
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.evm_event import EvmEvent
     from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
     from rotkehlchen.chain.ethereum.transactions import EthereumTransactions
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.history.events.structures.evm_event import EvmEvent
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -81,7 +81,7 @@ class EthereumTransactionDecoder(EVMTransactionDecoderWithDSProxy):
 
     def _maybe_enrich_transfers(
             self,
-            token: Optional[EvmToken],  # pylint: disable=unused-argument
+            token: EvmToken | None,  # pylint: disable=unused-argument
             tx_log: EvmTxReceiptLog,
             transaction: EvmTransaction,  # pylint: disable=unused-argument
             decoded_events: list['EvmEvent'],
@@ -126,7 +126,7 @@ class EthereumTransactionDecoder(EVMTransactionDecoderWithDSProxy):
 
     def _maybe_decode_governance(
             self,
-            token: Optional[EvmToken],  # pylint: disable=unused-argument
+            token: EvmToken | None,  # pylint: disable=unused-argument
             tx_log: EvmTxReceiptLog,
             transaction: EvmTransaction,
             decoded_events: list['EvmEvent'],  # pylint: disable=unused-argument
@@ -191,7 +191,7 @@ class EthereumTransactionDecoder(EVMTransactionDecoderWithDSProxy):
         )
 
     @staticmethod
-    def _address_is_exchange(address: ChecksumEvmAddress) -> Optional[str]:
+    def _address_is_exchange(address: ChecksumEvmAddress) -> str | None:
         name = ETHADDRESS_TO_KNOWN_NAME.get(address)
         if name and 'Kraken' in name:
             return CPT_KRAKEN

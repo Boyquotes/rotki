@@ -8,14 +8,6 @@ import pytest
 import requests
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.base import HistoryEvent
-from rotkehlchen.accounting.structures.eth2 import (
-    EthBlockEvent,
-    EthDepositEvent,
-    EthWithdrawalEvent,
-)
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.api.v1.schemas import EthStakingHistoryStatsProfit
 from rotkehlchen.chain.accounts import BlockchainAccountData
 from rotkehlchen.chain.ethereum.modules.eth2.constants import CPT_ETH2, UNKNOWN_VALIDATOR_INDEX
@@ -23,18 +15,24 @@ from rotkehlchen.chain.ethereum.modules.eth2.structures import Eth2Validator, Va
 from rotkehlchen.chain.ethereum.modules.eth2.utils import (
     DAY_AFTER_ETH2_GENESIS,
     scrape_validator_daily_stats,
-    scrape_validator_withdrawals,
 )
 from rotkehlchen.chain.evm.decoding.constants import CPT_GAS
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants import ONE, ZERO
-from rotkehlchen.constants.assets import A_DAI, A_ETH
+from rotkehlchen.constants.assets import A_ETH
 from rotkehlchen.constants.timing import DAY_IN_SECONDS
 from rotkehlchen.db.eth2 import DBEth2
 from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.db.filtering import Eth2DailyStatsFilterQuery, HistoryEventFilterQuery
 from rotkehlchen.db.history_events import DBHistoryEvents
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.eth2 import (
+    EthBlockEvent,
+    EthDepositEvent,
+    EthWithdrawalEvent,
+)
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.factories import make_evm_address, make_evm_tx_hash
 from rotkehlchen.tests.utils.mock import MockResponse
 from rotkehlchen.types import (
@@ -47,7 +45,7 @@ from rotkehlchen.types import (
     TimestampMS,
     deserialize_evm_tx_hash,
 )
-from rotkehlchen.utils.misc import ts_now, ts_now_in_ms, ts_sec_to_ms
+from rotkehlchen.utils.misc import ts_now, ts_sec_to_ms
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.ethereum.modules.eth2.eth2 import Eth2
@@ -546,154 +544,6 @@ def test_deposits_pubkey_re(eth2: 'Eth2', database):
     assert result[pubkey2] == ADDR2
 
 
-@pytest.mark.vcr()
-@pytest.mark.freeze_time('2023-09-26 08:47:11 GMT')
-def test_scrape_validator_withdrawals():
-    """
-    Simple test for withdrawal scraping. We use VCR since in the CI this test used to timeout often
-    """
-    # 20 days before exit withdrawal so we have ~2-3 pages
-    last_known_timestamp = 1695718031 - 130 * DAY_IN_SECONDS  # 2023-09-26 08:47:11 GMT - 130 days
-    withdrawal_data = scrape_validator_withdrawals(354933, last_known_timestamp)
-
-    assert len(withdrawal_data) >= 20, 'should have multiple pages'
-    for entry in withdrawal_data:
-        assert isinstance(entry[0], int)
-        assert entry[0] > last_known_timestamp
-        assert entry[1] == '0xB9D7934878B5FB9610B3fE8A5e441e8fad7E293f'
-        assert isinstance(entry[2], FVal)
-
-
-def test_get_validators_to_query_for_withdrawals(database):
-    db = DBEth2(database)
-    dbevents = DBHistoryEvents(database)
-    now_ms = ts_now_in_ms()
-    address1 = make_evm_address()
-    address2 = make_evm_address()
-    assert db.get_validators_to_query_for_withdrawals(now_ms) == []
-
-    with database.user_write() as write_cursor:  # first add some validators
-        db.add_validators(write_cursor, [
-            Eth2Validator(
-                index=1,
-                public_key=Eth2PubKey('0xf001'),
-                ownership_proportion=ONE,
-            ), Eth2Validator(
-                index=2,
-                public_key=Eth2PubKey('0xf002'),
-                ownership_proportion=ONE,
-            ), Eth2Validator(
-                index=3,
-                public_key=Eth2PubKey('0xf003'),
-                ownership_proportion=ONE,
-            ), Eth2Validator(
-                index=42,
-                public_key=Eth2PubKey('0xf0042'),
-                ownership_proportion=ONE,
-            ), Eth2Validator(
-                index=69,
-                public_key=Eth2PubKey('0xf0069'),
-                ownership_proportion=ONE,
-            ),
-        ])
-
-    # now check that all need to be queried since we have no withdrawals
-    assert db.get_validators_to_query_for_withdrawals(now_ms) == [(1, 0), (2, 0), (3, 0), (42, 0), (69, 0)]  # noqa: E501
-
-    last_ts_1 = 86400000 * 2 + 55000
-    last_ts_2 = 86400000 + 69000
-    last_ts_3 = 86400000 + 30000
-    with database.user_write() as write_cursor:  # now add some withdrawals in the DB
-        dbevents.add_history_events(write_cursor, [
-            EthWithdrawalEvent(
-                validator_index=1,
-                timestamp=TimestampMS(1),
-                balance=Balance(1, 1),
-                withdrawal_address=address1,
-                is_exit=False,
-            ), EthWithdrawalEvent(
-                validator_index=1,
-                timestamp=TimestampMS(86400000 + 25000),
-                balance=Balance(1, 1),
-                withdrawal_address=address1,
-                is_exit=False,
-            ), EthWithdrawalEvent(
-                validator_index=1,
-                timestamp=TimestampMS(last_ts_1),
-                balance=Balance(1, 1),
-                withdrawal_address=address1,
-                is_exit=False,
-            ), EthWithdrawalEvent(
-                validator_index=42,
-                timestamp=TimestampMS(now_ms - 25 * 3600 * 1000),
-                balance=Balance(1, 1),
-                withdrawal_address=address2,
-                is_exit=False,
-            ), EthWithdrawalEvent(
-                validator_index=42,
-                timestamp=TimestampMS(now_ms - 3600 * 1000),
-                balance=Balance(1, 1),
-                withdrawal_address=address2,
-                is_exit=False,
-            ), EthWithdrawalEvent(
-                validator_index=2,
-                timestamp=TimestampMS(22000),
-                balance=Balance(2, 1),
-                withdrawal_address=address1,
-                is_exit=False,
-            ), EthWithdrawalEvent(
-                validator_index=2,
-                timestamp=TimestampMS(last_ts_2),
-                balance=Balance(2, 1),
-                withdrawal_address=address1,
-                is_exit=False,
-            ), EthWithdrawalEvent(
-                validator_index=3,
-                timestamp=TimestampMS(14000),
-                balance=Balance(1, 1),
-                withdrawal_address=address1,
-                is_exit=False,
-            ), EthWithdrawalEvent(
-                validator_index=3,
-                timestamp=TimestampMS(last_ts_3),
-                balance=Balance(FVal('32.0023'), 1),
-                withdrawal_address=address1,
-                is_exit=True,
-            ), EthWithdrawalEvent(
-                validator_index=46,
-                timestamp=TimestampMS(now_ms - 3600 * 1000 * 1.5),
-                balance=Balance(FVal('32.0044'), 1),
-                withdrawal_address=address2,
-                is_exit=True,
-            ),
-        ])  # no withdrawals for validator 69, to see logic works for it too
-
-        # add some other events to make sure table populated with non-withdrawals doesn't mess up
-        dbevents.add_history_event(write_cursor, HistoryEvent(
-            event_identifier=b'id1',
-            sequence_index=0,
-            timestamp=TimestampMS(10),
-            location=Location.ETHEREUM,
-            event_type=HistoryEventType.TRADE,
-            event_subtype=HistoryEventSubType.SPEND,
-            asset=A_DAI,
-            balance=Balance(1, 1),
-        ))
-        dbevents.add_history_event(write_cursor, HistoryEvent(
-            event_identifier=b'id2',
-            sequence_index=0,
-            timestamp=TimestampMS(now_ms - 1300 * 1000),
-            location=Location.ETHEREUM,
-            event_type=HistoryEventType.TRADE,
-            event_subtype=HistoryEventSubType.SPEND,
-            asset=A_DAI,
-            balance=Balance(1, 1),
-        ))
-
-    result = db.get_validators_to_query_for_withdrawals(now_ms)
-    assert result == [(1, last_ts_1), (2, last_ts_2), (3, last_ts_3), (69, 0)]
-
-
 @pytest.mark.parametrize('ethereum_accounts', [['0x0fdAe061cAE1Ad4Af83b27A96ba5496ca992139b', '0xF4fEae08C1Fa864B64024238E33Bfb4A3Ea7741d']])  # noqa: E501
 @pytest.mark.parametrize('ethereum_modules', [['eth2']])
 def test_eth_validator_stat_calculation(database, blockchain):
@@ -1012,3 +862,58 @@ def test_validator_daily_stats_empty(database):
         result = dbeth2.get_validator_daily_stats_and_limit_info(cursor, Eth2DailyStatsFilterQuery.make())  # noqa: E501
 
     assert result == ([], 0, ZERO)
+
+
+def test_get_active_validator_indices(database):
+    dbevents = DBHistoryEvents(database)
+    dbeth2 = DBEth2(database)
+    active_index, exited_index, noevents_index = 1, 575645, 4242
+    active_address, exited_address = string_to_evm_address('0x15F4B914A0cCd14333D850ff311d6DafbFbAa32b'), string_to_evm_address('0x08DeB6278D671E2a1aDc7b00839b402B9cF3375d')  # noqa: E501
+
+    with database.user_write() as write_cursor:
+        dbeth2.add_validators(write_cursor, [
+            Eth2Validator(
+                index=active_index,
+                public_key=Eth2PubKey('0xa1d1ad0714035353258038e964ae9675dc0252ee22cea896825c01458e1807bfad2f9969338798548d9858a571f7425c'),
+                ownership_proportion=ONE,
+            ), Eth2Validator(
+                index=exited_index,
+                public_key=Eth2PubKey('0x800041b1eff8af7a583caa402426ffe8e5da001615f5ce00ba30ea8e3e627491e0aa7f8c0417071d5c1c7eb908962d8e'),
+                ownership_proportion=ONE,
+            ), Eth2Validator(
+                index=noevents_index,
+                public_key=Eth2PubKey('0xb02c42a2cda10f06441597ba87e87a47c187cd70e2b415bef8dc890669efe223f551a2c91c3d63a5779857d3073bf288'),
+                ownership_proportion=ONE,
+            ),
+        ])
+
+        dbevents.add_history_events(write_cursor, history=[
+            EthWithdrawalEvent(
+                validator_index=active_index,
+                timestamp=TimestampMS(1699319051000),
+                balance=Balance(FVal('0.017197')),
+                withdrawal_address=active_address,
+                is_exit=False,
+            ), EthWithdrawalEvent(
+                validator_index=active_index,
+                timestamp=TimestampMS(1699976207000),
+                balance=Balance(FVal('0.017250')),
+                withdrawal_address=active_address,
+                is_exit=False,
+            ), EthWithdrawalEvent(
+                validator_index=exited_index,
+                timestamp=TimestampMS(1699648427000),
+                balance=Balance(FVal('0.017073')),
+                withdrawal_address=exited_address,
+                is_exit=False,
+            ), EthWithdrawalEvent(
+                validator_index=exited_index,
+                timestamp=TimestampMS(1699976207000),
+                balance=Balance(FVal('32.007250')),
+                withdrawal_address=exited_address,
+                is_exit=True,
+            ),
+        ])
+
+    with database.conn.read_ctx() as cursor:
+        assert dbeth2.get_active_validator_indices(cursor) == {active_index, noevents_index}

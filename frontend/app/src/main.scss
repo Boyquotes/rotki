@@ -20,7 +20,7 @@ body {
 
   @media only screen and (max-width: 960px) {
     height: calc(100vh - 56px);
-    margin-top: 56px;
+    margin-top: 56px !important;
   }
 }
 
@@ -132,5 +132,10 @@ input {
 }
 
 .icon-bg {
-  @apply dark:border-rui-grey-600 dark:border dark:rounded-md dark:bg-white;
+  @apply dark:rounded-md dark:bg-white;
+}
+
+.blur {
+  filter: blur(0.75em);
+
 }

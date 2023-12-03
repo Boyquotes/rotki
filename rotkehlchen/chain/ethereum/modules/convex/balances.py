@@ -1,9 +1,7 @@
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.evm_event import EvmProduct
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.chain.ethereum.interfaces.balances import ProtocolWithGauges
 from rotkehlchen.chain.ethereum.utils import asset_normalized_value
 from rotkehlchen.chain.evm.contracts import EvmContract
@@ -11,6 +9,8 @@ from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import A_CVX
 from rotkehlchen.db.dbhandler import DBHandler
 from rotkehlchen.errors.misc import RemoteError
+from rotkehlchen.history.events.structures.evm_event import EvmProduct
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import ChecksumEvmAddress
@@ -18,9 +18,9 @@ from rotkehlchen.types import ChecksumEvmAddress
 from .constants import CPT_CONVEX, CVX_LOCKER_V2, CVX_REWARDS
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.evm_event import EvmEvent
     from rotkehlchen.chain.ethereum.interfaces.balances import BalancesType
     from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
+    from rotkehlchen.history.events.structures.evm_event import EvmEvent
     from rotkehlchen.types import CHAIN_IDS_WITH_BALANCE_PROTOCOLS
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class ConvexBalances(ProtocolWithGauges):
         )
         self.cvx = A_CVX.resolve_to_evm_token()
 
-    def get_gauge_address(self, event: 'EvmEvent') -> Optional[ChecksumEvmAddress]:
+    def get_gauge_address(self, event: 'EvmEvent') -> ChecksumEvmAddress | None:
         if event.extra_data is None:
             return None
         return event.extra_data.get('gauge_address')  # can be None

@@ -10,6 +10,7 @@ const props = defineProps<{
   matchers: SearchMatcher<any>[];
   selection: Suggestion[];
   location: SavedFilterLocation;
+  disabled: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -77,14 +78,17 @@ const css = useCssModule();
 
 <template>
   <div class="flex items-center">
-    <RuiTooltip :popper="{ placement: 'top' }" open-delay="400">
-      <template #activator="{ on }">
+    <RuiTooltip
+      :popper="{ placement: 'top' }"
+      open-delay="400"
+      :disabled="disabled"
+    >
+      <template #activator>
         <RuiButton
           color="secondary"
           variant="text"
           icon
-          :disabled="selection.length === 0"
-          v-on="on"
+          :disabled="disabled || selection.length === 0"
           @click="addToSavedFilter()"
         >
           <RuiIcon size="20" name="play-list-add-line" />
@@ -111,9 +115,19 @@ const css = useCssModule();
       :close-on-content-click="false"
     >
       <template #activator="{ on }">
-        <RuiTooltip :popper="{ placement: 'top' }" open-delay="400">
+        <RuiTooltip
+          :popper="{ placement: 'top' }"
+          open-delay="400"
+          :disabled="disabled"
+        >
           <template #activator>
-            <RuiButton color="primary" variant="text" icon v-on="on">
+            <RuiButton
+              :disabled="disabled"
+              color="primary"
+              variant="text"
+              icon
+              v-on="on"
+            >
               <RuiIcon size="20" name="filter-line" />
             </RuiButton>
           </template>
@@ -122,7 +136,7 @@ const css = useCssModule();
       </template>
       <VList v-if="savedFilters.length > 0" class="py-4">
         <div v-for="(filters, index) in savedFilters" :key="index">
-          <VDivider v-if="index > 0" class="my-3" />
+          <RuiDivider v-if="index > 0" class="my-3" />
           <div class="flex px-4">
             <div class="flex flex-wrap pr-4 gap-1">
               <VChip
@@ -174,7 +188,7 @@ const css = useCssModule();
           </div>
         </div>
       </VList>
-      <div v-else class="pa-4">
+      <div v-else class="p-4">
         <i18n path="table_filter.saved_filters.empty">
           <template #button>
             <RuiButton

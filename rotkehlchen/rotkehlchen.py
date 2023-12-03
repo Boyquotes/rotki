@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 from types import FunctionType
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, Optional, cast, overload
 
 import gevent
 
@@ -62,7 +62,7 @@ from rotkehlchen.errors.misc import (
     SystemPermissionError,
 )
 from rotkehlchen.exchanges.manager import ExchangeManager
-from rotkehlchen.externalapis.beaconchain import BeaconChain
+from rotkehlchen.externalapis.beaconchain.service import BeaconChain
 from rotkehlchen.externalapis.coingecko import Coingecko
 from rotkehlchen.externalapis.covalent import Covalent, chains_id
 from rotkehlchen.externalapis.cryptocompare import Cryptocompare
@@ -72,7 +72,7 @@ from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.globaldb.manual_price_oracles import ManualCurrentOracle
 from rotkehlchen.globaldb.updates import AssetsUpdater
 from rotkehlchen.greenlets.manager import GreenletManager
-from rotkehlchen.history.events import EventsHistorian
+from rotkehlchen.history.manager import HistoryQueryingManager
 from rotkehlchen.history.price import PriceHistorian
 from rotkehlchen.history.types import HistoricalPriceOracle
 from rotkehlchen.icons import IconManager
@@ -100,6 +100,7 @@ from rotkehlchen.types import (
 )
 from rotkehlchen.usage_analytics import maybe_submit_usage_analytics
 from rotkehlchen.user_messages import MessagesAggregator
+from rotkehlchen.utils.datadir import maybe_restructure_rotki_data_directory
 from rotkehlchen.utils.misc import combine_dicts
 
 if TYPE_CHECKING:
@@ -130,7 +131,7 @@ class Rotkehlchen:
         """
         # Can also be None after unlock if premium credentials did not
         # authenticate or premium server temporarily offline
-        self.premium: Optional[Premium] = None
+        self.premium: Premium | None = None
         self.user_is_logged_in: bool = False
 
         self.args = args
@@ -139,6 +140,8 @@ class Rotkehlchen:
         else:
             self.data_dir = Path(self.args.data_dir)
             self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        maybe_restructure_rotki_data_directory(self.data_dir)
 
         if not os.access(self.data_dir, os.W_OK | os.R_OK):
             raise SystemPermissionError(
@@ -186,7 +189,7 @@ class Rotkehlchen:
         )
         # Initialize EVM Contracts common abis
         EvmContracts.initialize_common_abis()
-        self.task_manager: Optional[TaskManager] = None
+        self.task_manager: TaskManager | None = None
         self.shutdown_event = gevent.event.Event()
         self.migration_manager = DataMigrationManager(self)
 
@@ -248,9 +251,9 @@ class Rotkehlchen:
             password: str,
             create_new: bool,
             sync_approval: Literal['yes', 'no', 'unknown'],
-            premium_credentials: Optional[PremiumCredentials],
+            premium_credentials: PremiumCredentials | None,
             resume_from_backup: bool,
-            initial_settings: Optional[ModifiableDBSettings] = None,
+            initial_settings: ModifiableDBSettings | None = None,
             sync_database: bool = True,
     ) -> None:
         """Unlocks an existing user or creates a new one if `create_new` is True
@@ -454,7 +457,7 @@ class Rotkehlchen:
             chains_aggregator=self.chains_aggregator,
             premium=self.premium,
         )
-        self.events_historian = EventsHistorian(
+        self.history_querying_manager = HistoryQueryingManager(
             user_directory=self.user_directory,
             db=self.data.db,
             msg_aggregator=self.msg_aggregator,
@@ -518,7 +521,7 @@ class Rotkehlchen:
         self.exchange_manager.delete_all_exchanges()
 
         del self.accountant
-        del self.events_historian
+        del self.history_querying_manager
         del self.data_importer
 
         self.data.logout()
@@ -607,7 +610,7 @@ class Rotkehlchen:
             self,
             cursor: 'DBCursor',
             blockchain: SupportedBlockchain,
-    ) -> Union[list[SingleBlockchainAccountData], dict[str, Any]]:
+    ) -> list[SingleBlockchainAccountData] | dict[str, Any]:
         account_data = self.data.db.get_blockchain_account_data(cursor, blockchain)
         if blockchain not in (SupportedBlockchain.BITCOIN, SupportedBlockchain.BITCOIN_CASH):
             return account_data
@@ -813,9 +816,9 @@ class Rotkehlchen:
             self.data.db.remove_single_blockchain_accounts(write_cursor, blockchain, accounts)
 
     def get_history_query_status(self) -> dict[str, str]:
-        if self.events_historian.progress < FVal('100'):
-            processing_state = self.events_historian.processing_state_name
-            progress = self.events_historian.progress / 2
+        if self.history_querying_manager.progress < FVal('100'):
+            processing_state = self.history_querying_manager.processing_state_name
+            progress = self.history_querying_manager.progress / 2
         elif self.accountant.first_processed_timestamp == -1:
             processing_state = 'Processing all retrieved historical events'
             progress = FVal(50)
@@ -839,7 +842,7 @@ class Rotkehlchen:
             start_ts: Timestamp,
             end_ts: Timestamp,
     ) -> tuple[int, str]:
-        error_or_empty, events = self.events_historian.get_history(
+        error_or_empty, events = self.history_querying_manager.get_history(
             start_ts=start_ts,
             end_ts=end_ts,
             has_premium=self.premium is not None,
@@ -855,7 +858,7 @@ class Rotkehlchen:
             self,
             requested_save_data: bool = False,
             save_despite_errors: bool = False,
-            timestamp: Optional[Timestamp] = None,
+            timestamp: Timestamp | None = None,
             ignore_cache: bool = False,
     ) -> dict[str, Any]:
         """Query all balances rotkehlchen can see.
@@ -1078,9 +1081,9 @@ class Rotkehlchen:
             location: Location,
             api_key: ApiKey,
             api_secret: ApiSecret,
-            passphrase: Optional[str] = None,
+            passphrase: str | None = None,
             kraken_account_type: Optional['KrakenAccountType'] = None,
-            binance_selected_trade_pairs: Optional[list[str]] = None,
+            binance_selected_trade_pairs: list[str] | None = None,
     ) -> tuple[bool, str]:
         """
         Setup a new exchange with an api key and an api secret and optionally a passphrase
@@ -1108,9 +1111,9 @@ class Rotkehlchen:
             )
         return is_success, msg
 
-    def query_periodic_data(self) -> dict[str, Union[bool, dict[str, list[str]], Timestamp]]:
+    def query_periodic_data(self) -> dict[str, bool | (dict[str, list[str]] | Timestamp)]:
         """Query for frequently changing data"""
-        result: dict[str, Union[bool, dict[str, list[str]], Timestamp]] = {}
+        result: dict[str, bool | (dict[str, list[str]] | Timestamp)] = {}
 
         if self.user_is_logged_in:
             with self.data.db.conn.read_ctx() as cursor:

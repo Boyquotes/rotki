@@ -1,8 +1,6 @@
 import pytest
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.chain.ethereum.modules.optimism_bridge.decoder import OPTIMISM_PORTAL_ADDRESS
 from rotkehlchen.chain.evm.constants import ZERO_ADDRESS
@@ -11,6 +9,8 @@ from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.chain.optimism.constants import CPT_OPTIMISM
 from rotkehlchen.constants.assets import A_ETH, A_OPTIMISM_ETH
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.ethereum import get_decoded_events_of_transaction
 from rotkehlchen.types import Location, TimestampMS, deserialize_evm_tx_hash
 
@@ -123,7 +123,7 @@ def test_receive_erc20_on_optimism_legacy(database, optimism_inquirer, optimism_
             asset=Asset('eip155:10/erc20:0x7F5c764cBc14f9669B88837ca1490cCa17c31607'),
             balance=Balance(amount=FVal('10')),
             location_label=user_address,
-            notes='Bridge 10 USDC from Ethereum to Optimism via Optimism bridge',
+            notes='Bridge 10 USDC.e from Ethereum to Optimism via Optimism bridge',
             counterparty=CPT_OPTIMISM,
             address=ZERO_ADDRESS,
         ),
@@ -152,7 +152,7 @@ def test_receive_erc20_on_optimism(database, optimism_inquirer, optimism_account
             asset=Asset('eip155:10/erc20:0x7F5c764cBc14f9669B88837ca1490cCa17c31607'),
             balance=Balance(amount=FVal('10000')),
             location_label=user_address,
-            notes='Bridge 10000 USDC from Ethereum to Optimism via Optimism bridge',
+            notes='Bridge 10000 USDC.e from Ethereum to Optimism via Optimism bridge',
             counterparty=CPT_OPTIMISM,
             address=ZERO_ADDRESS,
         ),
@@ -226,7 +226,7 @@ def test_withdraw_erc20(database, optimism_inquirer, optimism_accounts):
             asset=Asset('eip155:10/erc20:0x7F5c764cBc14f9669B88837ca1490cCa17c31607'),
             balance=Balance(amount=FVal('2718.857536')),
             location_label=user_address,
-            notes='Bridge 2718.857536 USDC from Optimism to Ethereum via Optimism bridge',
+            notes='Bridge 2718.857536 USDC.e from Optimism to Ethereum via Optimism bridge',
             counterparty=CPT_OPTIMISM,
             address=ZERO_ADDRESS,
         ),

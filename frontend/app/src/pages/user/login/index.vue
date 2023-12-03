@@ -15,6 +15,18 @@ const showUpgradeProgress: ComputedRef<boolean> = computed(
 const isDocker = import.meta.env.VITE_DOCKER;
 const { dockerRiskAccepted } = storeToRefs(useMainStore());
 
+const { fetchMessages, welcomeHeader, welcomeMessage } = useDynamicMessages();
+const { showReleaseNotes } = useUpdateMessage();
+
+const header = computed(() => {
+  const header = get(welcomeHeader);
+
+  return {
+    header: header?.header || t('login.welcome_title'),
+    text: header?.text || t('login.welcome_description')
+  };
+});
+
 const handleLogin = async (credentials: LoginCredentials) => {
   set(errors, []);
   await userLogin(credentials);
@@ -23,10 +35,13 @@ const handleLogin = async (credentials: LoginCredentials) => {
 const navigate = async () => {
   set(canRequestData, true);
   await navigateToDashboard();
+  set(showReleaseNotes, false);
 };
 
 const { t } = useI18n();
 const css = useCssModule();
+
+onMounted(async () => fetchMessages());
 </script>
 
 <template>
@@ -47,6 +62,7 @@ const css = useCssModule();
               <LoginForm
                 v-else
                 :loading="loading"
+                :is-docker="isDocker"
                 :errors="errors"
                 @touched="errors = []"
                 @login="handleLogin($event)"
@@ -72,12 +88,18 @@ const css = useCssModule();
           <RuiLogo class="w-8 !h-8" />
         </span>
         <h2 class="text-h3 font-light xl:text-h2 mb-6">
-          {{ t('login.welcome_title') }}
+          {{ header.header }}
         </h2>
-        <p class="text-body-2">{{ t('login.welcome_description') }}</p>
+        <p class="text-body-2">{{ header.text }}</p>
         <p v-if="false" class="text-body-2 text-rui-primary">
           {{ t('login.welcome_update_message') }}
         </p>
+        <NewReleaseChangelog v-if="showReleaseNotes" class="mt-4" />
+        <WelcomeMessageDisplay
+          v-else-if="welcomeMessage"
+          class="mt-6"
+          :message="welcomeMessage"
+        />
       </div>
       <DockerWarning v-if="!dockerRiskAccepted && isDocker" class="mt-8" />
     </AccountManagementAside>

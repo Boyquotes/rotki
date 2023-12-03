@@ -1,5 +1,5 @@
 import logging
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Literal
 
 from rotkehlchen.constants.assets import A_USD
 from rotkehlchen.errors.misc import RemoteError
@@ -21,7 +21,11 @@ log = RotkehlchenLogsAdapter(logger)
 
 def should_run_periodic_task(
         database: 'DBHandler',
-        key_name: Literal['last_data_updates_ts', 'last_evm_accounts_detect_ts'],
+        key_name: Literal[
+            'last_data_updates_ts',
+            'last_evm_accounts_detect_ts',
+            'last_spam_assets_detect_key',
+        ],
         refresh_period: int,
 ) -> bool:
     """
@@ -42,7 +46,7 @@ def should_run_periodic_task(
 def query_missing_prices_of_base_entries(
         database: 'DBHandler',
         entries_missing_prices: list[tuple[str, 'FVal', 'Asset', 'Timestamp']],
-        base_entries_ignore_set: Optional[set[str]] = None,
+        base_entries_ignore_set: set[str] | None = None,
 ) -> None:
     """
     Queries missing prices for HistoryBaseEntry in database updating

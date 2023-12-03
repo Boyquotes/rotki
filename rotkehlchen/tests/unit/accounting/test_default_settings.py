@@ -1,8 +1,9 @@
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
-from rotkehlchen.accounting.accountant import Accountant
+from more_itertools import peekable
 
+from rotkehlchen.accounting.accountant import Accountant
 from rotkehlchen.accounting.cost_basis.base import (
     AssetAcquisitionEvent,
     CostBasisInfo,
@@ -11,15 +12,15 @@ from rotkehlchen.accounting.cost_basis.base import (
 from rotkehlchen.accounting.mixins.event import AccountingEventType
 from rotkehlchen.accounting.pnl import PNL
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.base import HistoryEvent
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
 from rotkehlchen.accounting.structures.processed_event import ProcessedAccountingEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.chain.evm.decoding.constants import CPT_GAS
 from rotkehlchen.constants import ONE, ZERO
 from rotkehlchen.constants.assets import A_DAI, A_ETH
 from rotkehlchen.db.settings import ModifiableDBSettings
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.base import HistoryEvent
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.factories import make_evm_address, make_evm_tx_hash
 from rotkehlchen.types import Location, Price, Timestamp, TimestampMS
 from rotkehlchen.utils.misc import ts_sec_to_ms
@@ -99,7 +100,7 @@ def _gain_one_ether(
         entry_type: Literal['history_event', 'evm_event'] = 'evm_event',
 ) -> None:
     """Helper function to gain 1 ETH, so that spending events have something to spend"""
-    event_class: type[Union[HistoryEvent, EvmEvent]]
+    event_class: type[HistoryEvent | EvmEvent]
     kwargs: dict[str, Any]
     if entry_type == 'history_event':
         event_class = HistoryEvent
@@ -122,7 +123,7 @@ def _gain_one_ether(
     )
     consumed_num = events_accountant.process(
         event=eth_gain_event,
-        events_iterator=iter([]),
+        events_iterator=peekable([]),
     )
     assert consumed_num == 1
 
@@ -141,7 +142,7 @@ def test_accounting_no_settings(accounting_pot: 'AccountingPot'):
     )
     consumed_num = accounting_pot.events_accountant.process(
         event=event,
-        events_iterator=iter([]),
+        events_iterator=peekable([]),
     )
 
     assert consumed_num == 1
@@ -213,7 +214,7 @@ def test_accounting_spend_settings(
         event_type: 'HistoryEventType',
         event_subtype: 'HistoryEventSubType',
         is_taxable: bool,
-        counterparty: Optional[str],
+        counterparty: str | None,
         include_crypto2crypto,
 ):
     _gain_one_ether(events_accountant=accounting_pot.events_accountant)
@@ -232,7 +233,7 @@ def test_accounting_spend_settings(
     )
     consumed_num = accounting_pot.events_accountant.process(
         event=spend_event,
-        events_iterator=iter([]),
+        events_iterator=peekable([]),
     )
     assert consumed_num == 1
 
@@ -320,7 +321,7 @@ def test_accounting_swap_settings(accounting_pot: 'AccountingPot', counterparty:
     )
     consumed_num = accounting_pot.events_accountant.process(
         event=swap_spend_event,
-        events_iterator=iter([swap_receive_event]),
+        events_iterator=peekable([swap_receive_event]),
     )
     assert consumed_num == 2
     acquisition_event = AssetAcquisitionEvent(

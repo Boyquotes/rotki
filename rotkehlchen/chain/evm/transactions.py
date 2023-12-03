@@ -3,10 +3,9 @@ from abc import ABCMeta
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional
 
 from gevent.lock import Semaphore
-from pysqlcipher3 import dbapi2 as sqlcipher
 
 from rotkehlchen.api.websockets.typedefs import TransactionStatusStep, WSMessageType
 from rotkehlchen.assets.asset import EvmToken
@@ -155,7 +154,7 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
             self,
             address: ChecksumEvmAddress,
             period: TimestampOrBlockRange,
-            location_string: Optional[str] = None,
+            location_string: str | None = None,
     ) -> None:
         """Helper function to abstract tx querying functionality for different range types"""
         for new_transactions in self.evm_inquirer.etherscan.get_transactions(
@@ -244,9 +243,9 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
 
     def _query_and_save_internal_transactions_for_range_or_parent_hash(
             self,
-            address: Optional[ChecksumEvmAddress],
-            period_or_hash: Union[TimestampOrBlockRange, EVMTxHash],
-            location_string: Optional[str] = None,
+            address: ChecksumEvmAddress | None,
+            period_or_hash: TimestampOrBlockRange | EVMTxHash,
+            location_string: str | None = None,
     ) -> None:
         """Helper function to abstract internal tx querying for different range types
         or for a specific parent transaction hash.
@@ -517,7 +516,7 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
                 evm_transactions=[transaction],
                 relevant_address=relevant_address,
             )
-            self.dbevmtx.add_receipt_data(
+            self.dbevmtx.add_or_ignore_receipt_data(
                 write_cursor=write_cursor,
                 chain_id=self.evm_inquirer.chain_id,
                 data=raw_receipt_data,
@@ -592,16 +591,13 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
             )
 
         tx_receipt_raw_data = self.evm_inquirer.get_transaction_receipt(tx_hash=GENESIS_HASH)
-        try:
-            with self.database.user_write() as write_cursor:
-                self.dbevmtx.add_receipt_data(
-                    write_cursor=write_cursor,
-                    chain_id=self.evm_inquirer.chain_id,
-                    data=tx_receipt_raw_data,
-                )
-        except sqlcipher.IntegrityError as e:  # pylint: disable=no-member
-            if 'UNIQUE constraint failed: evmtx_receipts.tx_id' not in str(e):
-                raise  # otherwise something else added the receipt before so we just continue
+        with self.database.user_write() as write_cursor:
+            self.dbevmtx.add_or_ignore_receipt_data(
+                write_cursor=write_cursor,
+                chain_id=self.evm_inquirer.chain_id,
+                data=tx_receipt_raw_data,
+            )
+
         with self.database.conn.read_ctx() as cursor:
             tx_receipt = self.dbevmtx.get_receipt(
                 cursor=cursor,
@@ -639,8 +635,8 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
 
     def get_receipts_for_transactions_missing_them(
             self,
-            limit: Optional[int] = None,
-            addresses: Optional[list[ChecksumEvmAddress]] = None,
+            limit: int | None = None,
+            addresses: list[ChecksumEvmAddress] | None = None,
     ) -> None:
         """
         Searches the database for up to `limit` transactions that have no corresponding receipt
@@ -678,17 +674,12 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
                     self.msg_aggregator.add_warning(f'Failed to query information for {self.evm_inquirer.chain_name} transaction {entry.hex()} due to {e!s}. Skipping...')  # noqa: E501
                     continue
 
-                try:
-                    with self.database.user_write() as write_cursor:
-                        self.dbevmtx.add_receipt_data(
-                            write_cursor=write_cursor,
-                            chain_id=self.evm_inquirer.chain_id,
-                            data=tx_receipt_data,
-                        )
-                except sqlcipher.IntegrityError as e:  # pylint: disable=no-member
-                    if 'UNIQUE constraint failed: evmtx_receipts.tx_id' not in str(e):
-                        log.error(f'Failed to store transaction {entry.hex()} receipt due to {e!s}')  # noqa: E501
-                        raise  # if receipt is already added by other greenlet it's fine
+                with self.database.user_write() as write_cursor:
+                    self.dbevmtx.add_or_ignore_receipt_data(
+                        write_cursor=write_cursor,
+                        chain_id=self.evm_inquirer.chain_id,
+                        data=tx_receipt_data,
+                    )
 
     def add_transaction_by_hash(
             self,
@@ -727,11 +718,12 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
                 evm_transactions=[transaction],
                 relevant_address=associated_address,
             )
-            self.dbevmtx.add_receipt_data(
+            self.dbevmtx.add_or_ignore_receipt_data(
                 write_cursor=write_cursor,
                 chain_id=self.evm_inquirer.chain_id,
                 data=receipt_data,
             )
+
         with self.dbevmtx.db.conn.read_ctx() as cursor:
             tx_receipt = self.dbevmtx.get_receipt(
                 cursor=cursor,

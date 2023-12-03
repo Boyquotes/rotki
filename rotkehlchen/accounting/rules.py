@@ -1,10 +1,10 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
-from rotkehlchen.accounting.structures.base import HistoryBaseEntry, get_event_type_identifier
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
 from rotkehlchen.chain.evm.accounting.structures import BaseEventSettings, EventsAccountantCallback
 from rotkehlchen.db.accounting_rules import DBAccountingRules
 from rotkehlchen.db.filtering import AccountingRulesFilterQuery
+from rotkehlchen.history.events.structures.base import HistoryBaseEntry, get_event_type_identifier
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
 
 if TYPE_CHECKING:
     from rotkehlchen.accounting.pot import AccountingPot
@@ -25,7 +25,7 @@ class AccountingRulesManager:
         self.aggregators = evm_aggregators
         self.pot = pot
         self.event_settings: dict[int, BaseEventSettings] = {}
-        self.event_callbacks: dict[int, EventsAccountantCallback] = {}
+        self.event_callbacks: dict[int, tuple[int, EventsAccountantCallback]] = {}
 
     def _query_db_rules(self) -> None:
         """Query the accounting rules in the db and update event_settings with them"""
@@ -43,20 +43,25 @@ class AccountingRulesManager:
     def get_event_settings(
             self,
             event: HistoryBaseEntry,
-    ) -> tuple[Optional[BaseEventSettings], Optional[EventsAccountantCallback]]:
+    ) -> tuple[BaseEventSettings | None, EventsAccountantCallback | None]:
         """
         Return a matching rule for the event if it exists and an optional callback defined for
         the rule that should be executed
         """
-        event_identifier = event.get_type_identifier()
-        rule = self.event_settings.get(event_identifier, None)
-        if isinstance(event, EvmEvent) is False or rule is not None:
-            return rule, self.event_callbacks.get(event_identifier)
+        event_id = event.get_type_identifier()
+        rule = self.event_settings.get(event_id, None)
+        if (callback_data := self.event_callbacks.get(event_id)) is not None:
+            callback = callback_data[1]
+        else:
+            callback = None
 
-        event_identifier = event.get_type_identifier(include_counterparty=False)
+        if isinstance(event, EvmEvent) is False or rule is not None:
+            return rule, callback
+
+        event_id_no_cpt = event.get_type_identifier(include_counterparty=False)
         return (
-            self.event_settings.get(event_identifier),
-            self.event_callbacks.get(event_identifier),
+            self.event_settings.get(event_id_no_cpt),
+            callback,  # callback is always counterparty specific
         )
 
     def reset(self) -> None:

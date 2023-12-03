@@ -66,11 +66,15 @@ export const useAssetsApi = () => {
   const restoreAssetsDatabase = async (
     reset: 'hard' | 'soft',
     ignoreWarnings: boolean
-  ): Promise<boolean> => {
-    const response = await api.instance.delete<ActionResult<boolean>>(
+  ): Promise<PendingTask> => {
+    const response = await api.instance.delete<ActionResult<PendingTask>>(
       '/assets/updates',
       {
-        data: snakeCaseTransformer({ reset, ignoreWarnings }),
+        data: snakeCaseTransformer({
+          reset,
+          ignoreWarnings,
+          asyncQuery: true
+        }),
         validateStatus: validStatus
       }
     );
@@ -81,10 +85,12 @@ export const useAssetsApi = () => {
   const importCustom = async (
     file: File,
     upload = false
-  ): Promise<ActionResult<boolean>> => {
+  ): Promise<PendingTask> => {
     if (upload) {
       const data = new FormData();
       data.append('file', file);
+      data.append('async_query', 'true');
+
       const response = await api.instance.post('/assets/user', data, {
         validateStatus: validFileOperationStatus,
         headers: {
@@ -96,7 +102,11 @@ export const useAssetsApi = () => {
 
     const response = await api.instance.put(
       '/assets/user',
-      { action: 'upload', file: file.path },
+      snakeCaseTransformer({
+        action: 'upload',
+        file: file.path,
+        asyncQuery: true
+      }),
       {
         validateStatus: validFileOperationStatus
       }

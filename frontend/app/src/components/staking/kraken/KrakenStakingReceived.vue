@@ -25,12 +25,12 @@ const { t } = useI18n();
 </script>
 
 <template>
-  <RuiCard>
+  <RuiCard no-padding class="mb-4">
     <template #custom-header>
       <div class="flex items-center justify-between p-4">
-        <h5 class="text-h5">
+        <h6 class="text-h6">
           {{ t('kraken_staking_received.title') }}
-        </h5>
+        </h6>
         <RuiButtonGroup
           v-model="current"
           required
@@ -48,7 +48,7 @@ const { t } = useI18n();
         </RuiButtonGroup>
       </div>
     </template>
-    <div class="overflow-y-scroll pr-4 -mr-4 overflow-x-hidden max-h-[9rem]">
+    <div class="p-4 py-0 max-h-[11rem]">
       <div
         v-for="item in received"
         :key="item.asset"

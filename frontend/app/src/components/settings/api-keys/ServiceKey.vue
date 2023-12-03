@@ -44,18 +44,6 @@ const successMessages = useRefMap(status, status => {
   return [status.message];
 });
 
-const internalValue = computed({
-  get() {
-    if (get(editMode)) {
-      return get(currentValue);
-    }
-    return '';
-  },
-  set(value) {
-    set(currentValue, value);
-  }
-});
-
 const updateStatus = () => {
   if (!get(apiKey)) {
     set(cancellable, false);
@@ -98,9 +86,9 @@ const slots = useSlots();
 
 <template>
   <div class="flex flex-col gap-4">
-    <div class="flex gap-4" data-cy="service-key__content">
+    <div class="flex items-start gap-4" data-cy="service-key__content">
       <RuiRevealableTextField
-        v-model="internalValue"
+        v-model="currentValue"
         variant="outlined"
         color="primary"
         class="grow"
@@ -111,11 +99,8 @@ const slots = useSlots();
         :hint="currentValue ? '' : hint"
         :disabled="!editMode"
         :label="label"
-      >
-        <template #prepend>
-          <RuiIcon name="key-line" />
-        </template>
-      </RuiRevealableTextField>
+        prepend-icon="key-line"
+      />
 
       <RuiTooltip :open-delay="400" :popper="{ placement: 'top' }">
         <template #activator>

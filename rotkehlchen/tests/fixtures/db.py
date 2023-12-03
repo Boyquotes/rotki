@@ -3,7 +3,8 @@ import sys
 from collections.abc import Generator
 from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, Optional
+from shutil import rmtree
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -11,7 +12,7 @@ import pytest
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.balances.manual import ManuallyTrackedBalance
 from rotkehlchen.chain.accounts import BlockchainAccounts
-from rotkehlchen.constants.misc import DEFAULT_SQL_VM_INSTRUCTIONS_CB
+from rotkehlchen.constants.misc import DEFAULT_SQL_VM_INSTRUCTIONS_CB, USERSDIR_NAME
 from rotkehlchen.db.dbhandler import DBHandler
 from rotkehlchen.tests.utils.database import (
     _use_prepared_db,
@@ -34,15 +35,16 @@ def fixture_username():
 
 
 @pytest.fixture(name='ignored_assets')
-def fixture_ignored_assets() -> Optional[list[Asset]]:
+def fixture_ignored_assets() -> list[Asset] | None:
     return None
 
 
 @pytest.fixture(name='user_data_dir')
 def fixture_user_data_dir(data_dir, username) -> Path:
-    """Create and return the user data directory"""
-    user_data_dir = data_dir / username
-    user_data_dir.mkdir(exist_ok=True)
+    """Create and return the user data directory. Clean up old directory if existing"""
+    user_data_dir = data_dir / USERSDIR_NAME / username
+    rmtree(user_data_dir, ignore_errors=True)
+    user_data_dir.mkdir(parents=True, exist_ok=True)
     return user_data_dir
 
 
@@ -73,23 +75,23 @@ def fixture_sql_vm_instructions_cb() -> int:
 
 
 def _init_database(
-        data_dir: Path,
+        user_data_dir: Path,
         password: str,
         msg_aggregator: MessagesAggregator,
-        db_settings: Optional[dict[str, Any]],
-        ignored_assets: Optional[list[Asset]],
+        db_settings: dict[str, Any] | None,
+        ignored_assets: list[Asset] | None,
         blockchain_accounts: BlockchainAccounts,
         include_etherscan_key: bool,
         include_cryptocompare_key: bool,
         tags: list[dict[str, Any]],
         manually_tracked_balances: list[ManuallyTrackedBalance],
         data_migration_version: int,
-        use_custom_database: Optional[str],
+        use_custom_database: str | None,
         sql_vm_instructions_cb: int,
         perform_upgrades_at_unlock: bool,
 ) -> DBHandler:
     if use_custom_database is not None:
-        _use_prepared_db(data_dir, use_custom_database)
+        _use_prepared_db(user_data_dir, use_custom_database)
 
     with ExitStack() as stack:
         if use_custom_database is not None:
@@ -102,7 +104,7 @@ def _init_database(
             )
             stack.enter_context(upgrades_patch)
         db = DBHandler(
-            user_data_dir=data_dir,
+            user_data_dir=user_data_dir,
             password=password,
             msg_aggregator=msg_aggregator,
             initial_settings=None,
@@ -139,12 +141,12 @@ def database(
         new_db_unlock_actions,
         sql_vm_instructions_cb,
         perform_upgrades_at_unlock,
-) -> Generator[Optional[DBHandler], None, None]:
+) -> Generator[DBHandler | None, None, None]:
     if not start_with_logged_in_user:
         yield None
     else:
         db_handler = _init_database(
-            data_dir=user_data_dir,
+            user_data_dir=user_data_dir,
             msg_aggregator=function_scope_messages_aggregator,
             password=db_password,
             db_settings=db_settings,
@@ -167,10 +169,10 @@ def database(
 
 
 @pytest.fixture(name='db_settings')
-def fixture_db_settings() -> Optional[dict[str, Any]]:
+def fixture_db_settings() -> dict[str, Any] | None:
     return None
 
 
 @pytest.fixture(name='use_custom_database')
-def fixture_use_custom_database() -> Optional[str]:
+def fixture_use_custom_database() -> str | None:
     return None

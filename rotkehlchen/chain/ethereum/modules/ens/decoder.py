@@ -1,11 +1,10 @@
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import content_hash
 from ens import ENS
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.utils import TokenEncounterInfo, get_or_create_evm_token
 from rotkehlchen.chain.ethereum.abi import decode_event_data_abi_str
 from rotkehlchen.chain.ethereum.graph import Graph
@@ -27,6 +26,7 @@ from rotkehlchen.globaldb.cache import (
     globaldb_set_unique_cache_value,
 )
 from rotkehlchen.globaldb.handler import GlobalDBHandler
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import CacheType, ChecksumEvmAddress, EvmTokenKind
 from rotkehlchen.utils.misc import from_wei, hex_or_bytes_to_address
@@ -198,7 +198,7 @@ class EnsDecoder(GovernableDecoderInterface, CustomizableDateMixin):
             if event.event_type == HistoryEventType.SPEND and event.asset == A_ETH and event.balance.amount == checked_cost and event.address == context.tx_log.address:  # noqa: E501
                 event.balance.amount -= refund_amount  # get correct amount spent
                 event.event_type = HistoryEventType.RENEW
-                event.event_subtype = HistoryEventSubType.NFT
+                event.event_subtype = HistoryEventSubType.NONE
                 event.counterparty = CPT_ENS
                 event.notes = f'Renew ENS name {fullname} for {event.balance.amount} ETH until {self.timestamp_to_date(expires)}'  # noqa: E501
 
@@ -296,7 +296,7 @@ class EnsDecoder(GovernableDecoderInterface, CustomizableDateMixin):
         ))
         return DEFAULT_DECODING_OUTPUT
 
-    def _get_name_to_show(self, node: bytes) -> Optional[str]:
+    def _get_name_to_show(self, node: bytes) -> str | None:
         """Try to find the name associated with the ENS namehash/node that is being modified
 
         Returns the fullname

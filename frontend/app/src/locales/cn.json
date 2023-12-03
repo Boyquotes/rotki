@@ -61,7 +61,7 @@
       "addresses": "地址",
       "addresses_entries": "无条目 | {count} 个唯一条目 | {count} 个唯一条目",
       "addresses_hint": "插入多个逗号分隔的地址",
-      "blockchain": "选择区块链",
+      "blockchain": "选择区块链 | 选择区块链",
       "btc": {
         "derivation_path": "推导路径",
         "derivation_path_hint": "可选",
@@ -134,6 +134,7 @@
   },
   "account_settings_display": {
     "account_asset_movement": "考虑了账户资产变动费用:",
+    "cost_basis_fees": "考虑了成本基础费用:",
     "cost_basis_method": "成本基础方法:",
     "crypto2crypto": "加密到加密交易被考虑在内:",
     "days": "{days} 天",
@@ -150,6 +151,7 @@
       "labels": {
         "account_for_assets_movements": "考虑资产移动费用",
         "calculate_past_cost_basis": "创建报告时计算过去的成本基础",
+        "include_fees_in_cost_basis": "考虑成本基础费用",
         "cost_basis_method": "成本基础法",
         "eth_staking_taxable_after_withdrawal_enabled": "在启用提款之前，应该从会计中忽略 ETH 质押事件",
         "include_crypto2crypto": "考虑加密到加密交易",
@@ -560,6 +562,13 @@
       "error": {
         "description": "无法查询历史事件：{error}",
         "title": "历史事件查询"
+      },
+      "missing_rule": {
+        "title": "事件缺少会计规则",
+        "message": "该事件不会在会计中处理。要处理它，您必须选择以下选项之一：",
+        "re_decode": "重新编码事件",
+        "edit": "编辑事件",
+        "add_rule": "添加缺失的会计规则"
       }
     },
     "history_events_export": {
@@ -935,7 +944,7 @@
     "name": "rotki"
   },
   "asset_balances": {
-    "loading": "rotki 正在查询区块链，请稍候..."
+    "loading": "rotki 正在查询余额，请稍候..."
   },
   "asset_form": {
     "fetch_latest_icon": {
@@ -1441,7 +1450,6 @@
     "select_directory": "选择目录",
     "status": "地位",
     "total": "总计",
-    "tx": "Tx",
     "tx_hash": "交易哈希",
     "type": "类型",
     "unclaimed": "无人认领",
@@ -1487,16 +1495,16 @@
     "message": "正在连接到 rotki 后端"
   },
   "cost_basis_table": {
-    "complete": "（完成）",
+    "complete": "完成",
     "cost_basis": "成本基础",
     "headers": {
       "amount": "销售量",
       "full_amount": "事件获得总量",
       "rate": "{currency} 汇率",
       "remaining_amount": "卖出后剩余",
-      "taxable": "应税？"
+      "taxable": "应税"
     },
-    "incomplete": "（不完整）"
+    "incomplete": "不完整"
   },
   "create_account": {
     "credentials": {
@@ -1505,20 +1513,20 @@
       "label_password": "密码",
       "label_password_backup_reminder": "rotki 会将所有用户数据保存在本地。我明白如果我丢失密码，我将无法访问我的数据。我已经创建了密码的备份。",
       "label_password_repeat": "重复密码",
-      "label_username": "用户名",
+      "label_username": "个人资料名称",
       "password_sync_requirement": "请确保该帐户使用与最初备份的数据库相同的密码。如果输入不同的密码，您将无法访问数据库。",
       "validation": {
         "check_prompt": "确认您已阅读并创建了备份",
         "non_empty_password": "请提供密码",
         "non_empty_password_confirmation": "请提供密码确认",
-        "non_empty_username": "请提供用户名",
+        "non_empty_username": "請提供個人資料名稱",
         "password_confirmation_mismatch": "密码确认与提供的密码不匹配",
-        "valid_username": "用户名必须仅包含字母数字字符，不得包含空格"
+        "valid_username": "設定檔名稱必須僅包含字母數字字元且不能包含空格"
       }
     },
     "have_account": {
       "description": "已经有账户了？",
-      "log_in": "登录"
+      "log_in": "解锁您的帐户"
     },
     "introduction": {
       "description": "rotki 是一个尊重您隐私的本地应用程序。\n\nrotki 账户使用您的密码和 {highlight} 进行加密。\n\n您在此处创建的帐户仅适用于应用程序，在网页上我们使用不同的数据库。",
@@ -1641,7 +1649,7 @@
               "location": "这是可选的。如果指定，位置余额数据将自动调整。如果没有，您必须手动更新位置余额数据。"
             },
             "nft": "NFT",
-            "nft_hint": "接受格式： \"_nft_{ETH address}_{collection number}\"",
+            "nft_hint": "接受格式： \"_nft_{'ETH address'}_{'collection number'}\"",
             "optional": "可选",
             "preview": {
               "from": "从",
@@ -1915,7 +1923,11 @@
     }
   },
   "error": {
-    "process_running": "一个 rotki 后端进程已经在运行。已知这会导致应用程序的运行出现问题。请终止这些进程 pids: [{pids}] 并重新启动应用程序。"
+    "process_running": "一个 rotki 后端进程已经在运行。已知这会导致应用程序的运行出现问题。请终止这些进程 pids: [{pids}] 并重新启动应用程序。",
+    "generic": {
+      "title": "出了些问题",
+      "message": "我们在处理您的请求时遇到内部错误。如果此问题仍然存在，请联系我们的支持团队并提供以下详细信息：\\n错误代码：{code}\\n错误消息：{message}\\n路径：{path}"
+    }
   },
   "error_screen": {
     "backend_error": "后端有问题。",
@@ -2064,12 +2076,18 @@
     "tx_url": "交易将在 {txUrl} 打开"
   },
   "external_services": {
+    "api_key": "API key",
     "beaconchain": {
       "delete_tooltip": "删除 Beaconcha.in API 密钥",
       "description": "rotki 使用 Beaconcha.in 獲取有關您投資組合中 ETH 質押的信息。 只有在您受到速率限制時才需要 API 密鑰。",
       "hint": "输入您的 Beaconcha.in API 密钥",
-      "label": "API key",
       "title": "Beaconcha.in"
+    },
+    "blockscout": {
+      "delete_tooltip": "删除 Blockscout API 密钥",
+      "description": "rotki 使用 Blockscout 获取有关 ETH 提现查询等信息。仅当您受到速率限制时才需要 API 密钥。",
+      "hint": "输入您的 Blockscout API 密钥",
+      "title": "Blockscout"
     },
     "confirmation": {
       "message": "您确定要删除此 API 密钥吗？",
@@ -2079,14 +2097,12 @@
       "delete_tooltip": "删除 the Covalent API key",
       "description": "rotki可以使用Covalent获取各种链的历史数据",
       "hint": "输入您的 Covalent API 密钥",
-      "label": "API key",
       "title": "Covalent"
     },
     "cryptocompare": {
       "delete_tooltip": "删除 CryptoCompare API 密钥",
       "description": "rotki 使用 cryptocompare 来获取您投资组合中资产的价格信息。只有当您拥有大量资产并且受到速率限制时才需要 API 密钥。",
       "hint": "输入您的 CryptoCompare API 密钥",
-      "label": "API key",
       "title": "加密比较"
     },
     "delete_error": {
@@ -2096,14 +2112,12 @@
       "delete_tooltip": "删除 {chain} Etherscan API 密钥",
       "description": "如果您不使用自己的节点，建议用于任何 EVM 区块链余额或交易。",
       "hint": "输入您的 {chain} Etherscan API 密钥",
-      "label": "API key",
       "title": "Etherscan"
     },
     "loopring": {
       "delete_tooltip": "删除您的 Loopring API key",
       "description": "用于查询路印协议中的余额。此API密钥只能查询生成此密钥的账户。",
       "hint": "输入您的 Loopring API 密钥",
-      "label": "API key",
       "not_enabled": "路印协议模块未启用。除非您启用路印协议模块，否则您的余额将不会被检索",
       "settings": "设置",
       "title": "Loopring"
@@ -2112,7 +2126,6 @@
       "delete_tooltip": "删除你的 OpenSea API key",
       "description": "用于查询OpenSea的NFT信息和余额。",
       "hint": "输入您的 OpenSea API key",
-      "label": "API Key",
       "link": "您可以申请 an API key {link}",
       "title": "Opensea"
     },
@@ -2328,7 +2341,8 @@
       "language": "选择的语言",
       "treat_eth2_as_eth": "应将 ETH2 (Staked ETH) 视为 ETH",
       "version_update_check": "在应用中设置版本更新检查周期",
-      "version_update_check_enabled": "启用"
+      "version_update_check_enabled": "启用",
+      "chains_to_skip_detection": "跳过自动检测的 EVM 链"
     },
     "language_contribution_tooltip": "此功能是实验性的，对于某些语言可能无法按预期工作。这是因为应用程序中的所有静态句子都必须手动翻译，这是一个漫长而持续的过程。因此，我们需要您的贡献来加快速度 起来。单击此处了解更多信息。",
     "nft_setting": {
@@ -2418,6 +2432,10 @@
         "error": "错误设置版本更新检查频率",
         "invalid_frequency": "周期必须在 {start} 和 {end} 小时之间",
         "non_empty": "请输入小时数"
+      },
+      "chains_to_skip_detection": {
+        "error": "错误设置跳过自动令牌检测的 EVM 链",
+        "success": "成功保存的跳过自动令牌检测的 EVM 链"
       }
     },
     "version_update_check_hint": "多久（以小时为单位）检查您的应用程序版本以进行更新"
@@ -2757,7 +2775,7 @@
   },
   "login": {
     "button_no_account": "没有帐户？",
-    "button_signup": "报名",
+    "button_create_account": "创建账户",
     "credential_error": {
       "description": "如果您尚未创建应用帐户，则需要创建应用帐户才能登录。",
       "support": "如果您需要帮助，请通过我们的 Discord 支持渠道联系我们。",
@@ -2780,7 +2798,7 @@
       "welcome": "欢迎！ 请输入您的详细信息。"
     },
     "label_password": "密码",
-    "label_username": "用户名",
+    "label_username": "个人资料名称",
     "logout": "注销",
     "migrating_data": {
       "current": "已应用数据迁移 {currentVersion} 的 {totalSteps} 步 {currentStep}。.",
@@ -2789,14 +2807,14 @@
     },
     "remember_password": "记住密码d",
     "remember_password_tooltip": "密码将保存在本地计算机上的密码管理工具中（例如 MacOS 中的钥匙串）",
-    "remember_username": "记住用户名",
+    "remember_username": "記住個人資料名稱",
     "sync_error": {
       "local_modified": "本地最后修改时间：{0}",
       "question": "你想更换你的本地数据库吗？",
       "remote_modified": "远程最后修改：{0}",
       "title": "数据库同步所需的用户操作"
     },
-    "title": "登录",
+    "title": "解锁账户",
     "upgrading_db": {
       "current": "已应用数据库升级 v{currentVersion} 的 {totalSteps} 步 {currentStep}。",
       "title": "数据库升级",
@@ -2804,12 +2822,12 @@
     },
     "validation": {
       "non_empty_password": "请提供密码",
-      "non_empty_username": "请提供用户名",
-      "valid_username": "用户名必须只包含字母数字字符且不能有空格"
+      "non_empty_username": "請提供個人資料名稱",
+      "valid_username": "設定檔名稱必須僅包含字母數字字元且不能包含空格"
     },
     "welcome_description": "欢迎使用保护您隐私的开源投资组合管理器。",
     "welcome_title": "欢迎来到 rotki",
-    "welcome_update_message": "登录以探索我们所做的更改。"
+    "welcome_update_message": "解锁您的帐户以探索我们所做的更改。"
   },
   "macos_unsupported": {
     "header": "不支持的 macOS 版本",
@@ -3115,7 +3133,7 @@
     },
     "missing_api_key": {
       "action": "回车键",
-      "message": "您没有配置 {location} {service} API 密钥。 rotki {service} 查询仍然有效，但会很慢。如果你没有使用自己的{location}节点，建议去{url}，创建一个API密钥，然后在rotki的外部服务凭证设置中输入它",
+      "message": "您没有配置 {location} {service} API 密钥。 rotki {location} {service} 查询仍然有效，但会很慢。如果你没有使用自己的{location}节点，建议去{url}，创建一个API密钥，然后在rotki的外部服务凭证设置中输入它",
       "title": "{location} {service} API 密钥"
     },
     "new_detected_token": {
@@ -3437,12 +3455,13 @@
     "to_asset": "To Asset"
   },
   "price_oracle_selection": {
-    "hint": "* 禁用所有预言机将无法查询资产价格。"
+    "hint": "* 禁用所有预言机将导致无法查询资产价格。您可能需要单击“刷新价格”来应用更改。"
   },
   "price_oracle_settings": {
     "data_name": "价格预言机",
     "historic_prices": "历史价格",
     "latest_prices": "最新价格",
+    "latest_prices_update": "最新订单价格已更新。您可能需要单击“刷新价格”按钮来应用更改。",
     "subtitle": "管理以何种顺序使用哪些价格预言机。",
     "title": "价格预言机设置"
   },
@@ -3969,9 +3988,6 @@
       },
       "title": "evm交易查询状态"
     },
-    "redecode_events": {
-      "title": "重新解码 EVM 事件"
-    },
     "refresh_tooltip": "获取最新事件",
     "title": "历史事件",
     "unignore": "在会计中忽略交易"
@@ -3997,7 +4013,7 @@
     }
   },
   "uniswap": {
-    "assets_non_premium": "升级到 {0} 以查看资产信息",
+    "assets_non_premium": "升级到 @:uniswap.premium 以查看资产信息",
     "loading": "请稍候，您的流动资金池正在加载...",
     "loading_non_premium": "加载流动资金池余额可能需要一段时间......考虑升级到 {0} 以加快加载时间。",
     "premium": "溢价",
@@ -4020,7 +4036,6 @@
       "message": "安装应用程序更新时出错：{message}"
     },
     "messages": "新版本的 rotki 可用。请参阅 {releaseNotes}。",
-    "progress": "{percentage} %",
     "release_notes": "发行说明",
     "restart": "rotki 将立即重启以应用更新。"
   },

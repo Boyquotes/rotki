@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import { CollectionCommonFields } from '@/types/collection';
-import { type PaginationRequestPayload } from '@/types/common';
+import {
+  type ConflictResolutionStrategy,
+  type PaginationRequestPayload
+} from '@/types/common';
 
 export enum AccountingTreatment {
-  SWAP = 'swap',
-  SWAP_WITH_FEE = 'swap with fee'
+  SWAP = 'swap'
 }
 
 const AccountingTreatmentEnum = z.nativeEnum(AccountingTreatment);
@@ -57,3 +59,32 @@ export interface AccountingRuleLinkedSettingMap {
   label: string;
   state: boolean;
 }
+
+export const AccountingRuleConflict = z.object({
+  localId: z.number(),
+  localData: AccountingRule,
+  remoteData: AccountingRule
+});
+
+export type AccountingRuleConflict = z.infer<typeof AccountingRuleConflict>;
+
+export const AccountingRuleConflictCollectionResponse =
+  CollectionCommonFields.extend({
+    entries: z.array(AccountingRuleConflict)
+  });
+
+export interface AccountingRuleConflictRequestPayload
+  extends PaginationRequestPayload<AccountingRuleConflict> {}
+
+export interface AccountingRuleConflictAllResolution {
+  solveAllUsing: ConflictResolutionStrategy;
+}
+
+export interface AccountingRuleConflictManualResolution {
+  localId: string;
+  solveUsing: ConflictResolutionStrategy;
+}
+
+export type AccountingRuleConflictResolution =
+  | AccountingRuleConflictAllResolution
+  | { conflicts: AccountingRuleConflictManualResolution[] };

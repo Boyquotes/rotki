@@ -60,7 +60,6 @@ const {
   value,
   asset,
   fiatCurrency: sourceCurrency,
-  showCurrency,
   priceOfAsset,
   priceAsset,
   integer,
@@ -106,7 +105,7 @@ const { assetSymbol } = useAssetInfoRetrieval();
 
 const timestampToUse = computed(() => {
   const timestampVal = get(timestamp);
-  return get(milliseconds) ? Math.round(timestampVal / 1000) : timestampVal;
+  return get(milliseconds) ? Math.floor(timestampVal / 1000) : timestampVal;
 });
 
 const evaluating = or(
@@ -281,13 +280,13 @@ const comparisonSymbol: ComputedRef<'' | '<' | '>'> = computed(() => {
   return '';
 });
 
-const shownCurrency: ComputedRef<ShownCurrency> = computed(() => {
-  const show = get(showCurrency);
-  return show === 'none' && !!get(sourceCurrency) ? 'symbol' : show;
+const defaultShownCurrency: ComputedRef<ShownCurrency> = computed(() => {
+  const type = props.showCurrency;
+  return type === 'none' && !!get(sourceCurrency) ? 'symbol' : type;
 });
 
 const shouldShowCurrency: ComputedRef<boolean> = computed(
-  () => !get(isNaN) && !!(get(shownCurrency) !== 'none' || get(asset))
+  () => !get(isNaN) && !!(get(defaultShownCurrency) !== 'none' || get(asset))
 );
 
 // Copy
@@ -331,7 +330,7 @@ const displayAsset = computed(() => {
     return symb;
   }
 
-  const show = get(showCurrency);
+  const show = get(defaultShownCurrency);
   const value = get(displayCurrency);
 
   if (show === 'ticker') {
@@ -345,14 +344,14 @@ const displayAsset = computed(() => {
   return '';
 });
 
-const [DefineSymbol, ReuseSymbol] = createReusableTemplate();
+const [DefineSymbol, ReuseSymbol] = createReusableTemplate<{ name: string }>();
 </script>
 
 <template>
-  <div class="inline-block items-baseline">
-    <DefineSymbol>
+  <div class="inline-flex items-baseline">
+    <DefineSymbol #default="{ name }">
       <span data-cy="display-currency" class="truncate max-w-[5rem]">
-        {{ displayAsset }}
+        {{ name }}
       </span>
     </DefineSymbol>
 
@@ -360,14 +359,10 @@ const [DefineSymbol, ReuseSymbol] = createReusableTemplate();
       v-if="timestamp < 0 && isManualPrice"
       :popper="{ placement: 'top' }"
       :open-delay="400"
+      class="self-center mr-2 cursor-pointer"
     >
       <template #activator>
-        <RuiIcon
-          class="mr-3 mb-1 inline cursor-pointer"
-          size="16"
-          color="warning"
-          name="sparkling-line"
-        />
+        <RuiIcon size="16" color="warning" name="sparkling-line" />
       </template>
 
       {{ t('amount_display.manual_tooltip') }}
@@ -376,16 +371,15 @@ const [DefineSymbol, ReuseSymbol] = createReusableTemplate();
     <span
       :class="[
         {
-          [css.blur]: !shouldShowAmount,
+          blur: !shouldShowAmount,
           'text-rui-success': pnl && displayValue.gt(0),
           'text-rui-error': pnl && displayValue.lt(0),
           [css.xl]: xl,
-          'skeleton min-w-[3.5rem] max-w-[4rem] min-h-[1.3rem]': anyLoading
+          [`skeleton min-w-[3.5rem] max-w-[4rem] ${css.loading}`]: anyLoading
         }
       ]"
-      class="flex gap-1 items-center inline-block transition duration-200 rounded-lg"
+      class="inline-flex items-center gap-1 transition duration-200 rounded-lg"
       data-cy="amount-display"
-      @click="copy()"
     >
       <template v-if="!anyLoading">
         <template v-if="comparisonSymbol">
@@ -394,14 +388,21 @@ const [DefineSymbol, ReuseSymbol] = createReusableTemplate();
 
         <ReuseSymbol
           v-if="shouldShowCurrency && currencyLocation === 'before'"
+          :name="displayAsset"
         />
 
-        <CopyTooltip class="cursor-pointer" :copied="copied" :tooltip="tooltip">
+        <CopyTooltip
+          :copied="copied"
+          :tooltip="tooltip"
+          data-cy="display-amount"
+          @click="copy()"
+        >
           {{ renderedValue }}
         </CopyTooltip>
 
         <ReuseSymbol
           v-if="shouldShowCurrency && currencyLocation === 'after'"
+          :name="displayAsset"
         />
       </template>
     </span>
@@ -409,17 +410,19 @@ const [DefineSymbol, ReuseSymbol] = createReusableTemplate();
 </template>
 
 <style module lang="scss">
-.blur {
-  filter: blur(0.75em);
-}
-
 .xl {
   font-size: 3.5em;
   line-height: 4rem;
 
-  @media (max-width: 450px) {
+  @media (max-width: 600px) {
     font-size: 2.4em;
-    line-height: 2.4rem;
+    line-height: 3rem;
+  }
+}
+
+.loading {
+  &:after {
+    content: '\200B';
   }
 }
 </style>

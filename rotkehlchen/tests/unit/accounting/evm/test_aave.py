@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 
 import pytest
+from more_itertools import peekable
 
 from rotkehlchen.accounting.cost_basis.base import (
     AssetAcquisitionEvent,
@@ -10,14 +11,14 @@ from rotkehlchen.accounting.cost_basis.base import (
 from rotkehlchen.accounting.mixins.event import AccountingEventType
 from rotkehlchen.accounting.pnl import PNL
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
 from rotkehlchen.accounting.structures.processed_event import ProcessedAccountingEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.chain.ethereum.modules.aave.constants import CPT_AAVE_V2
 from rotkehlchen.constants.assets import A_DAI, A_REN
 from rotkehlchen.constants.misc import ONE, ZERO
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.factories import make_evm_address, make_evm_tx_hash
 from rotkehlchen.types import Location, Price, Timestamp
 from rotkehlchen.utils.misc import ts_sec_to_ms
@@ -35,7 +36,7 @@ HASH1, HASH2 = make_evm_tx_hash(), make_evm_tx_hash()
 @pytest.mark.parametrize('accounting_initialize_parameters', [True])
 def test_v2_withdraw(accountant: 'Accountant'):
     pot = accountant.pots[0]
-    events_iterator = iter([EvmEvent(
+    events_iterator = peekable([EvmEvent(
         tx_hash=HASH1,
         sequence_index=0,
         timestamp=TSMS1,
@@ -85,7 +86,7 @@ def test_v2_withdraw(accountant: 'Accountant'):
         counterparty=CPT_AAVE_V2,
     )])
     for event in events_iterator:
-        pot.events_accountant.process(event=event, events_iterator=events_iterator)
+        pot.events_accountant.process(event=event, events_iterator=events_iterator)  # type: ignore
 
     expected_events = [
         ProcessedAccountingEvent(
@@ -137,7 +138,7 @@ def test_v2_withdraw(accountant: 'Accountant'):
 @pytest.mark.parametrize('accounting_initialize_parameters', [True])
 def test_v2_payback(accountant: 'Accountant'):
     pot = accountant.pots[0]
-    events_iterator = iter([EvmEvent(
+    events_iterator = peekable([EvmEvent(
         tx_hash=HASH1,
         sequence_index=0,
         timestamp=TSMS1,
@@ -187,7 +188,7 @@ def test_v2_payback(accountant: 'Accountant'):
         counterparty=CPT_AAVE_V2,
     )])
     for event in events_iterator:
-        pot.events_accountant.process(event=event, events_iterator=events_iterator)
+        pot.events_accountant.process(event=event, events_iterator=events_iterator)  # type: ignore
 
     matched_acquisitions = [MatchedAcquisition(
         amount=FVal(50),

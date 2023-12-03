@@ -6,7 +6,7 @@ from base64 import b64encode
 from collections import defaultdict
 from http import HTTPStatus
 from json.decoder import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Union, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import gevent
 import requests
@@ -49,8 +49,10 @@ from rotkehlchen.utils.mixins.lockable import protect_with_lock
 from rotkehlchen.utils.serialization import jsonloads_dict, jsonloads_list
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.base import HistoryEvent
+    from collections.abc import Callable
+
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.history.events.structures.base import HistoryEvent
 
 
 logger = logging.getLogger(__name__)
@@ -170,7 +172,7 @@ class Gemini(ExchangeInterface):
             self,
             method: Literal['get', 'post'],
             endpoint: str,
-            options: Optional[dict[str, Any]] = None,
+            options: dict[str, Any] | None = None,
     ) -> requests.Response:
         """Queries endpoint until anything but 429 is returned
 
@@ -180,6 +182,7 @@ class Gemini(ExchangeInterface):
         v_endpoint = f'/v1/{endpoint}'
         url = f'{self.base_uri}{v_endpoint}'
         retries_left = CachedSettings().get_query_retry_limit()
+        retry_limit = CachedSettings().get_query_retry_limit()
         while retries_left > 0:
             if endpoint in {'mytrades', 'balances', 'transfers', 'roles', 'balances/earn'}:
                 # private endpoints
@@ -209,7 +212,7 @@ class Gemini(ExchangeInterface):
 
             if response.status_code == HTTPStatus.TOO_MANY_REQUESTS:
                 # Backoff a bit by sleeping. Sleep more, the more retries have been made
-                gevent.sleep(CachedSettings().get_query_retry_limit() / retries_left)
+                gevent.sleep(retry_limit / retries_left)
                 retries_left -= 1
             else:
                 # get out of the retry loop, we did not get 429 complaint
@@ -248,7 +251,7 @@ class Gemini(ExchangeInterface):
     def _private_api_query(
             self,
             endpoint: Literal['roles'],
-            options: Optional[dict[str, Any]] = None,
+            options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         ...
 
@@ -256,15 +259,15 @@ class Gemini(ExchangeInterface):
     def _private_api_query(
             self,
             endpoint: Literal['balances', 'mytrades', 'transfers', 'balances/earn'],
-            options: Optional[dict[str, Any]] = None,
+            options: dict[str, Any] | None = None,
     ) -> list[Any]:
         ...
 
     def _private_api_query(
             self,
             endpoint: str,
-            options: Optional[dict[str, Any]] = None,
-    ) -> Union[dict[str, Any], list[Any]]:
+            options: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | list[Any]:
         """Performs a Gemini API Query for a private endpoint
 
         You can optionally provide extra arguments to the endpoint via the options argument.
@@ -274,7 +277,7 @@ class Gemini(ExchangeInterface):
         permissions for the endpoint
         """
         response = self._query_continuously(method='post', endpoint=endpoint, options=options)
-        json_ret: Union[list[Any], dict[str, Any]]
+        json_ret: list[Any] | dict[str, Any]
         if response.status_code == HTTPStatus.FORBIDDEN:
             raise GeminiPermissionError(
                 f'API key does not have permission for {endpoint}',
@@ -289,7 +292,7 @@ class Gemini(ExchangeInterface):
                 f'status code: {response.status_code} and text: {response.text}',
             )
 
-        deserialization_fn: Union[Callable[[str], dict[str, Any]], Callable[[str], list[Any]]]
+        deserialization_fn: Callable[[str], dict[str, Any]] | Callable[[str], list[Any]]
         deserialization_fn = jsonloads_dict if endpoint == 'roles' else jsonloads_list
 
         try:

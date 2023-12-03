@@ -168,7 +168,9 @@ const isIgnored = (asset: string) => get(isAssetIgnored(asset));
             </template>
             <VList>
               <VListItem link @click="ignoreAsset(item.asset)">
-                <VListItemTitle>{{ t('assets.ignore') }}</VListItemTitle>
+                <VListItemTitle>
+                  {{ t('assets.ignore') }}
+                </VListItemTitle>
               </VListItem>
             </VList>
           </VMenu>
@@ -200,6 +202,7 @@ const isIgnored = (asset: string) => get(isAssetIgnored(asset));
             :headers="childHeaders"
             :items="item.acquisitions"
             :container="tableContainer"
+            disable-floating-header
           >
             <template #item.time="{ item: childItem }">
               <DateDisplay :timestamp="childItem.time" />

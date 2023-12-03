@@ -18,7 +18,7 @@ const props = withDefaults(
     chain?: Chains;
     evmChain?: string;
     buttons?: boolean;
-    small?: boolean;
+    size?: number | string;
     truncateLength?: number;
     type?: keyof ExplorerUrls;
     disableScramble?: boolean;
@@ -33,7 +33,7 @@ const props = withDefaults(
     chain: Blockchain.ETH,
     evmChain: undefined,
     buttons: false,
-    small: false,
+    size: 12,
     truncateLength: 4,
     type: 'address',
     disableScramble: false
@@ -130,13 +130,13 @@ const { href, onLinkClick } = useLinks(url);
     </template>
 
     <template v-if="!linkOnly && !buttons">
-      <span v-if="fullAddress" :class="{ 'blur-content': !shouldShowAmount }">
+      <span v-if="fullAddress" :class="{ blur: !shouldShowAmount }">
         {{ displayText }}
       </span>
 
       <RuiTooltip v-else :popper="{ placement: 'top' }" :open-delay="400">
         <template #activator>
-          <span :class="{ 'blur-content': !shouldShowAmount }">
+          <span :class="{ blur: !shouldShowAmount }">
             <template v-if="aliasName">{{ aliasName }}</template>
             <template v-else>
               {{ truncateAddress(displayText, truncateLength) }}
@@ -162,7 +162,7 @@ const { href, onLinkClick } = useLinks(url);
             color="primary"
             @click="copy(text)"
           >
-            <RuiIcon name="file-copy-line" :size="small ? 14 : 12" />
+            <RuiIcon name="file-copy-line" :size="size" />
           </RuiButton>
         </template>
 
@@ -187,7 +187,7 @@ const { href, onLinkClick } = useLinks(url);
             target="_blank"
             @click="onLinkClick()"
           >
-            <RuiIcon name="external-link-line" :size="small ? 14 : 12" />
+            <RuiIcon name="external-link-line" :size="size" />
           </RuiButton>
         </template>
 
@@ -197,9 +197,3 @@ const { href, onLinkClick } = useLinks(url);
     </div>
   </div>
 </template>
-
-<style scoped lang="scss">
-.blur-content {
-  filter: blur(0.3em);
-}
-</style>

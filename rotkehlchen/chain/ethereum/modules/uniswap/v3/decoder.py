@@ -1,8 +1,8 @@
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Literal, NamedTuple, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Optional
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import Asset, EvmToken
 from rotkehlchen.assets.utils import TokenEncounterInfo, get_or_create_evm_token
 from rotkehlchen.chain.ethereum.modules.uniswap.utils import decode_basic_uniswap_info
@@ -28,6 +28,7 @@ from rotkehlchen.constants.assets import A_ETH, A_WETH
 from rotkehlchen.constants.resolver import evm_address_to_identifier
 from rotkehlchen.errors.misc import RemoteError
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import ChainID, ChecksumEvmAddress, EvmTokenKind, EvmTransaction
 from rotkehlchen.utils.misc import hex_or_bytes_to_int, ts_ms_to_sec
@@ -35,10 +36,10 @@ from rotkehlchen.utils.misc import hex_or_bytes_to_int, ts_ms_to_sec
 from ..constants import CPT_UNISWAP_V2, CPT_UNISWAP_V3, UNISWAP_ICON, UNISWAP_LABEL
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.evm_event import EvmEvent
     from rotkehlchen.assets.asset import CryptoAsset
     from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
     from rotkehlchen.chain.evm.decoding.base import BaseDecoderTools
+    from rotkehlchen.history.events.structures.evm_event import EvmEvent
     from rotkehlchen.user_messages import MessagesAggregator
 
 logger = logging.getLogger(__name__)
@@ -52,8 +53,9 @@ COLLECT_LIQUIDITY_SIGNATURE = b"@\xd0\xef\xd1\xa5=`\xec\xbf@\x97\x1b\x9d\xaf}\xc
 UNISWAP_V3_NFT_MANAGER = string_to_evm_address('0xC36442b4a4522E871399CD717aBDD847Ab11FE88')
 UNISWAP_AUTO_ROUTER_V1 = string_to_evm_address('0xE592427A0AEce92De3Edee1F18E0157C05861564')
 UNISWAP_AUTO_ROUTER_V2 = string_to_evm_address('0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45')
+UNISWAP_UNIVERSAL_ROUTER = string_to_evm_address('0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD')
 
-UNISWAP_ROUTERS = {UNISWAP_AUTO_ROUTER_V1, UNISWAP_AUTO_ROUTER_V2}
+UNISWAP_ROUTERS = {UNISWAP_AUTO_ROUTER_V1, UNISWAP_AUTO_ROUTER_V2, UNISWAP_UNIVERSAL_ROUTER}
 
 
 class CryptoAssetAmount(NamedTuple):
@@ -62,12 +64,12 @@ class CryptoAssetAmount(NamedTuple):
     amount: FVal
 
 
-def _find_from_asset_and_amount(events: list['EvmEvent']) -> Optional[tuple[Asset, FVal]]:
+def _find_from_asset_and_amount(events: list['EvmEvent']) -> tuple[Asset, FVal] | None:
     """
     Searches for uniswap v2/v3 swaps, detects `from_asset` and sums up `from_amount`.
     Works only with `from_asset` being the same for all swaps.
     """
-    from_asset: Optional[Asset] = None
+    from_asset: Asset | None = None
     from_amount = ZERO
     for event in events:
         if (
@@ -87,13 +89,13 @@ def _find_from_asset_and_amount(events: list['EvmEvent']) -> Optional[tuple[Asse
     return from_asset, from_amount
 
 
-def _find_to_asset_and_amount(events: list['EvmEvent']) -> Optional[tuple[Asset, FVal]]:
+def _find_to_asset_and_amount(events: list['EvmEvent']) -> tuple[Asset, FVal] | None:
     """
     Searches for uniswap v2/v3 swaps, detects `to_asset` and sums up `to_amount`.
     Works only with `to_asset` being the same for all swaps.
     Also works with a special case where there is only one receive event at the end.
     """
-    to_asset: Optional[Asset] = None
+    to_asset: Asset | None = None
     to_amount = ZERO
     for event in events:
         if (
@@ -158,7 +160,7 @@ class Uniswapv3Decoder(DecoderInterface):
 
     def _maybe_decode_v3_swap(
             self,
-            token: Optional[EvmToken],  # pylint: disable=unused-argument
+            token: EvmToken | None,  # pylint: disable=unused-argument
             tx_log: EvmTxReceiptLog,
             transaction: EvmTransaction,  # pylint: disable=unused-argument
             decoded_events: list['EvmEvent'],
@@ -204,7 +206,7 @@ class Uniswapv3Decoder(DecoderInterface):
             decoded_events: list['EvmEvent'],
             send_eth_event: 'EvmEvent',
             receive_eth_event: Optional['EvmEvent'],
-    ) -> Optional[SwapData]:
+    ) -> SwapData | None:
         """
         Decode a swap of ETH to a token. Such swap consists of 3 events:
         1. Sending ETH to the router.
@@ -230,7 +232,7 @@ class Uniswapv3Decoder(DecoderInterface):
             self,
             decoded_events: list['EvmEvent'],
             receive_eth_event: 'EvmEvent',
-    ) -> Optional[SwapData]:
+    ) -> SwapData | None:
         from_data = _find_from_asset_and_amount(decoded_events)
         if from_data is None:
             return None
@@ -245,7 +247,7 @@ class Uniswapv3Decoder(DecoderInterface):
     def _decode_token_to_token_swap(
             self,
             decoded_events: list['EvmEvent'],
-    ) -> Optional[SwapData]:
+    ) -> SwapData | None:
         from_data = _find_from_asset_and_amount(decoded_events)
         to_data = _find_to_asset_and_amount(decoded_events)
         if from_data is None or to_data is None:
@@ -404,7 +406,7 @@ class Uniswapv3Decoder(DecoderInterface):
 
         resolved_assets_and_amounts: list[CryptoAssetAmount] = []
         # index 2 -> first token in pair; index 3 -> second token in pair
-        for token, amount in zip(liquidity_pool_position_info[2:4], (amount0_raw, amount1_raw)):
+        for token, amount in zip(liquidity_pool_position_info[2:4], (amount0_raw, amount1_raw), strict=True):  # noqa: E501
             token_with_data: CryptoAsset = get_or_create_evm_token(
                 userdb=self.evm_inquirer.database,
                 evm_address=token,

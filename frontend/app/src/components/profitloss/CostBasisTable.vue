@@ -21,6 +21,10 @@ const { costBasis, currency } = toRefs(props);
 
 const panel = ref<number[]>([]);
 
+watch(costBasis, () => {
+  set(panel, []);
+});
+
 const css = useCssModule();
 
 const tableHeaders = computed<DataTableHeader[]>(() => [
@@ -48,7 +52,8 @@ const tableHeaders = computed<DataTableHeader[]>(() => [
   },
   {
     text: t('common.datetime'),
-    value: 'time'
+    value: 'time',
+    align: 'end'
   },
   {
     text: t('cost_basis_table.headers.taxable'),
@@ -93,22 +98,31 @@ const matchedAcquisitions = computed(
             </template>
           </VExpansionPanelHeader>
 
-          <VExpansionPanelContent>
-            <Card class="mt-4">
-              <template #title>
-                {{ t('cost_basis_table.cost_basis') }}
-                <span class="text-caption ml-2">
-                  {{
-                    costBasis.isComplete
-                      ? t('cost_basis_table.complete')
-                      : t('cost_basis_table.incomplete')
-                  }}
-                </span>
+          <VExpansionPanelContent class="pt-4">
+            <RuiCard>
+              <template #custom-header>
+                <div class="flex p-4 items-center gap-4">
+                  <h5 class="text-h5">
+                    {{ t('cost_basis_table.cost_basis') }}
+                  </h5>
+                  <RuiChip
+                    v-if="costBasis.isComplete"
+                    size="sm"
+                    color="success"
+                  >
+                    {{ t('cost_basis_table.complete') }}
+                  </RuiChip>
+                  <RuiChip v-else size="sm" color="error">
+                    {{ t('cost_basis_table.incomplete') }}
+                  </RuiChip>
+                </div>
               </template>
               <DataTable
                 :class="css.table"
                 :items="matchedAcquisitions"
                 :headers="tableHeaders"
+                disable-floating-header
+                disable-header-pagination
                 item-key="id"
                 sort-by="time"
               >
@@ -131,6 +145,7 @@ const matchedAcquisitions = computed(
                   <AmountDisplay
                     force-currency
                     :value="item.event.rate"
+                    show-currency="symbol"
                     :fiat-currency="currency"
                   />
                 </template>
@@ -138,10 +153,10 @@ const matchedAcquisitions = computed(
                   <DateDisplay :timestamp="item.event.timestamp" />
                 </template>
                 <template #item.taxable="{ item }">
-                  <VIcon v-if="item.taxable" color="success">mdi-check</VIcon>
+                  <SuccessDisplay :success="item.taxable" />
                 </template>
               </DataTable>
-            </Card>
+            </RuiCard>
           </VExpansionPanelContent>
         </VExpansionPanel>
       </VExpansionPanels>

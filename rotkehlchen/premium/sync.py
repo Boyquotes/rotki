@@ -1,9 +1,10 @@
 import logging
 import shutil
 from enum import Enum
-from typing import Any, Literal, NamedTuple, Optional, Union
+from typing import Any, Literal, NamedTuple
 
 from rotkehlchen.api.websockets.typedefs import WSMessageType
+from rotkehlchen.constants.misc import USERSDIR_NAME
 from rotkehlchen.data_handler import DataHandler
 from rotkehlchen.data_migrations.manager import DataMigrationManager
 from rotkehlchen.errors.api import PremiumAuthenticationError, RotkehlchenPermissionError
@@ -32,7 +33,7 @@ class SyncCheckResult(NamedTuple):
     can_sync: CanSync
     # If result is ASK_USER, what should the message be?
     message: str
-    payload: Optional[dict[str, Any]]
+    payload: dict[str, Any] | None
 
 
 class PremiumSyncManager:
@@ -47,7 +48,7 @@ class PremiumSyncManager:
         self.last_remote_data_upload_ts = 0  # gets populated only after the first API call
         self.data = data
         self.migration_manager = migration_manager
-        self.premium: Optional[Premium] = None
+        self.premium: Premium | None = None
 
     def _query_last_data_metadata(self) -> RemoteMetadata:
         """Query remote metadata and keep up to date the last remote data upload ts"""
@@ -160,7 +161,7 @@ class PremiumSyncManager:
     def maybe_upload_data_to_server(
             self,
             force_upload: bool = False,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """
         Returns a boolean value denoting whether we can upload the DB to the server.
         In case of error we also return a message to provide information to the user.
@@ -300,7 +301,7 @@ class PremiumSyncManager:
     def _abort_new_syncing_premium_user(
             self,
             username: str,
-            original_exception: Union[PremiumAuthenticationError, RemoteError],
+            original_exception: PremiumAuthenticationError | RemoteError,
     ) -> None:
         """At this point we are at a new user trying to create an account with
         premium API keys and we failed. But a directory was created. Remove it.
@@ -310,7 +311,7 @@ class PremiumSyncManager:
         self.data.logout()  # wipes self.data.user_data_dir, so store it
         shutil.move(
             user_data_dir,  # type: ignore
-            self.data.data_directory / f'auto_backup_{username}_{ts_now()}',
+            self.data.data_directory / USERSDIR_NAME / f'auto_backup_{username}_{ts_now()}',
         )
         raise PremiumAuthenticationError(
             f'Could not verify keys for the new account. {original_exception!s}',
@@ -318,12 +319,12 @@ class PremiumSyncManager:
 
     def try_premium_at_start(
             self,
-            given_premium_credentials: Optional[PremiumCredentials],
+            given_premium_credentials: PremiumCredentials | None,
             username: str,
             create_new: bool,
             sync_approval: Literal['yes', 'no', 'unknown'],
             sync_database: bool,
-    ) -> Optional[Premium]:
+    ) -> Premium | None:
         """
         Check if new user provided api pair or we already got one in the DB
 

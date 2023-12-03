@@ -11,12 +11,7 @@ import requests
 from rotkehlchen.accounting.constants import FREE_PNL_EVENTS_LIMIT, FREE_REPORTS_LOOKUP_LIMIT
 from rotkehlchen.accounting.mixins.event import AccountingEventType
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.base import HistoryEvent
-from rotkehlchen.accounting.structures.types import (
-    ActionType,
-    HistoryEventSubType,
-    HistoryEventType,
-)
+from rotkehlchen.accounting.structures.types import ActionType
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import A_BTC, A_DAI, A_EUR
 from rotkehlchen.db.history_events import DBHistoryEvents
@@ -24,6 +19,8 @@ from rotkehlchen.exchanges.data_structures import Trade
 from rotkehlchen.externalapis.cryptocompare import Cryptocompare
 from rotkehlchen.externalapis.defillama import Defillama
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.base import HistoryEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.history.price import PriceHistorian
 from rotkehlchen.history.types import HistoricalPriceOracle
 from rotkehlchen.tests.utils.api import (
@@ -64,6 +61,7 @@ if TYPE_CHECKING:
     {'include_fees_in_cost_basis': True},
     {'include_fees_in_cost_basis': False},
 ])
+@pytest.mark.parametrize('initialize_accounting_rules', [True])
 def test_query_history(rotkehlchen_api_server_with_exchanges, start_ts, end_ts):
     """Test that the history processing REST API endpoint works. Similar to test_history.py
 
@@ -283,6 +281,7 @@ def test_query_history_external_exchanges(rotkehlchen_api_server):
 @pytest.mark.parametrize('ethereum_accounts', [[ETH_ADDRESS1, ETH_ADDRESS2, ETH_ADDRESS3]])
 @pytest.mark.parametrize('mocked_price_queries', [prices])
 @pytest.mark.parametrize('ascending_timestamp', [False, True])
+@pytest.mark.parametrize('initialize_accounting_rules', [True])
 def test_query_pnl_report_events_pagination_filtering(
         rotkehlchen_api_server_with_exchanges,
         ascending_timestamp,
@@ -431,6 +430,7 @@ def test_history_debug_import(rotkehlchen_api_server):
 @pytest.mark.parametrize('have_decoders', [True])
 @pytest.mark.parametrize('number_of_eth_accounts', [0])
 @pytest.mark.parametrize('should_mock_price_queries', [False])
+@pytest.mark.parametrize('initialize_accounting_rules', [True])
 def test_missing_prices_in_pnl_report(rotkehlchen_api_server):
     """
     Test missing prices propagated during the PNL report

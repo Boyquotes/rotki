@@ -12,7 +12,6 @@ import {
 import { type CollectionResponse } from '@/types/collection';
 import {
   type AddTransactionHashPayload,
-  type AddressesAndEvmChainPayload,
   type EditHistoryEventPayload,
   HistoryEventDetail,
   type HistoryEventEntryWithMeta,
@@ -85,15 +84,30 @@ export const useHistoryEventsApi = () => {
     return handleResponse(response);
   };
 
+  const getUnDecodedTransactionEventsBreakdown =
+    async (): Promise<PendingTask> => {
+      const response = await api.instance.get<ActionResult<PendingTask>>(
+        '/blockchains/evm/transactions/decode',
+        {
+          params: snakeCaseTransformer({
+            asyncQuery: true
+          }),
+          validateStatus: validStatus
+        }
+      );
+
+      return handleResponse(response);
+    };
+
   const reDecodeMissingTransactionEvents = async <T>(
-    data: AddressesAndEvmChainPayload[],
+    evmChains: string[],
     asyncQuery = true
   ): Promise<T> => {
     const response = await api.instance.post<ActionResult<T>>(
       '/blockchains/evm/transactions/decode',
       snakeCaseTransformer({
         asyncQuery,
-        data
+        evmChains
       }),
       { validateStatus: validStatus }
     );
@@ -278,6 +292,7 @@ export const useHistoryEventsApi = () => {
     fetchEvmTransactionsTask,
     deleteEvmTransactions,
     decodeHistoryEvents,
+    getUnDecodedTransactionEventsBreakdown,
     reDecodeMissingTransactionEvents,
     addHistoryEvent,
     editHistoryEvent,

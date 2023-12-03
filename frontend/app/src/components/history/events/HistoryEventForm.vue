@@ -35,21 +35,19 @@ watchImmediate([groupHeader, editableItem], ([groupHeader, editableItem]) => {
 </script>
 
 <template>
-  <form class="history-event-form pt-4">
-    <div>
-      <VSelect
-        v-model="entryType"
-        data-cy="entry-type"
-        :items="historyEventEntryTypes"
-        :disabled="!!groupHeader"
-        outlined
-        label="Entry Type"
-        hide-details
-      >
-        <template #item="{ item }">{{ toCapitalCase(item) }}</template>
-        <template #selection="{ item }">{{ toCapitalCase(item) }}</template>
-      </VSelect>
-    </div>
+  <form class="history-event-form">
+    <VSelect
+      v-model="entryType"
+      data-cy="entry-type"
+      :items="historyEventEntryTypes"
+      :disabled="!!groupHeader"
+      outlined
+      label="Entry Type"
+      hide-details
+    >
+      <template #item="{ item }">{{ toCapitalCase(item) }}</template>
+      <template #selection="{ item }">{{ toCapitalCase(item) }}</template>
+    </VSelect>
 
     <RuiDivider class="my-8" />
 

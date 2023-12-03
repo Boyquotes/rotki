@@ -1,6 +1,7 @@
 import logging
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import requests
 
@@ -31,14 +32,14 @@ from rotkehlchen.utils.mixins.cacheable import CacheableMixIn
 from rotkehlchen.utils.mixins.lockable import LockableQueryMixIn, protect_with_lock
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.base import HistoryEvent
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.history.events.structures.base import HistoryEvent
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
 
-ExchangeQueryBalances = tuple[Optional[dict[AssetWithOracles, Balance]], str]
+ExchangeQueryBalances = tuple[dict[AssetWithOracles, Balance] | None, str]
 
 ExchangeHistoryFailCallback = Callable[[str], None]
 ExchangeHistoryNewStepCallback = Callable[[str], None]
@@ -150,7 +151,7 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
             self,
             start_ts: Timestamp,  # pylint: disable=unused-argument
             end_ts: Timestamp,  # pylint: disable=unused-argument
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Has to be implemented by exchanges if they have anything exchange specific
 
 
@@ -432,7 +433,7 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
             # has_premium True is fine here since the result of this is not user facing atm
             events = db.get_history_events(cursor, filter_query=filter_query, has_premium=True)
             if only_cache:
-                return events
+                return events  # type: ignore[return-value]  # HistoryBaseEntry vs HistoryEvent
 
             ranges = DBQueryRanges(self.db)
             location_string = f'{self.location!s}_history_events_{self.name}'
@@ -458,14 +459,14 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
                 )
             events.extend(new_events)
 
-        return events
+        return events  # type: ignore[return-value]  # HistoryBaseEntry vs HistoryEvent
 
     def query_history_with_callbacks(
             self,
             start_ts: Timestamp,
             end_ts: Timestamp,
             fail_callback: ExchangeHistoryFailCallback,
-            new_step_data: Optional[tuple[ExchangeHistoryNewStepCallback, str]] = None,
+            new_step_data: tuple[ExchangeHistoryNewStepCallback, str] | None = None,
     ) -> None:
         """Queries the historical event endpoints for this exchange and performs actions.
         The results are saved in the DB.

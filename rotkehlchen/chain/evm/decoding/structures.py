@@ -4,11 +4,11 @@ from typing import TYPE_CHECKING, Final, Literal, NamedTuple, Optional
 from rotkehlchen.types import ChecksumEvmAddress
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.evm_event import EvmEvent
-    from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
     from rotkehlchen.assets.asset import Asset, EvmToken
     from rotkehlchen.chain.evm.structures import EvmTxReceiptLog
     from rotkehlchen.fval import FVal
+    from rotkehlchen.history.events.structures.evm_event import EvmEvent
+    from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
     from rotkehlchen.types import EvmTransaction
 
 
@@ -21,13 +21,13 @@ class ActionItem(NamedTuple):
     amount: 'FVal'
     to_event_type: Optional['HistoryEventType'] = None
     to_event_subtype: Optional['HistoryEventSubType'] = None
-    to_notes: Optional[str] = None
-    to_counterparty: Optional[str] = None
-    to_address: Optional[ChecksumEvmAddress] = None
-    extra_data: Optional[dict] = None
+    to_notes: str | None = None
+    to_counterparty: str | None = None
+    to_address: ChecksumEvmAddress | None = None
+    extra_data: dict | None = None
     # Optional event data that pairs it with the event of the action item
     # Contains a tuple with the paired event and whether it's an out event (True) or in event
-    paired_event_data: Optional[tuple['EvmEvent', bool]] = None
+    paired_event_data: tuple['EvmEvent', bool] | None = None
 
 
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
@@ -68,7 +68,7 @@ class DecodingOutput:
     """
     event: Optional['EvmEvent'] = None
     action_items: list[ActionItem] = field(default_factory=list)
-    matched_counterparty: Optional[str] = None
+    matched_counterparty: str | None = None
     refresh_balances: bool = False
 
 
@@ -81,7 +81,7 @@ class TransferEnrichmentOutput(NamedTuple):
     - refresh_balances may be set to True if the user's on-chain balances in some protocols has
     changed (for example if the user has deposited / withdrawn funds from a curve gauge).
     """
-    matched_counterparty: Optional[str] = None
+    matched_counterparty: str | None = None
     refresh_balances: bool = False
 
 

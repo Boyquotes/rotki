@@ -1,17 +1,17 @@
 import json
 import logging
 import re
+import sys
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING
 
 import gevent
 from gevent.lock import Semaphore
 from pysqlcipher3 import dbapi2 as sqlcipher
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.eth2 import EthBlockEvent, EthWithdrawalEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
+from rotkehlchen.chain.structures import TimestampOrBlockRange
 from rotkehlchen.constants import ONE
 from rotkehlchen.constants.assets import A_ETH
 from rotkehlchen.constants.timing import HOUR_IN_SECONDS
@@ -20,23 +20,27 @@ from rotkehlchen.db.filtering import EvmEventFilterQuery
 from rotkehlchen.db.history_events import DBHistoryEvents
 from rotkehlchen.errors.api import PremiumPermissionError
 from rotkehlchen.errors.misc import InputError, RemoteError
+from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.eth2 import EthBlockEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.premium.premium import Premium
 from rotkehlchen.types import ChecksumEvmAddress, Eth2PubKey, Timestamp
 from rotkehlchen.user_messages import MessagesAggregator
 from rotkehlchen.utils.interfaces import EthereumModule
-from rotkehlchen.utils.misc import from_gwei, ts_ms_to_sec, ts_now, ts_sec_to_ms
+from rotkehlchen.utils.misc import from_gwei, ts_now
 
 from .constants import (
     CPT_ETH2,
     FREE_VALIDATORS_LIMIT,
-    LAST_WITHDRAWALS_QUERY_TS,
+    LAST_WITHDRAWALS_EXIT_QUERY_TS,
     UNKNOWN_VALIDATOR_INDEX,
     VALIDATOR_STATS_QUERY_BACKOFF_EVERY_N_VALIDATORS,
     VALIDATOR_STATS_QUERY_BACKOFF_TIME,
     VALIDATOR_STATS_QUERY_BACKOFF_TIME_RANGE,
+    WITHDRAWALS_TS_PREFIX,
 )
 from .structures import (
     DEPOSITING_VALIDATOR_PERFORMANCE,
@@ -45,14 +49,14 @@ from .structures import (
     ValidatorDetails,
     ValidatorID,
 )
-from .utils import scrape_validator_daily_stats, scrape_validator_withdrawals
+from .utils import scrape_validator_daily_stats, timestamp_to_epoch
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
     from rotkehlchen.db.dbhandler import DBHandler
     from rotkehlchen.db.drivers.gevent import DBCursor
     from rotkehlchen.db.filtering import Eth2DailyStatsFilterQuery
-    from rotkehlchen.externalapis.beaconchain import BeaconChain
+    from rotkehlchen.externalapis.beaconchain.service import BeaconChain
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -65,7 +69,7 @@ class Eth2(EthereumModule):
             self,
             ethereum_inquirer: 'EthereumInquirer',
             database: 'DBHandler',
-            premium: Optional[Premium],
+            premium: Premium | None,
             msg_aggregator: MessagesAggregator,
             beaconchain: 'BeaconChain',
     ) -> None:
@@ -75,9 +79,7 @@ class Eth2(EthereumModule):
         self.msg_aggregator = msg_aggregator
         self.beaconchain = beaconchain
         self.last_stats_query_ts = 0
-        self.last_withdrawals_query_ts = 0
         self.validator_stats_queried = 0
-        self.validator_withdrawals_queried = 0
         self.deposits_pubkey_re = re.compile(r'.*validator with pubkey (.*)\. Deposit.*')
         self.withdrawals_query_lock = Semaphore()
 
@@ -143,7 +145,7 @@ class Eth2(EthereumModule):
         usd_price = Inquirer().find_usd_price(A_ETH)
         dbeth2 = DBEth2(self.database)
         balance_mapping: dict[Eth2PubKey, Balance] = defaultdict(Balance)
-        validators: Union[list[ValidatorID], list[Eth2Validator]]
+        validators: list[ValidatorID] | list[Eth2Validator]
         if fetch_validators_for_eth1:
             validators = self.fetch_and_update_eth1_validator_data(addresses)
         else:
@@ -296,18 +298,18 @@ class Eth2(EthereumModule):
 
         return result  # type: ignore  # location_label is set for this event
 
-    def _maybe_backoff_beaconchain(self, now: Timestamp, name: Literal['stats', 'withdrawals']) -> None:  # noqa: E501
+    def _maybe_backoff_beaconchain(self, now: Timestamp) -> None:
         should_backoff = (
-            now - getattr(self, f'last_{name}_query_ts') < VALIDATOR_STATS_QUERY_BACKOFF_TIME_RANGE and  # noqa: E501
-            getattr(self, f'validator_{name}_queried') >= VALIDATOR_STATS_QUERY_BACKOFF_EVERY_N_VALIDATORS  # noqa: E501
+            now - self.last_stats_query_ts < VALIDATOR_STATS_QUERY_BACKOFF_TIME_RANGE and
+            self.validator_stats_queried >= VALIDATOR_STATS_QUERY_BACKOFF_EVERY_N_VALIDATORS
         )
         if should_backoff:
             log.debug(
-                f'Queried {getattr(self, f"validator_{name}_queried")} validators in the last '
+                f'Queried {self.validator_stats_queried} validators in the last '
                 f'{VALIDATOR_STATS_QUERY_BACKOFF_TIME_RANGE} seconds. Backing off for '
                 f'{VALIDATOR_STATS_QUERY_BACKOFF_TIME} seconds.',
             )
-            setattr(self, f'validator_{name}_queried', 0)
+            self.validator_stats_queried = 0
             gevent.sleep(VALIDATOR_STATS_QUERY_BACKOFF_TIME)
 
     def _query_services_for_validator_daily_stats(
@@ -320,7 +322,7 @@ class Eth2(EthereumModule):
         result = dbeth2.get_validators_to_query_for_stats(up_to_ts=to_ts)
 
         for validator_index, last_ts, exit_ts in result:
-            self._maybe_backoff_beaconchain(now=now, name='stats')
+            self._maybe_backoff_beaconchain(now=now)
             new_stats = scrape_validator_daily_stats(
                 validator_index=validator_index,
                 last_known_timestamp=last_ts,
@@ -334,76 +336,46 @@ class Eth2(EthereumModule):
 
     def query_services_for_validator_withdrawals(
             self,
+            addresses: Sequence[ChecksumEvmAddress],
             to_ts: Timestamp,
     ) -> None:
-        """Goes through all saved validators, sees which need to query withdrawals
-        queries them and saves them in the DB.
-
-        May raise:
-        - RemoteError due to problems querying beaconcha.in API
+        """Goes through all given addresses, queries for the latest withdrawals
+        and saves them in the DB. Uses multiple sources
         """
         with self.withdrawals_query_lock:
-            # First check if the withdrawals were queried within the last 3 hours to
-            # not query them again. This is just an extra optimization check since our logic
-            # can get us in here multipel times both from periodic and frontend and
-            # we only remember last withdrawal per each validator which can take 4-7 days
-            now = ts_now()
-            with self.database.conn.read_ctx() as cursor:
-                last_query = self.database.get_used_query_range(cursor, LAST_WITHDRAWALS_QUERY_TS)
-                if last_query is not None and now - last_query[1] <= HOUR_IN_SECONDS * 3:
-                    log.debug('Got in query_services_for_validator_withdrawals too soon. Doing nothing')  # noqa: E501
-                    return
+            for address in addresses:
+                self.query_single_address_withdrawals(address, to_ts)
 
-            log.debug(f'Querying for validator withdrawals up to {to_ts=}')
-            dbeth2 = DBEth2(self.database)
-            dbevents = DBHistoryEvents(self.database)
-            result = dbeth2.get_validators_to_query_for_withdrawals(up_to_tsms=ts_sec_to_ms(to_ts))
-            log.debug(f'Got the following validator data to query for withdrawals: {result}')
+    def query_single_address_withdrawals(self, address: ChecksumEvmAddress, to_ts: Timestamp) -> None:  # noqa: E501
+        range_name = f'{WITHDRAWALS_TS_PREFIX}_{address}'
+        with self.database.conn.read_ctx() as cursor:
+            last_query = self.database.get_used_query_range(cursor, range_name)
 
-            # first get all validator indices to see which validators have exited and when
-            validator_indices = {x[0] for x in result}
-            data = self.beaconchain.get_validator_data(indices_or_pubkeys=list(validator_indices))
-            exit_epoch = {}
-            now = ts_now()
-            for validator_entry in data:
-                if validator_entry['status'] != 'exited':
-                    exit_epoch[validator_entry['validatorindex']] = now  # so that is_exit fails
-                else:
-                    exit_epoch[validator_entry['validatorindex']] = validator_entry['exitepoch']
+        from_ts = Timestamp(0)
+        if last_query is not None and to_ts - (from_ts := last_query[1]) <= HOUR_IN_SECONDS * 3:
+            return
 
-            # Then fetch latest withdrawals for each
-            for validator_index, last_ts_ms in result:
-                self._maybe_backoff_beaconchain(now=now, name='withdrawals')
-                new_data = scrape_validator_withdrawals(
-                    validator_index=validator_index,
-                    last_known_timestamp=ts_ms_to_sec(last_ts_ms),
-                )
-                log.debug(f'Got {len(new_data)} new withdrawals for validator {validator_index}')
-                now = ts_now()
-                self.validator_withdrawals_queried += 1
-                self.last_withdrawals_query_ts = now
-                for entry in new_data:
-                    withdrawal = EthWithdrawalEvent(
-                        validator_index=validator_index,
-                        timestamp=ts_sec_to_ms(entry[0]),
-                        balance=Balance(amount=entry[2]),
-                        withdrawal_address=entry[1],
-                        is_exit=entry[0] >= exit_epoch[validator_index],
-                    )
-                    try:
-                        with self.database.user_write() as write_cursor:
-                            dbevents.add_history_event(write_cursor, event=withdrawal)
-                    except sqlcipher.IntegrityError as e:  # pylint: disable=no-member
-                        log.error(f'Could not write withdrawal: {withdrawal} to the DB due to {e!s}')  # noqa: E501
+        log.debug(f'Querying {address} ETH withdrawals from {from_ts} to {to_ts}')
 
-            with self.database.user_write() as write_cursor:
-                self.database.update_used_query_range(  # update last withdrawal query timestamp
-                    write_cursor=write_cursor,
-                    name=LAST_WITHDRAWALS_QUERY_TS,
-                    start_ts=Timestamp(0),
-                    end_ts=now,
-                )
-            log.debug(f'Finished querying for validator withdrawals up to {to_ts=}')
+        try:
+            self.ethereum.etherscan.get_withdrawals(
+                address=address,
+                period=TimestampOrBlockRange('timestamps', from_ts, to_ts),
+            )
+        except (DeserializationError, RemoteError) as e:
+            log.error(f'Failed to query ethereum withdrawals for {address} through etherscan due to {e}. Will try blockscout.')  # noqa: E501
+            try:
+                self.ethereum.blockscout.query_withdrawals(address)
+            except (DeserializationError, RemoteError, KeyError) as othere:
+                msg = str(othere)
+                if isinstance(othere, KeyError):
+                    msg = f'Missing key entry for {msg}'
+
+                log.error(f'Failed to query ethereum withdrawals for {address} through blockscout due to {msg}. Bailing out for now.')  # noqa: E501
+                return
+
+        with self.database.user_write() as write_cursor:
+            self.database.update_used_query_range(write_cursor, range_name, Timestamp(0), to_ts)
 
     def get_validator_daily_stats(
             self,
@@ -428,8 +400,8 @@ class Eth2(EthereumModule):
 
     def add_validator(
             self,
-            validator_index: Optional[int],
-            public_key: Optional[Eth2PubKey],
+            validator_index: int | None,
+            public_key: Eth2PubKey | None,
             ownership_proportion: FVal,
     ) -> None:
         """Adds the given validator to the DB. Due to marshmallow here at least
@@ -539,6 +511,55 @@ class Eth2(EthereumModule):
                     log.warning(f'Could not update history events with {changes_entry} in combine_block_with_tx_events due to {e!s}')  # noqa: E501
                     # already exists. Probably right after resetting events? Delete old one
                     write_cursor.execute('DELETE FROM history_events WHERE identifier=?', (changes_entry[5],))  # noqa: E501
+
+    def detect_exited_validators(self) -> None:
+        """This function will detect any validators that have exited from the ones that
+        are last known to be active and set the DB values accordingly"""
+        now = ts_now()
+        with self.database.user_write() as write_cursor:
+            self.database.update_used_query_range(
+                write_cursor=write_cursor,
+                name=LAST_WITHDRAWALS_EXIT_QUERY_TS,
+                start_ts=Timestamp(0),
+                end_ts=now,
+            )
+
+        dbeth2 = DBEth2(self.database)
+        with self.database.conn.read_ctx() as cursor:
+            validator_indices = list(dbeth2.get_active_validator_indices(cursor))
+
+        if len(validator_indices) == 0:
+            return
+
+        try:
+            validator_data = self.beaconchain.get_validator_data(validator_indices)
+        except RemoteError as e:
+            log.error(f'Could not query validator data from beaconcha.in due to {e}')
+            return
+
+        current_epoch = timestamp_to_epoch(now)
+        needed_validators = []
+        for entry in validator_data:
+            if (exit_epoch := entry.get('exitepoch', sys.maxsize)) > current_epoch:
+                continue
+
+            # this is a slashed/exited validator
+            if (validator_index := entry.get('validatorindex')) is None:
+                log.error(f'Beaconcha.in response {entry} does not contain validatorindex')
+                continue
+
+            needed_validators.append((validator_index, exit_epoch))
+
+        if len(needed_validators) == 0:
+            return
+
+        with self.database.user_write() as write_cursor:
+            for index, exit_epoch in needed_validators:
+                dbeth2.set_validator_exit(
+                    write_cursor=write_cursor,
+                    index=index,
+                    exit_epoch=exit_epoch,
+                )
 
     def refresh_activated_validators_deposits(self) -> None:
         """It's possible that when an eth deposit gets decoded and created the validator

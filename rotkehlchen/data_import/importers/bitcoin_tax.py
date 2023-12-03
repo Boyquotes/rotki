@@ -1,11 +1,9 @@
 import csv
 import logging
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from rotkehlchen.accounting.structures.balance import AssetBalance, Balance
-from rotkehlchen.accounting.structures.base import HistoryEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.converters import LOCATION_TO_ASSET_MAPPING, asset_from_common_identifier
 from rotkehlchen.constants import ZERO
 from rotkehlchen.data_import.utils import BaseExchangeImporter, UnsupportedCSVEntry, hash_csv_row
@@ -13,6 +11,8 @@ from rotkehlchen.db.drivers.gevent import DBCursor
 from rotkehlchen.errors.asset import UnknownAsset
 from rotkehlchen.errors.misc import InputError
 from rotkehlchen.errors.serialization import DeserializationError
+from rotkehlchen.history.events.structures.base import HistoryEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.serialization.deserialize import (
     deserialize_asset_amount,
@@ -61,7 +61,7 @@ class BitcoinTaxImporter(BaseExchangeImporter):
             action: str,
             base_asset_balance: AssetBalance,
             quote_asset_balance: AssetBalance,
-            fee_asset_balance: Optional[AssetBalance],
+            fee_asset_balance: AssetBalance | None,
             memo: str,
     ) -> None:
         """
@@ -132,7 +132,7 @@ class BitcoinTaxImporter(BaseExchangeImporter):
             location: Location,
             action: str,
             asset_balance: AssetBalance,
-            fee_asset_balance: Optional[AssetBalance],
+            fee_asset_balance: AssetBalance | None,
             memo: str,
     ) -> None:
         """

@@ -1,8 +1,6 @@
 import pytest
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.assets.utils import get_or_create_evm_token
 from rotkehlchen.chain.ethereum.modules.ens.constants import CPT_ENS
@@ -19,6 +17,8 @@ from rotkehlchen.constants import ONE, ZERO
 from rotkehlchen.constants.assets import A_ETH
 from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.ethereum import get_decoded_events_of_transaction
 from rotkehlchen.types import (
     ChainID,
@@ -455,7 +455,7 @@ def test_renewal_with_refund_old_controller(database, ethereum_inquirer, ethereu
             timestamp=TimestampMS(1663628627000),
             location=Location.ETHEREUM,
             event_type=HistoryEventType.RENEW,
-            event_subtype=HistoryEventSubType.NFT,
+            event_subtype=HistoryEventSubType.NONE,
             asset=A_ETH,
             balance=Balance(amount=FVal('0.054034186623924151')),
             location_label=user_address,
@@ -504,7 +504,7 @@ def test_renewal_with_refund_new_controller(database, ethereum_inquirer, ethereu
             timestamp=TimestampMS(1688717987000),
             location=Location.ETHEREUM,
             event_type=HistoryEventType.RENEW,
-            event_subtype=HistoryEventSubType.NFT,
+            event_subtype=HistoryEventSubType.NONE,
             asset=A_ETH,
             balance=Balance(amount=FVal('0.013465329469696502')),
             location_label=user_address,

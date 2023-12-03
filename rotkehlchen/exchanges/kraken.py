@@ -9,7 +9,7 @@ import logging
 import operator
 import time
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 import gevent
@@ -17,12 +17,6 @@ import requests
 from requests import Response
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.base import (
-    HistoryBaseEntryType,
-    HistoryEvent,
-    HistoryEventSubType,
-    HistoryEventType,
-)
 from rotkehlchen.api.v1.types import IncludeExcludeFilterData
 from rotkehlchen.api.websockets.typedefs import (
     HistoryEventsQueryType,
@@ -46,6 +40,12 @@ from rotkehlchen.exchanges.exchange import (
     ExchangeInterface,
     ExchangeQueryBalances,
     ExchangeWithExtras,
+)
+from rotkehlchen.history.events.structures.base import (
+    HistoryBaseEntryType,
+    HistoryEvent,
+    HistoryEventSubType,
+    HistoryEventType,
 )
 from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.logging import RotkehlchenLogsAdapter
@@ -89,36 +89,44 @@ KRAKEN_BACKOFF_DIVIDEND = 15
 MAX_CALL_COUNTER_INCREASE = 2  # Trades and Ledger produce the max increase
 
 
-def kraken_ledger_entry_type_to_ours(value: str) -> HistoryEventType:
-    """Turns a kraken ledger entry to our history event type
+def kraken_ledger_entry_type_to_ours(value: str) -> tuple[HistoryEventType, HistoryEventSubType]:
+    """Turns a kraken ledger entry to our history event type, subtype combination
 
     Though they are very similar to our current event types we keep this mapping function
     since there is some minor differences and if we ever want to change our types we
     can do so without breaking kraken.
 
+    Docs: https://support.kraken.com/hc/en-us/articles/360001169383-How-to-interpret-Ledger-history-fields
+
     Returns Informational type for any kraken event that we don't know how to process
     """
+    event_type = HistoryEventType.INFORMATIONAL  # returned for kraken's unknown events
+    event_subtype = HistoryEventSubType.NONE  # may be further edited down out of this function
     if value == 'trade':
-        return HistoryEventType.TRADE
+        event_type = HistoryEventType.TRADE
     if value == 'staking':
-        return HistoryEventType.STAKING
+        event_type = HistoryEventType.STAKING
     if value == 'deposit':
-        return HistoryEventType.DEPOSIT
+        event_type = HistoryEventType.DEPOSIT
     if value == 'withdrawal':
-        return HistoryEventType.WITHDRAWAL
+        event_type = HistoryEventType.WITHDRAWAL
     if value == 'spend':
-        return HistoryEventType.SPEND
+        event_type = HistoryEventType.SPEND
     if value == 'receive':
-        return HistoryEventType.RECEIVE
+        event_type = HistoryEventType.RECEIVE
     if value == 'transfer':
-        return HistoryEventType.TRANSFER
+        event_type = HistoryEventType.TRANSFER
     if value == 'adjustment':
-        return HistoryEventType.ADJUSTMENT
+        event_type = HistoryEventType.ADJUSTMENT
+    if value == 'invite bonus':
+        event_type = HistoryEventType.RECEIVE
+        event_subtype = HistoryEventSubType.REWARD
 
-    return HistoryEventType.INFORMATIONAL  # returned for kraken's unknown events
+    # we ignore margin, rollover, settled since they are for margin trades
+    return event_type, event_subtype
 
 
-def _check_and_get_response(response: Response, method: str) -> Union[str, dict]:
+def _check_and_get_response(response: Response, method: str) -> str | dict:
     """Checks the kraken response and if it's succesfull returns the result.
 
     If there is recoverable error a string is returned explaining the error
@@ -177,7 +185,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
             secret: ApiSecret,
             database: 'DBHandler',
             msg_aggregator: MessagesAggregator,
-            kraken_account_type: Optional[KrakenAccountType] = None,
+            kraken_account_type: KrakenAccountType | None = None,
     ):
         super().__init__(
             name=name,
@@ -193,7 +201,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
         self.last_query_ts = 0
         self.history_events_db = DBHistoryEvents(self.db)
 
-    def set_account_type(self, account_type: Optional[KrakenAccountType]) -> None:
+    def set_account_type(self, account_type: KrakenAccountType | None) -> None:
         if account_type is None:
             account_type = DEFAULT_KRAKEN_ACCOUNT_TYPE
 
@@ -252,7 +260,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
     def _validate_single_api_key_action(
             self,
             method_str: str,
-            req: Optional[dict[str, Any]] = None,
+            req: dict[str, Any] | None = None,
     ) -> tuple[bool, str]:
         try:
             self.api_query(method_str, req)
@@ -289,7 +297,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
         else:
             self.call_counter += 1
 
-    def _query_public(self, method: str, req: Optional[dict] = None) -> Union[dict, str]:
+    def _query_public(self, method: str, req: dict | None = None) -> dict | str:
         """API queries that do not require a valid key/secret pair.
 
         Arguments:
@@ -307,7 +315,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
         self._manage_call_counter(method)
         return _check_and_get_response(response, method)
 
-    def api_query(self, method: str, req: Optional[dict] = None) -> dict:
+    def api_query(self, method: str, req: dict | None = None) -> dict:
         tries = KRAKEN_QUERY_TRIES
         query_method = (
             self._query_public if method in KRAKEN_PUBLIC_METHODS else self._query_private
@@ -358,7 +366,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
             f'After {KRAKEN_QUERY_TRIES} kraken queries for {method} could still not be completed',
         )
 
-    def _query_private(self, method: str, req: Optional[dict] = None) -> Union[dict, str]:
+    def _query_private(self, method: str, req: dict | None = None) -> dict | str:
         """API queries that require a valid key/secret pair.
 
         Arguments:
@@ -471,7 +479,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
             keyname: str,
             start_ts: Timestamp,
             end_ts: Timestamp,
-            extra_dict: Optional[dict] = None,
+            extra_dict: dict | None = None,
     ) -> tuple[list, bool]:
         """ Abstracting away the functionality of querying a kraken endpoint where
         you need to check the 'count' of the returned results and provide sufficient
@@ -576,7 +584,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
                 has_premium=True,
             )
 
-        trades, max_ts = self.process_kraken_trades(trades_raw)
+        trades, max_ts = self.process_kraken_trades(trades_raw)  # type: ignore[arg-type]  # HistoryBaseEntry vs HistoryEvent
         queried_range = (start_ts, Timestamp(max_ts)) if with_errors else (start_ts, end_ts)
         return trades, queried_range
 
@@ -585,10 +593,10 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
             endpoint: str,
             start_ts: Timestamp,
             end_ts: Timestamp,
-            offset: Optional[int] = None,
-            extra_dict: Optional[dict] = None,
+            offset: int | None = None,
+            extra_dict: dict | None = None,
     ) -> dict:
-        request: dict[str, Union[Timestamp, int]] = {}
+        request: dict[str, Timestamp | int] = {}
         request['start'] = start_ts
         request['end'] = end_ts
         if offset is not None:
@@ -700,7 +708,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
             self,
             trade_parts: list[HistoryEvent],
             adjustments: list[HistoryEvent],
-    ) -> Optional[Trade]:
+    ) -> Trade | None:
         """Processes events from trade parts to a trade. If it's an adjustment
         adds it to a separate list"""
         if trade_parts[0].event_type == HistoryEventType.ADJUSTMENT:
@@ -826,8 +834,8 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
             rate = Price(receive_part.balance.amount / amount)
 
         # If kfee was found we use it as the fee for the trade
-        fee: Optional[Fee] = None
-        fee_asset: Optional[Asset] = None
+        fee: Fee | None = None
+        fee_asset: Asset | None = None
         if kfee_part is not None and fee_part is None:
             fee = Fee(kfee_part.balance.amount)
             fee_asset = A_KFEE
@@ -977,7 +985,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
 
         if len(new_events) != 0:
             with self.db.user_write() as write_cursor:
-                try:
+                try:  # duplicates should be handled due to INSERT OR IGNORE and UNIQUE(event_identifier, sequence_index)  # noqa: E501
                     self.history_events_db.add_history_events(write_cursor=write_cursor, history=new_events)  # noqa: E501
                 except InputError as e:  # not catching IntegrityError. event asset is resolved
                     self.msg_aggregator.add_error(
@@ -1050,17 +1058,16 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
                 events_source=f'{query_start_ts} to {query_end_ts}',
                 save_skipped_events=True,
             )
-            if len(new_events) != 0:
+            if len(new_events) != 0 and with_errors is False:
                 with self.db.user_write() as write_cursor:
                     ranges.update_used_query_range(
                         write_cursor=write_cursor,
                         location_string=range_query_name,
-                        queried_ranges=[(start_ts, end_ts)] + ranges_to_query,
+                        queried_ranges=[(query_start_ts, query_end_ts)],
                     )
 
             if with_errors is True:
                 return True  # we had errors so stop any further queries and quit
-
         return False  # no errors
 
     def history_event_from_kraken(
@@ -1077,6 +1084,8 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
 
         If `save_skipped_events` is True then any events that are skipped are saved
         in the DB for processing later.
+
+        Information on how to interpret Kraken ledger type field: https://support.kraken.com/hc/en-us/articles/360001169383-How-to-interpret-Ledger-history-fields
         """
         group_events: list[tuple[int, HistoryEvent]] = []
         skipped = False
@@ -1097,9 +1106,8 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
                     value=raw_event['time'], name='time', location='kraken ledger processing',
                 ) * 1000).to_int(exact=False))
 
-                event_type = kraken_ledger_entry_type_to_ours(raw_event['type'])
+                event_type, event_subtype = kraken_ledger_entry_type_to_ours(raw_event['type'])
                 asset = asset_from_kraken(raw_event['asset'])
-                event_subtype = HistoryEventSubType.NONE
                 notes = None
                 raw_amount = deserialize_fval(
                     raw_event['amount'],

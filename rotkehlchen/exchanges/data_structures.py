@@ -2,10 +2,10 @@ import datetime
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from rotkehlchen.accounting.mixins.event import AccountingEventMixin, AccountingEventType
-from rotkehlchen.accounting.structures.types import ActionType, EventDirection
+from rotkehlchen.accounting.structures.types import ActionType
 from rotkehlchen.assets.asset import Asset, AssetWithOracles
 from rotkehlchen.assets.converters import asset_from_binance
 from rotkehlchen.constants import ONE, ZERO
@@ -13,6 +13,7 @@ from rotkehlchen.crypto import sha3
 from rotkehlchen.errors.asset import UnknownAsset
 from rotkehlchen.fval import FVal
 from rotkehlchen.history.deserialization import deserialize_price
+from rotkehlchen.history.events.structures.types import EventDirection
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.serialization.deserialize import (
     deserialize_asset_amount,
@@ -68,8 +69,8 @@ class AssetMovement(AccountingEventMixin):
     category: AssetMovementCategory
     timestamp: Timestamp
     # The source address if this is a deposit and the destination address if withdrawal
-    address: Optional[str]
-    transaction_id: Optional[str]
+    address: str | None
+    transaction_id: str | None
     asset: Asset
     # Amount is the original amount removed from the account
     amount: FVal
@@ -246,15 +247,15 @@ class Trade(AccountingEventMixin):
     # sold if it's a sell. Should NOT include fees
     amount: AssetAmount
     rate: Price
-    fee: Optional[Fee] = None
-    fee_currency: Optional[Asset] = None
+    fee: Fee | None = None
+    fee_currency: Asset | None = None
     # For external trades this is optional and is a link to the trade in an explorer
     # For exchange trades this should be the exchange unique trade identifer
     # For trades imported from third parties we should generate a unique id for this.
     # If trades are both imported from third parties like cointracking.info and from
     # the exchanges themselves then there is no way to avoid duplicates.
-    link: Optional[str] = None
-    notes: Optional[str] = None
+    link: str | None = None
+    notes: str | None = None
 
     @property
     def identifier(self) -> TradeID:
@@ -470,7 +471,7 @@ MarginPositionDBTuple = tuple[
 class MarginPosition(AccountingEventMixin):
     """We only support margin positions on poloniex and bitmex at the moment"""
     location: Location
-    open_time: Optional[Timestamp]
+    open_time: Timestamp | None
     close_time: Timestamp
     # Profit loss in pl_currency (does not include fees)
     profit_loss: AssetAmount

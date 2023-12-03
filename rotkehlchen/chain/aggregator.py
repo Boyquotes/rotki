@@ -1,20 +1,10 @@
 import logging
 import typing
 from collections import defaultdict
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from importlib import import_module
 from pathlib import Path
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Literal,
-    Optional,
-    TypeVar,
-    cast,
-    get_args,
-    overload,
-)
+from typing import TYPE_CHECKING, Any, Literal, Optional, TypeVar, cast, get_args, overload
 
 import requests
 from gevent.lock import Semaphore
@@ -102,7 +92,7 @@ if TYPE_CHECKING:
     from rotkehlchen.chain.ethereum.interfaces.balances import ProtocolWithBalance
     from rotkehlchen.chain.ethereum.manager import EthereumManager
     from rotkehlchen.chain.ethereum.modules.aave.aave import Aave
-    from rotkehlchen.chain.ethereum.modules.compound.compound import Compound
+    from rotkehlchen.chain.ethereum.modules.compound.v2.compound import Compound
     from rotkehlchen.chain.ethereum.modules.eth2.eth2 import Eth2
     from rotkehlchen.chain.ethereum.modules.eth2.structures import (
         ValidatorDailyStats,
@@ -118,7 +108,7 @@ if TYPE_CHECKING:
     from rotkehlchen.chain.substrate.manager import SubstrateManager
     from rotkehlchen.db.dbhandler import DBHandler
     from rotkehlchen.db.drivers.gevent import DBCursor
-    from rotkehlchen.externalapis.beaconchain import BeaconChain
+    from rotkehlchen.externalapis.beaconchain.service import BeaconChain
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -204,7 +194,7 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
             msg_aggregator: MessagesAggregator,
             database: 'DBHandler',
             greenlet_manager: GreenletManager,
-            premium: Optional[Premium],
+            premium: Premium | None,
             data_directory: Path,
             beaconchain: 'BeaconChain',
             btc_derivation_gap_limit: int,
@@ -323,7 +313,7 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
             result = QueriedAddresses(self.database).get_queried_addresses_for_module(cursor, module)  # noqa: E501
         return result if result is not None else self.accounts.eth
 
-    def activate_module(self, module_name: ModuleName) -> Optional[EthereumModule]:
+    def activate_module(self, module_name: ModuleName) -> EthereumModule | None:
         """Activates an ethereum module by module name"""
         module = self.eth_modules.get(module_name, None)
         if module:
@@ -372,7 +362,7 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
         ...
 
     @overload
-    def get_module(self, module_name: Literal['balancer']) -> Optional[Balancer]:
+    def get_module(self, module_name: Literal['balancer']) -> Balancer | None:
         ...
 
     @overload
@@ -384,15 +374,15 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
         ...
 
     @overload
-    def get_module(self, module_name: Literal['loopring']) -> Optional[Loopring]:
+    def get_module(self, module_name: Literal['loopring']) -> Loopring | None:
         ...
 
     @overload
-    def get_module(self, module_name: Literal['makerdao_dsr']) -> Optional[MakerdaoDsr]:
+    def get_module(self, module_name: Literal['makerdao_dsr']) -> MakerdaoDsr | None:
         ...
 
     @overload
-    def get_module(self, module_name: Literal['makerdao_vaults']) -> Optional[MakerdaoVaults]:
+    def get_module(self, module_name: Literal['makerdao_vaults']) -> MakerdaoVaults | None:
         ...
 
     @overload
@@ -404,33 +394,33 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
         ...
 
     @overload
-    def get_module(self, module_name: Literal['yearn_vaults']) -> Optional[YearnVaults]:
+    def get_module(self, module_name: Literal['yearn_vaults']) -> YearnVaults | None:
         ...
 
     @overload
-    def get_module(self, module_name: Literal['yearn_vaults_v2']) -> Optional[YearnVaultsV2]:
+    def get_module(self, module_name: Literal['yearn_vaults_v2']) -> YearnVaultsV2 | None:
         ...
 
     @overload
-    def get_module(self, module_name: Literal['liquity']) -> Optional[Liquity]:
+    def get_module(self, module_name: Literal['liquity']) -> Liquity | None:
         ...
 
     @overload
-    def get_module(self, module_name: Literal['pickle_finance']) -> Optional[PickleFinance]:
+    def get_module(self, module_name: Literal['pickle_finance']) -> PickleFinance | None:
         ...
 
     @overload
     def get_module(self, module_name: Literal['nfts']) -> Optional['Nfts']:
         ...
 
-    def get_module(self, module_name: ModuleName) -> Optional[Any]:
+    def get_module(self, module_name: ModuleName) -> Any | None:
         instance = self.eth_modules.get(module_name, None)
         if instance is None:  # not activated
             return None
 
         return instance
 
-    def get_balances_update(self, chain: Optional[SupportedBlockchain]) -> BlockchainBalancesUpdate:  # noqa: E501
+    def get_balances_update(self, chain: SupportedBlockchain | None) -> BlockchainBalancesUpdate:
         """Returns a balances update to be consumed by the API."""
         return BlockchainBalancesUpdate(
             given_chain=chain,
@@ -482,7 +472,7 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
     @cache_response_timewise(forward_ignore_cache=True)
     def query_balances(
             self,
-            blockchain: Optional[SupportedBlockchain] = None,
+            blockchain: SupportedBlockchain | None = None,
             ignore_cache: bool = False,
     ) -> BlockchainBalancesUpdate:
         """Queries either all, or specific blockchain balances
@@ -921,16 +911,11 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
         manager = cast('EvmManager', self.get_chain_manager(chain))
         native_token_usd_price = Inquirer().find_usd_price(manager.node_inquirer.native_token)
         chain_balances = self.balances.get(chain)
-        queried_balances = manager.node_inquirer.get_multi_balance(accounts)
-        for account, balance in queried_balances.items():
-            if balance == ZERO:
-                continue
-
-            usd_value = balance * native_token_usd_price
+        for account, balance in manager.node_inquirer.get_multi_balance(accounts).items():
             chain_balances[account] = BalanceSheet(
                 assets=defaultdict(Balance, {
-                    manager.node_inquirer.native_token: Balance(balance, usd_value),
-                }),
+                    manager.node_inquirer.native_token: Balance(balance, balance * native_token_usd_price),  # noqa: E501
+                } if balance != ZERO else {}),  # accounts (e.g. multisigs) can have zero balances
             )
         self.query_evm_tokens(manager=manager, balances=chain_balances)
 
@@ -1045,8 +1030,7 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
     def _add_eth_protocol_balances(self, eth_balances: defaultdict[ChecksumEvmAddress, BalanceSheet]) -> None:  # noqa: E501
         """Also count token balances that may come from various eth protocols"""
         # If we have anything in DSR also count it towards total blockchain balances
-        dsr_module = self.get_module('makerdao_dsr')
-        if dsr_module is not None:
+        if (dsr_module := self.get_module('makerdao_dsr')) is not None:
             current_dsr_report = dsr_module.get_current_dsr()
             for dsr_account, balance_entry in current_dsr_report.balances.items():
 
@@ -1056,8 +1040,7 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
                 eth_balances[dsr_account].assets[A_DAI] += balance_entry
 
         # Also count the vault balances
-        vaults_module = self.get_module('makerdao_vaults')
-        if vaults_module is not None:
+        if (vaults_module := self.get_module('makerdao_vaults')) is not None:
             vault_balances = vaults_module.get_balances()
             for address, entry in vault_balances.items():
                 if address not in eth_balances:
@@ -1108,8 +1091,7 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
                     balances=defi_balances,
                 )
 
-        pickle_module = self.get_module('pickle_finance')
-        if pickle_module is not None:
+        if (pickle_module := self.get_module('pickle_finance')) is not None:
             pickle_balances_per_address = pickle_module.balances_in_protocol(
                 addresses=self.queried_addresses_for_module('pickle_finance'),
             )
@@ -1117,8 +1099,7 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
                 for asset_balance in pickle_balances:
                     eth_balances[address].assets[asset_balance.asset] += asset_balance.balance
 
-        liquity_module = self.get_module('liquity')
-        if liquity_module is not None:
+        if (liquity_module := self.get_module('liquity')) is not None:
             liquity_addresses = self.queried_addresses_for_module('liquity')
             # Get trove information
             liquity_balances = liquity_module.get_positions(given_addresses=liquity_addresses)
@@ -1307,8 +1288,8 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
 
     def add_eth2_validator(
             self,
-            validator_index: Optional[int],
-            public_key: Optional[Eth2PubKey],
+            validator_index: int | None,
+            public_key: Eth2PubKey | None,
             ownership_proportion: FVal,
     ) -> None:
         """May raise:
@@ -1501,7 +1482,7 @@ class ChainsAggregator(CacheableMixIn, LockableQueryMixIn):
     def detect_evm_accounts(
             self,
             progress_handler: Optional['ProgressUpdater'] = None,
-            chains: Optional[list[SUPPORTED_EVM_CHAINS]] = None,
+            chains: list[SUPPORTED_EVM_CHAINS] | None = None,
     ) -> list[tuple[SUPPORTED_EVM_CHAINS, ChecksumEvmAddress]]:
         """
         Detects user's EVM accounts on different chains and adds them to the tracked accounts.

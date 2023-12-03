@@ -1,9 +1,8 @@
 import logging
 from abc import ABCMeta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.chain.ethereum.utils import asset_normalized_value
 from rotkehlchen.chain.evm.constants import ZERO_ADDRESS
 from rotkehlchen.chain.evm.decoding.constants import CPT_GITCOIN, GITCOIN_CPT_DETAILS
@@ -15,6 +14,7 @@ from rotkehlchen.chain.evm.decoding.structures import (
 )
 from rotkehlchen.chain.evm.decoding.types import CounterpartyDetails
 from rotkehlchen.constants.assets import A_ETH
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.utils.misc import (
     hex_or_bytes_to_address,
@@ -61,7 +61,7 @@ class GitcoinV2CommonDecoder(DecoderInterface, metaclass=ABCMeta):
             evm_inquirer: 'EvmNodeInquirer',
             base_tools: 'BaseDecoderTools',
             msg_aggregator: 'MessagesAggregator',
-            project_registry: 'ChecksumEvmAddress',
+            project_registry: Optional['ChecksumEvmAddress'],
             voting_impl_addresses: list['ChecksumEvmAddress'],
             round_impl_addresses: list['ChecksumEvmAddress'],
             payout_strategy_addresses: list['ChecksumEvmAddress'],
@@ -115,7 +115,7 @@ class GitcoinV2CommonDecoder(DecoderInterface, metaclass=ABCMeta):
         paying_contract_address = hex_or_bytes_to_address(context.tx_log.topics[paying_contract_idx])  # noqa: E501
         token_address = hex_or_bytes_to_address(context.tx_log.data[:32])
         if token_address == ZERO_ADDRESS:
-            asset = self.eth
+            asset = self.evm_inquirer.native_token
         else:
             asset = self.base.get_or_create_evm_token(token_address)
         amount_raw = hex_or_bytes_to_int(context.tx_log.data[32:64])
@@ -272,7 +272,8 @@ class GitcoinV2CommonDecoder(DecoderInterface, metaclass=ABCMeta):
         mappings |= {
             address: (self._decode_payout_action,) for address in self.payout_strategy_addresses
         }
-        mappings[self.project_registry] = (self._decode_project_action,)
+        if self.project_registry:
+            mappings[self.project_registry] = (self._decode_project_action,)
         return mappings
 
     @staticmethod

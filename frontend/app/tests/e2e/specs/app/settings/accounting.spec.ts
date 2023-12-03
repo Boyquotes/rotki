@@ -1,6 +1,6 @@
-import { Guid } from '../../../common/guid';
 import { AccountingSettingsPage } from '../../../pages/accounting-settings-page';
 import { RotkiApp } from '../../../pages/rotki-app';
+import { createUser } from '../../../utils/user';
 
 describe('settings::accounting', () => {
   let username: string;
@@ -8,7 +8,7 @@ describe('settings::accounting', () => {
   let pageAccounting: AccountingSettingsPage;
 
   before(() => {
-    username = Guid.newGuid().toString();
+    username = createUser();
     app = new RotkiApp();
     pageAccounting = new AccountingSettingsPage();
     app.fasterLogin(username);
@@ -31,6 +31,17 @@ describe('settings::accounting', () => {
     pageAccounting.changeSwitch('.accounting-settings__taxfree-period', false);
   });
 
+  it('change cost basis fee settings & validate UI message', () => {
+    pageAccounting.verifySwitchState(
+      '.accounting-settings__include-fees-in-cost-basis',
+      true
+    );
+    pageAccounting.changeSwitch(
+      '.accounting-settings__include-fees-in-cost-basis',
+      false
+    );
+  });
+
   it('verify changes persist', () => {
     app.fasterLogout();
     app.login(username);
@@ -46,6 +57,10 @@ describe('settings::accounting', () => {
     );
     pageAccounting.verifySwitchState(
       '.accounting-settings__taxfree-period',
+      false
+    );
+    pageAccounting.verifySwitchState(
+      '.accounting-settings__include-fees-in-cost-basis',
       false
     );
   });

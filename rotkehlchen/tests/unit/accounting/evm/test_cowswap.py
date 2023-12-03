@@ -1,39 +1,25 @@
 from typing import TYPE_CHECKING
 
 import pytest
+from more_itertools import peekable
 
 from rotkehlchen.accounting.cost_basis.base import CostBasisInfo
 from rotkehlchen.accounting.mixins.event import AccountingEventType
 from rotkehlchen.accounting.pnl import PNL
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
 from rotkehlchen.accounting.structures.processed_event import ProcessedAccountingEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.chain.evm.decoding.cowswap.constants import CPT_COWSWAP
 from rotkehlchen.constants import ONE, ZERO
 from rotkehlchen.constants.assets import A_USDC, A_WBTC
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
+from rotkehlchen.tests.utils.accounting import MOCKED_PRICES, TIMESTAMP_1_MS, TIMESTAMP_1_SEC
 from rotkehlchen.tests.utils.factories import make_evm_address, make_evm_tx_hash
-from rotkehlchen.types import Location, Price, Timestamp, TimestampMS
+from rotkehlchen.types import Location, Price
 
 if TYPE_CHECKING:
     from rotkehlchen.accounting.accountant import Accountant
-
-TIMESTAMP_1_MS = TimestampMS(1000)
-TIMESTAMP_1_SEC = Timestamp(1)
-
-MOCKED_PRICES = {
-    A_WBTC.identifier: {
-        'EUR': {
-            TIMESTAMP_1_SEC: Price(ONE),
-        },
-    },
-    A_USDC.identifier: {
-        'EUR': {
-            TIMESTAMP_1_SEC: Price(ONE),
-        },
-    },
-}
 
 
 @pytest.mark.parametrize('mocked_price_queries', [MOCKED_PRICES])
@@ -64,19 +50,6 @@ def test_cowswap_swap_with_fee(accountant: 'Accountant'):
         sequence_index=2,
         timestamp=TIMESTAMP_1_MS,
         location=Location.ETHEREUM,
-        event_type=HistoryEventType.SPEND,
-        event_subtype=HistoryEventSubType.FEE,
-        asset=A_WBTC,
-        balance=Balance(amount=FVal(fee_amount_str)),
-        location_label=user_address,
-        notes=f'Spend {fee_amount_str} WBTC as a cowswap fee',
-        counterparty=CPT_COWSWAP,
-        address=contract_address,
-    ), EvmEvent(
-        tx_hash=tx_hash,
-        sequence_index=3,
-        timestamp=TIMESTAMP_1_MS,
-        location=Location.ETHEREUM,
         event_type=HistoryEventType.TRADE,
         event_subtype=HistoryEventSubType.RECEIVE,
         asset=A_USDC,
@@ -85,14 +58,27 @@ def test_cowswap_swap_with_fee(accountant: 'Accountant'):
         notes=f'Receive {receive_amount_str} USDC as the result of a swap in cowswap',
         counterparty=CPT_COWSWAP,
         address=contract_address,
+    ), EvmEvent(
+        tx_hash=tx_hash,
+        sequence_index=3,
+        timestamp=TIMESTAMP_1_MS,
+        location=Location.ETHEREUM,
+        event_type=HistoryEventType.TRADE,
+        event_subtype=HistoryEventSubType.FEE,
+        asset=A_WBTC,
+        balance=Balance(amount=FVal(fee_amount_str)),
+        location_label=user_address,
+        notes=f'Spend {fee_amount_str} WBTC as a cowswap fee',
+        counterparty=CPT_COWSWAP,
+        address=contract_address,
     )]
     pot = accountant.pots[0]
-    events_iterator = iter(events)
+    events_iterator = peekable(events)
     for event in events_iterator:
-        pot.events_accountant.process(event=event, events_iterator=events_iterator)
+        pot.events_accountant.process(event=event, events_iterator=events_iterator)  # type: ignore
 
     extra_data = {
-        'group_id': '1' + tx_hash.hex() + '13',  # pylint: disable=no-member
+        'group_id': '1' + tx_hash.hex() + '12',  # pylint: disable=no-member
         'tx_hash': tx_hash.hex(),  # pylint: disable=no-member
     }
     expected_processed_events = [

@@ -49,6 +49,7 @@ declare global {
   const checkIfDevelopment: typeof import('./utils/env-utils')['checkIfDevelopment']
   const chunkArray: typeof import('./utils/data')['chunkArray']
   const compareSymbols: typeof import('./utils/assets')['compareSymbols']
+  const compareTextByKeyword: typeof import('./utils/assets')['compareTextByKeyword']
   const computed: typeof import('vue')['computed']
   const computedAsync: typeof import('@vueuse/core')['computedAsync']
   const computedEager: typeof import('@vueuse/core')['computedEager']
@@ -115,6 +116,7 @@ declare global {
   const getFilepath: typeof import('./utils/backups')['getFilepath']
   const getKeyType: typeof import('./utils/xpub')['getKeyType']
   const getMetamaskAddresses: typeof import('./utils/metamask')['getMetamaskAddresses']
+  const getPlaceholderRule: typeof import('./utils/settings')['getPlaceholderRule']
   const getPoolProfit: typeof import('./utils/defi/xswap')['getPoolProfit']
   const getPools: typeof import('./utils/defi/xswap')['getPools']
   const getPrefix: typeof import('./utils/xpub')['getPrefix']
@@ -122,8 +124,10 @@ declare global {
   const getServiceRegisterUrl: typeof import('./utils/url')['getServiceRegisterUrl']
   const getSortItems: typeof import('./utils/assets')['getSortItems']
   const getTags: typeof import('./utils/tags')['getTags']
+  const getTextToken: typeof import('./utils/text')['getTextToken']
   const getValidSelectorFromEvmAddress: typeof import('./utils/assets')['getValidSelectorFromEvmAddress']
   const groupAssetBreakdown: typeof import('./utils/balances')['groupAssetBreakdown']
+  const guessTimezone: typeof import('./utils/date')['guessTimezone']
   const h: typeof import('vue')['h']
   const hexToRgbPoints: typeof import('./utils/color')['hexToRgbPoints']
   const ignorableWatch: typeof import('@vueuse/core')['ignorableWatch']
@@ -423,6 +427,7 @@ declare global {
   const useDocumentVisibility: typeof import('@vueuse/core')['useDocumentVisibility']
   const useDraggable: typeof import('@vueuse/core')['useDraggable']
   const useDropZone: typeof import('@vueuse/core')['useDropZone']
+  const useDynamicMessages: typeof import('./composables/dynamic-messages')['useDynamicMessages']
   const useEditBalancesSnapshotForm: typeof import('./composables/snapshots/edit-balance/form')['useEditBalancesSnapshotForm']
   const useEditLocationsSnapshotForm: typeof import('./composables/snapshots/edit-location/form')['useEditLocationsSnapshotForm']
   const useEditTotalSnapshotForm: typeof import('./composables/snapshots/edit-total/form')['useEditTotalSnapshotForm']
@@ -483,6 +488,7 @@ declare global {
   const useHistoryEventsForm: typeof import('./composables/history/events/form')['useHistoryEventsForm']
   const useHistoryIgnoringApi: typeof import('./composables/api/history/ignore')['useHistoryIgnoringApi']
   const useHistoryStore: typeof import('./store/history/index')['useHistoryStore']
+  const useHistoryTransactionDecoding: typeof import('./composables/history/events/tx/decoding')['useHistoryTransactionDecoding']
   const useHistoryTransactions: typeof import('./composables/history/events/tx/index')['useHistoryTransactions']
   const useHistoryTransactionsForm: typeof import('./composables/history/events/tx/form')['useHistoryTransactionsForm']
   const useI18n: typeof import('./composables/usei18n')['useI18n']
@@ -668,6 +674,7 @@ declare global {
   const useTxQueryStatusStore: typeof import('./store/history/query-status/tx-query-status')['useTxQueryStatusStore']
   const useUniswapApi: typeof import('./composables/api/defi/uniswap')['useUniswapApi']
   const useUniswapStore: typeof import('./store/defi/uniswap/index')['useUniswapStore']
+  const useUpdateMessage: typeof import('./composables/update-message')['useUpdateMessage']
   const useUrlSearchParams: typeof import('@vueuse/core')['useUrlSearchParams']
   const useUserMedia: typeof import('@vueuse/core')['useUserMedia']
   const useUserNotesApi: typeof import('./composables/api/session/user-notes')['useUserNotesApi']
@@ -764,7 +771,7 @@ declare module 'vue' {
     readonly checkBeforeSubmission: UnwrapRef<typeof import('./utils/validation')['checkBeforeSubmission']>
     readonly checkIfDevelopment: UnwrapRef<typeof import('./utils/env-utils')['checkIfDevelopment']>
     readonly chunkArray: UnwrapRef<typeof import('./utils/data')['chunkArray']>
-    readonly compareSymbols: UnwrapRef<typeof import('./utils/assets')['compareSymbols']>
+    readonly compareTextByKeyword: UnwrapRef<typeof import('./utils/assets')['compareTextByKeyword']>
     readonly computed: UnwrapRef<typeof import('vue')['computed']>
     readonly computedAsync: UnwrapRef<typeof import('@vueuse/core')['computedAsync']>
     readonly computedEager: UnwrapRef<typeof import('@vueuse/core')['computedEager']>
@@ -831,6 +838,7 @@ declare module 'vue' {
     readonly getFilepath: UnwrapRef<typeof import('./utils/backups')['getFilepath']>
     readonly getKeyType: UnwrapRef<typeof import('./utils/xpub')['getKeyType']>
     readonly getMetamaskAddresses: UnwrapRef<typeof import('./utils/metamask')['getMetamaskAddresses']>
+    readonly getPlaceholderRule: UnwrapRef<typeof import('./utils/settings')['getPlaceholderRule']>
     readonly getPoolProfit: UnwrapRef<typeof import('./utils/defi/xswap')['getPoolProfit']>
     readonly getPools: UnwrapRef<typeof import('./utils/defi/xswap')['getPools']>
     readonly getPrefix: UnwrapRef<typeof import('./utils/xpub')['getPrefix']>
@@ -838,8 +846,10 @@ declare module 'vue' {
     readonly getServiceRegisterUrl: UnwrapRef<typeof import('./utils/url')['getServiceRegisterUrl']>
     readonly getSortItems: UnwrapRef<typeof import('./utils/assets')['getSortItems']>
     readonly getTags: UnwrapRef<typeof import('./utils/tags')['getTags']>
+    readonly getTextToken: UnwrapRef<typeof import('./utils/text')['getTextToken']>
     readonly getValidSelectorFromEvmAddress: UnwrapRef<typeof import('./utils/assets')['getValidSelectorFromEvmAddress']>
     readonly groupAssetBreakdown: UnwrapRef<typeof import('./utils/balances')['groupAssetBreakdown']>
+    readonly guessTimezone: UnwrapRef<typeof import('./utils/date')['guessTimezone']>
     readonly h: UnwrapRef<typeof import('vue')['h']>
     readonly hexToRgbPoints: UnwrapRef<typeof import('./utils/color')['hexToRgbPoints']>
     readonly ignorableWatch: UnwrapRef<typeof import('@vueuse/core')['ignorableWatch']>
@@ -1139,6 +1149,7 @@ declare module 'vue' {
     readonly useDocumentVisibility: UnwrapRef<typeof import('@vueuse/core')['useDocumentVisibility']>
     readonly useDraggable: UnwrapRef<typeof import('@vueuse/core')['useDraggable']>
     readonly useDropZone: UnwrapRef<typeof import('@vueuse/core')['useDropZone']>
+    readonly useDynamicMessages: UnwrapRef<typeof import('./composables/dynamic-messages')['useDynamicMessages']>
     readonly useEditBalancesSnapshotForm: UnwrapRef<typeof import('./composables/snapshots/edit-balance/form')['useEditBalancesSnapshotForm']>
     readonly useEditLocationsSnapshotForm: UnwrapRef<typeof import('./composables/snapshots/edit-location/form')['useEditLocationsSnapshotForm']>
     readonly useEditTotalSnapshotForm: UnwrapRef<typeof import('./composables/snapshots/edit-total/form')['useEditTotalSnapshotForm']>
@@ -1199,6 +1210,7 @@ declare module 'vue' {
     readonly useHistoryEventsForm: UnwrapRef<typeof import('./composables/history/events/form')['useHistoryEventsForm']>
     readonly useHistoryIgnoringApi: UnwrapRef<typeof import('./composables/api/history/ignore')['useHistoryIgnoringApi']>
     readonly useHistoryStore: UnwrapRef<typeof import('./store/history/index')['useHistoryStore']>
+    readonly useHistoryTransactionDecoding: UnwrapRef<typeof import('./composables/history/events/tx/decoding')['useHistoryTransactionDecoding']>
     readonly useHistoryTransactions: UnwrapRef<typeof import('./composables/history/events/tx/index')['useHistoryTransactions']>
     readonly useHistoryTransactionsForm: UnwrapRef<typeof import('./composables/history/events/tx/form')['useHistoryTransactionsForm']>
     readonly useI18n: UnwrapRef<typeof import('./composables/usei18n')['useI18n']>
@@ -1384,6 +1396,7 @@ declare module 'vue' {
     readonly useTxQueryStatusStore: UnwrapRef<typeof import('./store/history/query-status/tx-query-status')['useTxQueryStatusStore']>
     readonly useUniswapApi: UnwrapRef<typeof import('./composables/api/defi/uniswap')['useUniswapApi']>
     readonly useUniswapStore: UnwrapRef<typeof import('./store/defi/uniswap/index')['useUniswapStore']>
+    readonly useUpdateMessage: UnwrapRef<typeof import('./composables/update-message')['useUpdateMessage']>
     readonly useUrlSearchParams: UnwrapRef<typeof import('@vueuse/core')['useUrlSearchParams']>
     readonly useUserMedia: UnwrapRef<typeof import('@vueuse/core')['useUserMedia']>
     readonly useUserNotesApi: UnwrapRef<typeof import('./composables/api/session/user-notes')['useUserNotesApi']>
@@ -1474,7 +1487,7 @@ declare module '@vue/runtime-core' {
     readonly checkBeforeSubmission: UnwrapRef<typeof import('./utils/validation')['checkBeforeSubmission']>
     readonly checkIfDevelopment: UnwrapRef<typeof import('./utils/env-utils')['checkIfDevelopment']>
     readonly chunkArray: UnwrapRef<typeof import('./utils/data')['chunkArray']>
-    readonly compareSymbols: UnwrapRef<typeof import('./utils/assets')['compareSymbols']>
+    readonly compareTextByKeyword: UnwrapRef<typeof import('./utils/assets')['compareTextByKeyword']>
     readonly computed: UnwrapRef<typeof import('vue')['computed']>
     readonly computedAsync: UnwrapRef<typeof import('@vueuse/core')['computedAsync']>
     readonly computedEager: UnwrapRef<typeof import('@vueuse/core')['computedEager']>
@@ -1541,6 +1554,7 @@ declare module '@vue/runtime-core' {
     readonly getFilepath: UnwrapRef<typeof import('./utils/backups')['getFilepath']>
     readonly getKeyType: UnwrapRef<typeof import('./utils/xpub')['getKeyType']>
     readonly getMetamaskAddresses: UnwrapRef<typeof import('./utils/metamask')['getMetamaskAddresses']>
+    readonly getPlaceholderRule: UnwrapRef<typeof import('./utils/settings')['getPlaceholderRule']>
     readonly getPoolProfit: UnwrapRef<typeof import('./utils/defi/xswap')['getPoolProfit']>
     readonly getPools: UnwrapRef<typeof import('./utils/defi/xswap')['getPools']>
     readonly getPrefix: UnwrapRef<typeof import('./utils/xpub')['getPrefix']>
@@ -1548,8 +1562,10 @@ declare module '@vue/runtime-core' {
     readonly getServiceRegisterUrl: UnwrapRef<typeof import('./utils/url')['getServiceRegisterUrl']>
     readonly getSortItems: UnwrapRef<typeof import('./utils/assets')['getSortItems']>
     readonly getTags: UnwrapRef<typeof import('./utils/tags')['getTags']>
+    readonly getTextToken: UnwrapRef<typeof import('./utils/text')['getTextToken']>
     readonly getValidSelectorFromEvmAddress: UnwrapRef<typeof import('./utils/assets')['getValidSelectorFromEvmAddress']>
     readonly groupAssetBreakdown: UnwrapRef<typeof import('./utils/balances')['groupAssetBreakdown']>
+    readonly guessTimezone: UnwrapRef<typeof import('./utils/date')['guessTimezone']>
     readonly h: UnwrapRef<typeof import('vue')['h']>
     readonly hexToRgbPoints: UnwrapRef<typeof import('./utils/color')['hexToRgbPoints']>
     readonly ignorableWatch: UnwrapRef<typeof import('@vueuse/core')['ignorableWatch']>
@@ -1849,6 +1865,7 @@ declare module '@vue/runtime-core' {
     readonly useDocumentVisibility: UnwrapRef<typeof import('@vueuse/core')['useDocumentVisibility']>
     readonly useDraggable: UnwrapRef<typeof import('@vueuse/core')['useDraggable']>
     readonly useDropZone: UnwrapRef<typeof import('@vueuse/core')['useDropZone']>
+    readonly useDynamicMessages: UnwrapRef<typeof import('./composables/dynamic-messages')['useDynamicMessages']>
     readonly useEditBalancesSnapshotForm: UnwrapRef<typeof import('./composables/snapshots/edit-balance/form')['useEditBalancesSnapshotForm']>
     readonly useEditLocationsSnapshotForm: UnwrapRef<typeof import('./composables/snapshots/edit-location/form')['useEditLocationsSnapshotForm']>
     readonly useEditTotalSnapshotForm: UnwrapRef<typeof import('./composables/snapshots/edit-total/form')['useEditTotalSnapshotForm']>
@@ -1909,6 +1926,7 @@ declare module '@vue/runtime-core' {
     readonly useHistoryEventsForm: UnwrapRef<typeof import('./composables/history/events/form')['useHistoryEventsForm']>
     readonly useHistoryIgnoringApi: UnwrapRef<typeof import('./composables/api/history/ignore')['useHistoryIgnoringApi']>
     readonly useHistoryStore: UnwrapRef<typeof import('./store/history/index')['useHistoryStore']>
+    readonly useHistoryTransactionDecoding: UnwrapRef<typeof import('./composables/history/events/tx/decoding')['useHistoryTransactionDecoding']>
     readonly useHistoryTransactions: UnwrapRef<typeof import('./composables/history/events/tx/index')['useHistoryTransactions']>
     readonly useHistoryTransactionsForm: UnwrapRef<typeof import('./composables/history/events/tx/form')['useHistoryTransactionsForm']>
     readonly useI18n: UnwrapRef<typeof import('./composables/usei18n')['useI18n']>
@@ -2094,6 +2112,7 @@ declare module '@vue/runtime-core' {
     readonly useTxQueryStatusStore: UnwrapRef<typeof import('./store/history/query-status/tx-query-status')['useTxQueryStatusStore']>
     readonly useUniswapApi: UnwrapRef<typeof import('./composables/api/defi/uniswap')['useUniswapApi']>
     readonly useUniswapStore: UnwrapRef<typeof import('./store/defi/uniswap/index')['useUniswapStore']>
+    readonly useUpdateMessage: UnwrapRef<typeof import('./composables/update-message')['useUpdateMessage']>
     readonly useUrlSearchParams: UnwrapRef<typeof import('@vueuse/core')['useUrlSearchParams']>
     readonly useUserMedia: UnwrapRef<typeof import('@vueuse/core')['useUserMedia']>
     readonly useUserNotesApi: UnwrapRef<typeof import('./composables/api/session/user-notes')['useUserNotesApi']>

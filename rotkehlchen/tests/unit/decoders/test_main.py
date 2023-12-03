@@ -4,12 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
-from rotkehlchen.accounting.structures.types import (
-    ActionType,
-    HistoryEventSubType,
-    HistoryEventType,
-)
+from rotkehlchen.accounting.structures.types import ActionType
 from rotkehlchen.chain.ethereum.constants import CPT_KRAKEN
 from rotkehlchen.chain.ethereum.transactions import EthereumTransactions
 from rotkehlchen.chain.evm.constants import GENESIS_HASH, ZERO_ADDRESS
@@ -24,6 +19,8 @@ from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.db.optimismtx import DBOptimismTx
 from rotkehlchen.errors.misc import InputError
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.constants import A_OPTIMISM_USDT
 from rotkehlchen.tests.utils.ethereum import INFURA_ETH_NODE, get_decoded_events_of_transaction
 from rotkehlchen.tests.utils.factories import make_ethereum_event
@@ -53,11 +50,13 @@ def test_decoders_initialization(ethereum_transaction_decoder: 'EthereumTransact
         'Balancerv1',
         'Balancerv2',
         'BaseBridge',
-        'Compound',
+        'Compoundv2',
+        'Compoundv3',
         'Cowswap',
         'Curve',
         'Diva',
         'Dxdaomesa',
+        'Eas',
         'Ens',
         'Eth2',
         'Gitcoin',
@@ -72,6 +71,7 @@ def test_decoders_initialization(ethereum_transaction_decoder: 'EthereumTransact
         'Octant',
         'Oneinchv1',
         'Oneinchv2',
+        'Oneinchv3',
         'Oneinchv4',
         'Oneinchv5',
         'OptimismBridge',
@@ -105,6 +105,7 @@ def test_decoders_initialization(ethereum_transaction_decoder: 'EthereumTransact
         'gnosis-chain',
         'gas',
         'ens',
+        'eas',
         'liquity',
         'Locked GNO',
         'shapeshift',
@@ -129,6 +130,7 @@ def test_decoders_initialization(ethereum_transaction_decoder: 'EthereumTransact
         'aave-v1',
         'aave-v2',
         'compound',
+        'compound-v3',
         'dxdaomesa',
         '1inch-v1',
         'sushiswap-v2',
@@ -140,6 +142,7 @@ def test_decoders_initialization(ethereum_transaction_decoder: 'EthereumTransact
         'optimism',
         'eth2',
         'cowswap',
+        '1inch-v3',
         '1inch-v4',
         '1inch-v5',
         'safe-multisig',

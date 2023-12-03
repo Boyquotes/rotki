@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 import pytest
 from pysqlcipher3 import dbapi2 as sqlcipher
-from rotkehlchen.chain.evm.accounting.structures import TxEventSettings
 
+from rotkehlchen.chain.evm.accounting.structures import TxEventSettings
 from rotkehlchen.constants.misc import DEFAULT_SQL_VM_INSTRUCTIONS_CB
 from rotkehlchen.data_handler import DataHandler
 from rotkehlchen.db.checks import sanity_check_impl
@@ -60,7 +60,7 @@ def assert_tx_hash_is_bytes(
     - Checks that comparing the entries after converting the bytes to its string equivalent yields
     the same as its `old` counterpart.
     """
-    for _old, _new in zip(old, new):
+    for _old, _new in zip(old, new, strict=True):
         assert isinstance(_new[tx_hash_index], bytes)
         assert isinstance(_old[tx_hash_index], str)
         _old = list(_old)
@@ -813,7 +813,7 @@ def test_upgrade_db_34_to_35(user_data_dir):  # pylint: disable=unused-argument
         ('_ceth_0xdAC17F958D2ee523a2206206994597C13D831ec7',),
     ]
     with db_v34.conn.read_ctx() as cursor:
-        for table_name, expected_result in zip(upgraded_tables, expected_timestamps):
+        for table_name, expected_result in zip(upgraded_tables, expected_timestamps, strict=True):
             cursor.execute(f'SELECT time from {table_name}')
             assert cursor.fetchall() == expected_result
 
@@ -937,7 +937,7 @@ def test_upgrade_db_34_to_35(user_data_dir):  # pylint: disable=unused-argument
     ]
 
     with db_v35.conn.read_ctx() as cursor:
-        for table_name, expected_result in zip(upgraded_tables, expected_timestamps):
+        for table_name, expected_result in zip(upgraded_tables, expected_timestamps, strict=True):
             cursor.execute(f'SELECT timestamp from {table_name}')
             assert cursor.fetchall() == expected_result
         cursor.execute('SELECT blockchain from web3_nodes LIMIT 1')
@@ -1817,6 +1817,7 @@ def test_upgrade_db_39_to_40(user_data_dir):  # pylint: disable=unused-argument
     cursor.execute('SELECT type, subtype from history_events WHERE event_identifier NOT LIKE ?', (PREFIX,))  # noqa: E501
     other_events_types_before = set(cursor.fetchall())
 
+    assert cursor.execute('SELECT * FROM history_events_mappings').fetchall() == [(7352, 'state', 1), (7353, 'state', 0)]  # all event mappings  # noqa: E501
     assert events_types_before == {
         ('deposit', 'spend'), ('deposit', 'fee'),
         ('withdrawal', 'receive'), ('withdrawal', 'fee'),
@@ -1829,6 +1830,7 @@ def test_upgrade_db_39_to_40(user_data_dir):  # pylint: disable=unused-argument
     # check that the evm events info is populated and connected to
     assert cursor.execute('SELECT * from evm_events_info').fetchall() == [
         (15, 'bytehash', 'aprotocol', 'aproduct', '0x4bBa290826C253BD854121346c370a9886d1bC26', None),  # noqa: E501
+        (7352, 'hash', None, None, '0', None), (7353, 'hash', None, None, '0', None),
     ]
     assert cursor.execute('SELECT * from eth_staking_events_info').fetchall() == [(16, 19564, 0)]
 
@@ -1857,6 +1859,17 @@ def test_upgrade_db_39_to_40(user_data_dir):  # pylint: disable=unused-argument
     cursor.execute('SELECT value FROM settings where name=?', ('taxable_ledger_actions',))
     assert 'airdrop' in json.loads(cursor.fetchone()[0])
 
+    # check the renaming of the VELO asset
+    bnb_velo_asset_id = 'eip155:56/erc20:0xf486ad071f3bEE968384D2E39e2D8aF0fCf6fd46'
+    assert cursor.execute(
+        'SELECT asset FROM history_events WHERE identifier IN (?, ?)',
+        ('10000', '10001'),
+    ).fetchall() == [('VELO',), (bnb_velo_asset_id,)]
+    assert cursor.execute(
+        'SELECT base_asset FROM trades WHERE id=?',
+        ('1a1ee5',),
+    ).fetchall() == [('VELO',)]
+
     cursor.close()
     db_v39.logout()
     # Execute upgrade
@@ -1872,6 +1885,7 @@ def test_upgrade_db_39_to_40(user_data_dir):  # pylint: disable=unused-argument
     cursor.execute('SELECT type, subtype from history_events WHERE event_identifier NOT LIKE ?', (PREFIX,))  # noqa: E501
     other_events_types_after = set(cursor.fetchall())
 
+    assert cursor.execute('SELECT * FROM history_events_mappings').fetchall() == [(7352, 'state', 1)]  # only customized event mapping  # noqa: E501
     assert events_types_after == {
         ('deposit', 'deposit asset'), ('spend', 'fee'),
         ('withdrawal', 'remove asset'), ('spend', 'fee'),
@@ -1882,9 +1896,7 @@ def test_upgrade_db_39_to_40(user_data_dir):  # pylint: disable=unused-argument
     # also check that the non rotki events are not affected
     assert other_events_types_after == {('deposit', 'deposit asset'), ('withdrawal', 'remove asset'), ('withdrawal', 'fee'), ('receive', 'receive'), ('staking', 'fee'), ('receive', 'none'), ('spend', 'none'), ('receive', 'donate'), ('receive', 'airdrop'), ('remove_asset', 'staking')}  # noqa: E501
     # check that after upgrade tables depending on base history events are still connected
-    assert cursor.execute('SELECT * from evm_events_info').fetchall() == [
-        (15, 'bytehash', 'aprotocol', 'aproduct', '0x4bBa290826C253BD854121346c370a9886d1bC26', None),  # noqa: E501
-    ]
+    assert cursor.execute('SELECT * from evm_events_info').fetchall() == [(7352, 'hash', None, None, '0', None)]  # noqa: E501
     assert cursor.execute('SELECT * from eth_staking_events_info').fetchall() == [(16, 19564, 0)]
     # check new tables are created and old are removed
     assert table_exists(cursor, 'skipped_external_events') is True
@@ -1911,8 +1923,7 @@ def test_upgrade_db_39_to_40(user_data_dir):  # pylint: disable=unused-argument
     ]
     # Assert used query ranges got updated
     assert cursor.execute('SELECT * from used_query_ranges').fetchall() == [
-        ('last_withdrawals_query_ts', 0, 1693141835),
-        ('coinbase_history_events_coinbase1', 0, 100),
+        ('coinbase_history_events_coinbase1', 0, 100),  # notice withdrawals old range is deleted
         ('coinbase_history_events_coinbase2', 500, 1000),
     ]
     # Check that ledger actions settings are removed
@@ -1933,6 +1944,20 @@ def test_upgrade_db_39_to_40(user_data_dir):  # pylint: disable=unused-argument
         count_cost_basis_pnl=False,
         accounting_treatment=None,
     ).serialize() == TxEventSettings.deserialize_from_db(accounting_row[4:]).serialize()
+
+    # check that the replacement for the VELO asset worked
+    assert cursor.execute(
+        'SELECT COUNT(*) FROM assets WHERE identifier=?',
+        ('VELO',),
+    ).fetchone()[0] == 0
+    assert cursor.execute(
+        'SELECT asset FROM history_events WHERE identifier IN (?, ?)',
+        ('10000', '10001'),
+    ).fetchall() == [(bnb_velo_asset_id,)] * 2
+    assert cursor.execute(
+        'SELECT base_asset FROM trades WHERE id=?',
+        ('1a1ee5',),
+    ).fetchall() == [(bnb_velo_asset_id,)]
 
 
 def test_latest_upgrade_correctness(user_data_dir):
@@ -1998,6 +2023,7 @@ def test_latest_upgrade_correctness(user_data_dir):
         'skipped_external_events',
         'accounting_rules',
         'linked_rules_properties',
+        'unresolved_remote_conflicts',
     }
     new_views = views_after_upgrade - views_before
     assert new_views == set()

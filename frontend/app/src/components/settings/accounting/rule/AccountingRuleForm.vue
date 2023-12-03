@@ -19,17 +19,6 @@ const props = withDefaults(
 
 const { editableItem } = toRefs(props);
 
-const getPlaceholderRule = (): AccountingRuleEntry => ({
-  identifier: -1,
-  eventType: '',
-  eventSubtype: '',
-  counterparty: null,
-  taxable: { value: false },
-  countEntireAmountSpend: { value: false },
-  countCostBasisPnl: { value: false },
-  accountingTreatment: null
-});
-
 const state: Ref<AccountingRuleEntry> = ref(getPlaceholderRule());
 
 const externalServerValidation = () => true;
@@ -77,7 +66,7 @@ const { addAccountingRule, editAccountingRule } = useAccountingApi();
 const { setMessage } = useMessageStore();
 
 const save = async () => {
-  const editing = !!get(editableItem);
+  const editing = Number(get(editableItem)?.identifier) > 0;
   const stateVal = get(state);
 
   const payload = {
@@ -132,7 +121,7 @@ const accountingTreatments = Object.values(AccountingTreatment).map(
 </script>
 
 <template>
-  <form class="pt-2">
+  <form>
     <HistoryEventTypeForm
       :event-type.sync="state.eventType"
       :event-subtype.sync="state.eventSubtype"

@@ -1,7 +1,7 @@
 import logging
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import EvmToken
 from rotkehlchen.chain.ethereum.modules.balancer.constants import BALANCER_LABEL, CPT_BALANCER_V2
 from rotkehlchen.chain.ethereum.modules.balancer.v2.constants import V2_SWAP, VAULT_ADDRESS
@@ -18,7 +18,7 @@ from rotkehlchen.chain.evm.decoding.structures import (
 )
 from rotkehlchen.chain.evm.decoding.types import CounterpartyDetails
 from rotkehlchen.constants.assets import A_ETH, A_WETH
-from rotkehlchen.constants.resolver import ethaddress_to_identifier
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import ChecksumEvmAddress
 from rotkehlchen.utils.misc import hex_or_bytes_to_address, hex_or_bytes_to_int
@@ -68,7 +68,7 @@ class Balancerv2Decoder(DecoderInterface):
         amount_out = hex_or_bytes_to_int(context.tx_log.data[32:64])
 
         # Create action item to propagate the information about the swap to the transfer enrichers
-        to_token = EvmToken(ethaddress_to_identifier(to_token_address))
+        to_token = self.base.get_or_create_evm_token(to_token_address)
         to_amount = asset_normalized_value(
             amount=amount_out,
             asset=to_token,

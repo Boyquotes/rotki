@@ -68,18 +68,21 @@ const action = async (notification: NotificationData) => {
 </script>
 
 <template>
-  <VCard
+  <RuiCard
     :class="[
       css.notification,
       {
         [css.action]: !!notification.action,
-        [css['fixed-height']]: !popup
+        [css['fixed-height']]: !popup,
+        [css[`bg_${color}`]]: !!color,
+        ['!rounded-none']: popup
       }
     ]"
-    :outlined="!popup"
-    :elevation="0"
+    class="!p-2"
+    no-padding
+    :variant="popup ? 'flat' : 'outlined'"
   >
-    <VListItem :class="css.body" class="flex-col items-stretch">
+    <VListItem :class="css.body" class="flex-col items-stretch p-0">
       <div class="flex pa-1">
         <VListItemAvatar class="mr-3 ml-1 my-0" :color="color">
           <div>
@@ -87,7 +90,7 @@ const action = async (notification: NotificationData) => {
           </div>
         </VListItemAvatar>
         <VListItemContent class="py-0">
-          <VListItemTitle>
+          <VListItemTitle :title="notification.title">
             {{ notification.title }}
           </VListItemTitle>
           <VListItemSubtitle>
@@ -108,14 +111,14 @@ const action = async (notification: NotificationData) => {
         </RuiTooltip>
       </div>
       <div
-        class="mt-1 px-2 text-rui-text"
+        class="mt-1 px-2 text-rui-text break-words text-sm leading-2"
         :class="[css.message, { [css.inline]: !popup }]"
       >
         <MissingKeyNotification
           v-if="notification.i18nParam"
           :params="notification.i18nParam"
         />
-        <div v-else>
+        <div v-else :title="notification.message">
           {{ notification.message }}
         </div>
       </div>
@@ -151,7 +154,7 @@ const action = async (notification: NotificationData) => {
         </RuiTooltip>
       </div>
     </VListItem>
-  </VCard>
+  </RuiCard>
 </template>
 
 <style module lang="scss">
@@ -165,12 +168,17 @@ const action = async (notification: NotificationData) => {
   &.action {
     background-color: rgba(237, 108, 2, 0.12);
   }
+
+  @each $color in (warning, error, info) {
+    &.bg_#{$color} {
+      @apply bg-rui-#{$color}/[.12] #{!important};
+    }
+  }
 }
 
 .body {
   max-width: 400px;
   height: 100% !important;
-  padding: 8px !important;
 
   &::after {
     display: none;
@@ -178,8 +186,7 @@ const action = async (notification: NotificationData) => {
 }
 
 .message {
-  font-size: 14px;
-  max-height: 60px;
+  height: 60px;
   overflow-y: auto;
   white-space: pre-line;
 

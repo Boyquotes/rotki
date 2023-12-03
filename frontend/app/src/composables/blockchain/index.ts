@@ -45,14 +45,17 @@ export const useBlockchains = () => {
     });
   };
 
-  const fetchAccounts = async (blockchain?: Blockchain): Promise<void> => {
+  const fetchAccounts = async (
+    blockchain?: Blockchain,
+    refreshEns: boolean = false
+  ): Promise<void> => {
     const promises: Promise<any>[] = [];
 
     const chains = Object.values(Blockchain);
     if (!blockchain) {
-      promises.push(...chains.map(chain => fetch(chain)));
+      promises.push(...chains.map(chain => fetch(chain, refreshEns)));
     } else {
-      promises.push(fetch(blockchain));
+      promises.push(fetch(blockchain, refreshEns));
     }
 
     await Promise.allSettled(promises);
@@ -63,7 +66,7 @@ export const useBlockchains = () => {
     periodic = false
   ) => {
     const chain = get(blockchain);
-    await fetchAccounts(chain);
+    await fetchAccounts(chain, true);
 
     const isEth = chain === Blockchain.ETH;
     const isEth2 = chain === Blockchain.ETH2;

@@ -2,20 +2,16 @@ import importlib
 import logging
 import pkgutil
 from abc import ABCMeta, abstractmethod
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, Union
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 from gevent.lock import Semaphore
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.evm_event import EvmProduct
-from rotkehlchen.accounting.structures.types import (
-    ActionType,
-    HistoryEventSubType,
-    HistoryEventType,
-)
+from rotkehlchen.accounting.structures.types import ActionType
 from rotkehlchen.api.websockets.typedefs import WSMessageType
 from rotkehlchen.assets.asset import AssetWithOracles, EvmToken
 from rotkehlchen.assets.utils import TokenEncounterInfo, get_or_create_evm_token
@@ -35,6 +31,8 @@ from rotkehlchen.errors.misc import InputError, ModuleLoadingError, NotERC20Conf
 from rotkehlchen.errors.serialization import ConversionError, DeserializationError
 from rotkehlchen.fval import FVal
 from rotkehlchen.globaldb.handler import GlobalDBHandler
+from rotkehlchen.history.events.structures.evm_event import EvmProduct
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import ChecksumEvmAddress, EvmTokenKind, EvmTransaction, EVMTxHash
 from rotkehlchen.utils.misc import from_wei, hex_or_bytes_to_address, hex_or_bytes_to_int
@@ -53,11 +51,11 @@ from .structures import (
 from .utils import maybe_reshuffle_events
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.evm_event import EvmEvent
     from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer, EvmNodeInquirerWithDSProxy
     from rotkehlchen.chain.evm.transactions import EvmTransactions
     from rotkehlchen.db.dbhandler import DBHandler
     from rotkehlchen.db.drivers.gevent import DBCursor
+    from rotkehlchen.history.events.structures.evm_event import EvmEvent
 
     from .interfaces import DecoderInterface
 
@@ -69,7 +67,7 @@ class EventDecoderFunction(Protocol):
 
     def __call__(
             self,
-            token: Optional[EvmToken],
+            token: EvmToken | None,
             tx_log: EvmTxReceiptLog,
             transaction: EvmTransaction,
             decoded_events: list['EvmEvent'],
@@ -226,7 +224,7 @@ class EVMTransactionDecoder(metaclass=ABCMeta):
 
     def _recursively_initialize_decoders(
             self,
-            package: Union[str, ModuleType],
+            package: str | ModuleType,
     ) -> DecodingRules:
         if isinstance(package, str):
             package = importlib.import_module(package)
@@ -288,13 +286,13 @@ class EVMTransactionDecoder(metaclass=ABCMeta):
 
     def try_all_rules(
             self,
-            token: Optional[EvmToken],
+            token: EvmToken | None,
             tx_log: EvmTxReceiptLog,
             transaction: EvmTransaction,
             decoded_events: list['EvmEvent'],
             action_items: list[ActionItem],
             all_logs: list[EvmTxReceiptLog],
-    ) -> Optional[DecodingOutput]:
+    ) -> DecodingOutput | None:
         """
         Execute event rules for the current tx log. Returns None when no
         new event or actions need to be propagated.
@@ -485,8 +483,8 @@ class EVMTransactionDecoder(metaclass=ABCMeta):
 
     def get_and_decode_undecoded_transactions(
             self,
-            limit: Optional[int] = None,
-            addresses: Optional[list[ChecksumEvmAddress]] = None,
+            limit: int | None = None,
+            send_ws_notifications: bool = False,
     ) -> None:
         """Checks the DB for up to `limit` undecoded transactions and decodes them.
         If a list of addresses is provided then only the transactions involving those
@@ -494,17 +492,25 @@ class EVMTransactionDecoder(metaclass=ABCMeta):
 
         This is protected by concurrent access from a lock"""
         with self.undecoded_tx_query_lock:
+            log.debug(f'Starting task to process undecoded transactions for {self.evm_inquirer.chain_name} with {limit=}')  # noqa: E501
             hashes = self.dbevmtx.get_transaction_hashes_not_decoded(
                 chain_id=self.evm_inquirer.chain_id,
                 limit=limit,
-                addresses=addresses,
             )
-            self.decode_transaction_hashes(ignore_cache=False, tx_hashes=hashes)
+            if len(hashes) != 0:
+                log.debug(f'Will decode {len(hashes)} transactions for {self.evm_inquirer.chain_name}')  # noqa: E501
+                self.decode_transaction_hashes(
+                    ignore_cache=False,
+                    tx_hashes=hashes,
+                    send_ws_notifications=send_ws_notifications,
+                )
+            log.debug(f'Finished task to process undecoded transactions for {self.evm_inquirer.chain_name} with {limit=}')  # noqa: E501
 
     def decode_transaction_hashes(
             self,
             ignore_cache: bool,
-            tx_hashes: Optional[list[EVMTxHash]],
+            tx_hashes: list[EVMTxHash] | None,
+            send_ws_notifications: bool = False,
     ) -> list['EvmEvent']:
         """Make sure that receipts are pulled + events decoded for the given transaction hashes.
 
@@ -527,7 +533,18 @@ class EVMTransactionDecoder(metaclass=ABCMeta):
                 )
                 tx_hashes = [EVMTxHash(x[0]) for x in cursor]
 
-        for tx_hash in tx_hashes:
+        total_transactions = len(tx_hashes)
+        for tx_index, tx_hash in enumerate(tx_hashes):
+            if send_ws_notifications and tx_index % 10 == 0:
+                self.msg_aggregator.add_message(
+                    message_type=WSMessageType.EVM_UNDECODED_TRANSACTIONS,
+                    data={
+                        'evm_chain': self.evm_inquirer.chain_name,
+                        'total': total_transactions,
+                        'processed': tx_index,
+                    },
+                )
+
             # TODO: Change this if transaction filter query can accept multiple hashes
             with self.database.conn.read_ctx() as cursor:
                 try:
@@ -547,6 +564,16 @@ class EVMTransactionDecoder(metaclass=ABCMeta):
             events.extend(new_events)
             if new_refresh_balances is True:
                 refresh_balances = True
+
+        if send_ws_notifications:
+            self.msg_aggregator.add_message(
+                message_type=WSMessageType.EVM_UNDECODED_TRANSACTIONS,
+                data={
+                    'evm_chain': self.evm_inquirer.chain_name,
+                    'total': total_transactions,
+                    'processed': total_transactions,
+                },
+            )
 
         self._post_process(refresh_balances=refresh_balances)
         return events
@@ -666,7 +693,7 @@ class EVMTransactionDecoder(metaclass=ABCMeta):
 
     def _maybe_decode_erc20_approve(
             self,
-            token: Optional[EvmToken],
+            token: EvmToken | None,
             tx_log: EvmTxReceiptLog,
             transaction: EvmTransaction,
             decoded_events: list['EvmEvent'],  # pylint: disable=unused-argument
@@ -781,7 +808,7 @@ class EVMTransactionDecoder(metaclass=ABCMeta):
 
     def _maybe_decode_erc20_721_transfer(
             self,
-            token: Optional[EvmToken],
+            token: EvmToken | None,
             tx_log: EvmTxReceiptLog,
             transaction: EvmTransaction,
             decoded_events: list['EvmEvent'],  # pylint: disable=unused-argument
@@ -941,7 +968,7 @@ class EVMTransactionDecoder(metaclass=ABCMeta):
 
     @staticmethod
     @abstractmethod
-    def _address_is_exchange(address: ChecksumEvmAddress) -> Optional[str]:
+    def _address_is_exchange(address: ChecksumEvmAddress) -> str | None:
         """Takes an address and returns if it's an exchange in the given chain
         and the counterparty to use if it is."""
 

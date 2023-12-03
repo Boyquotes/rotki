@@ -7,7 +7,7 @@ import pytest
 import requests
 from freezegun import freeze_time
 
-from rotkehlchen.assets.asset import Asset, CustomAsset, EvmToken, UnderlyingToken
+from rotkehlchen.assets.asset import Asset, CustomAsset, EvmToken, FiatAsset, UnderlyingToken
 from rotkehlchen.assets.utils import get_or_create_evm_token
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants import ZERO
@@ -39,9 +39,10 @@ from rotkehlchen.inquirer import (
     CURRENT_PRICE_CACHE_SECS,
     DEFAULT_RATE_LIMIT_WAITING_TIME,
     CurrentPriceOracle,
+    Inquirer,
     _query_currency_converterapi,
 )
-from rotkehlchen.interfaces import HistoricalPriceOracleInterface
+from rotkehlchen.interfaces import CurrentPriceOracleInterface
 from rotkehlchen.tests.utils.constants import A_CNY, A_JPY
 from rotkehlchen.tests.utils.mock import MockResponse
 from rotkehlchen.types import (
@@ -78,6 +79,20 @@ def test_query_realtime_price_apis(inquirer):
     usd = A_USD.resolve_to_fiat_asset()
     result = inquirer.query_historical_fiat_exchange_rates(usd, A_CNY, 1411603200)
     assert result == FVal('6.133938')
+
+
+@pytest.mark.skipif(
+    'CI' in os.environ,
+    reason='This test would contribute in rate limiting of these apis',
+)
+def test_query_price_for_not_supported_fiat_asset(inquirer: Inquirer):
+    """Check that if we can't find the price for a fiat currency we correctly return None"""
+    current_price = inquirer.query_historical_fiat_exchange_rates(
+        from_fiat_currency=A_USD.resolve_to_fiat_asset(),
+        to_fiat_currency=FiatAsset('NGN'),
+        timestamp=ts_now(),
+    )
+    assert current_price is None
 
 
 @pytest.mark.skipif(
@@ -257,19 +272,26 @@ def test_find_usd_price_all_rate_limited_in_last(inquirer):  # pylint: disable=u
     """Test zero price is returned when all the oracles have exceeded the rate
     limits requesting the USD price of an asset.
     """
-    inquirer._oracle_instances = [
-        MagicMock() for oracle in inquirer._oracles if isinstance(oracle, HistoricalPriceOracleInterface)  # noqa: E501
-    ]
+    class OracleMock(CurrentPriceOracleInterface):
+        def __init__(self, name):
+            self.rate_limited_in_last_call_count = 0
+            self.query_current_price_call_count = 0
+            super().__init__(name)
 
-    for oracle_instance in inquirer._oracle_instances:
-        oracle_instance.rate_limited_in_last.return_value = True
+        def rate_limited_in_last(self, seconds):
+            self.rate_limited_in_last_call_count += 1
+            return True
+
+        def query_current_price(self, from_asset, to_asset, match_main_currency):
+            self.query_current_price_call_count += 1
+
+    inquirer._oracle_instances = [OracleMock('x') for _ in inquirer._oracles]
 
     price = inquirer.find_usd_price(A_BTC)
-
     assert price == ZERO_PRICE
     for oracle_instance in inquirer._oracle_instances:
-        assert oracle_instance.rate_limited_in_last.call_count == 1
-        assert oracle_instance.query_current_price.call_count == 0
+        assert oracle_instance.rate_limited_in_last_call_count == 1
+        assert oracle_instance.query_current_price_call_count == 0
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])

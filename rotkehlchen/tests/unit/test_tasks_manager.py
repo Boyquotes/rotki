@@ -3,16 +3,21 @@ from unittest.mock import MagicMock, patch
 
 import gevent
 import pytest
+from rotkehlchen.assets.asset import EvmToken
 
 from rotkehlchen.chain.bitcoin.hdkey import HDKey
 from rotkehlchen.chain.bitcoin.xpub import XpubData
+from rotkehlchen.chain.ethereum.modules.eth2.constants import WITHDRAWALS_TS_PREFIX
 from rotkehlchen.constants.timing import DATA_UPDATES_REFRESH
 from rotkehlchen.db.constants import LAST_DATA_UPDATES_KEY
 from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.db.settings import ModifiableDBSettings
 from rotkehlchen.db.updates import RotkiDataUpdater
 from rotkehlchen.errors.misc import RemoteError
+from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.premium.premium import Premium, PremiumCredentials, SubscriptionStatus
+from rotkehlchen.serialization.deserialize import deserialize_timestamp
+from rotkehlchen.tasks.assets import LAST_SPAM_ASSETS_DETECT_KEY
 from rotkehlchen.tasks.manager import PREMIUM_STATUS_CHECK, TaskManager
 from rotkehlchen.tasks.utils import should_run_periodic_task
 from rotkehlchen.tests.utils.ethereum import (
@@ -23,7 +28,7 @@ from rotkehlchen.tests.utils.ethereum import (
 from rotkehlchen.tests.utils.factories import make_evm_address
 from rotkehlchen.tests.utils.mock import mock_evm_chains_with_transactions
 from rotkehlchen.tests.utils.premium import VALID_PREMIUM_KEY, VALID_PREMIUM_SECRET
-from rotkehlchen.types import ChainID, Location, SupportedBlockchain
+from rotkehlchen.types import SPAM_PROTOCOL, ChainID, EvmTokenKind, Location, SupportedBlockchain
 from rotkehlchen.utils.hexbytes import hexstring_to_bytes
 from rotkehlchen.utils.misc import ts_now
 
@@ -192,6 +197,7 @@ def test_maybe_schedule_exchange_query_ignore_exchanges(
     assert task_manager._maybe_schedule_exchange_history_query() is None
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('one_receipt_in_db', [True, False])
 @pytest.mark.parametrize('ethereum_accounts', [[TEST_ADDR1, TEST_ADDR2]])
 def test_maybe_schedule_ethereum_txreceipts(
@@ -449,3 +455,61 @@ def test_maybe_kill_running_tx_query_tasks(rotkehlchen_api_server, ethereum_acco
         rotki.task_manager.potential_tasks = []
         rotki.task_manager.schedule()
         assert len(rotki.task_manager.running_greenlets) == 0
+
+
+@pytest.mark.parametrize('ethereum_accounts', [['0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12', '0x9531C059098e3d194fF87FebB587aB07B30B1306']])  # noqa: E501
+@pytest.mark.parametrize('ethereum_modules', [['eth2']])
+def test_maybe_query_ethereum_withdrawals(task_manager, ethereum_accounts):
+    task_manager.potential_tasks = [task_manager._maybe_query_withdrawals]
+    query_patch = patch.object(
+        task_manager.chains_aggregator.get_module('eth2'),
+        'query_services_for_validator_withdrawals',
+        side_effect=lambda *args, **kwargs: None,
+    )
+
+    with query_patch as query_mock:
+        task_manager.schedule()
+        gevent.sleep(0)  # context switch for execution of task
+        assert query_mock.call_count == 1
+
+        # test the used query ranges
+        for hours_ago, expected_call_count, msg in (
+                (5, 2, 'should have ran again'),
+                (1, 2, 'should not have ran again'),
+        ):
+            with task_manager.database.user_write() as write_cursor:
+                for address in ethereum_accounts:
+                    write_cursor.execute(
+                        'INSERT OR REPLACE INTO used_query_ranges(name, start_ts, end_ts) VALUES(?, ?, ?)',  # noqa: E501
+                        (f'{WITHDRAWALS_TS_PREFIX}_{address}', 0, ts_now() - 3600 * hours_ago),
+                    )
+            task_manager.schedule()
+            gevent.sleep(0)  # context switch for execution of task
+            assert query_mock.call_count == expected_call_count, msg
+
+
+def test_maybe_detect_new_spam_tokens(
+        task_manager: TaskManager,
+        database: 'DBHandler',
+        globaldb: GlobalDBHandler,
+) -> None:
+    """Test that the task updating the list of known spam assets works correctly"""
+    token = EvmToken.initialize(  # add a token that will be detected as spam
+        address=make_evm_address(),
+        chain_id=ChainID.ETHEREUM,
+        token_kind=EvmTokenKind.ERC20,
+        name='$ vanityeth.org ($ vanityeth.org)',
+        symbol='VANITYTOKEN',
+    )
+    globaldb.add_asset(asset=token)
+
+    task_manager.potential_tasks = [task_manager._maybe_detect_new_spam_tokens]
+    task_manager.schedule()
+    gevent.joinall(task_manager.running_greenlets[task_manager._maybe_detect_new_spam_tokens])  # wait for the task to finish since it might context switch while running  # noqa: E501
+
+    updated_token = EvmToken(token.identifier)
+    assert updated_token.protocol == SPAM_PROTOCOL
+    with database.conn.read_ctx() as cursor:
+        assert token.identifier in database.get_ignored_asset_ids(cursor=cursor)
+        cursor.execute('SELECT value FROM settings WHERE name=?', (LAST_SPAM_ASSETS_DETECT_KEY,))
+        assert deserialize_timestamp(cursor.fetchone()[0]) - ts_now() < 2  # saved timestamp should be recent  # noqa: E501

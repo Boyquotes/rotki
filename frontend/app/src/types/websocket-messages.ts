@@ -36,6 +36,16 @@ export const EvmTransactionQueryData = z
   })
   .merge(EvmChainAddress);
 
+export const EvmUndecodedTransactionsData = z.object({
+  evmChain: z.string(),
+  processed: z.number(),
+  total: z.number()
+});
+
+export type EvmUndecodedTransactionsData = z.infer<
+  typeof EvmUndecodedTransactionsData
+>;
+
 export const HistoryEventsQueryStatus = {
   QUERYING_EVENTS_STARTED: 'querying_events_started',
   QUERYING_EVENTS_STATUS_UPDATE: 'querying_events_status_update',
@@ -128,10 +138,19 @@ export const RefreshBalancesData = z.object({
   blockchain: z.nativeEnum(Blockchain)
 });
 
+export const AccountingRuleConflictData = z.object({
+  numOfConflicts: z.number()
+});
+
+export type AccountingRuleConflictData = z.infer<
+  typeof AccountingRuleConflictData
+>;
+
 export const SocketMessageType = {
   LEGACY: 'legacy',
   BALANCES_SNAPSHOT_ERROR: 'balance_snapshot_error',
   EVM_TRANSACTION_STATUS: 'evm_transaction_status',
+  EVM_UNDECODED_TRANSACTIONS: 'evm_undecoded_transactions',
   HISTORY_EVENTS_STATUS: 'history_events_status',
   PREMIUM_STATUS_UPDATE: 'premium_status_update',
   DB_UPGRADE_STATUS: 'db_upgrade_status',
@@ -140,7 +159,8 @@ export const SocketMessageType = {
   NEW_EVM_TOKEN_DETECTED: 'new_evm_token_detected',
   MISSING_API_KEY: 'missing_api_key',
   REFRESH_BALANCES: 'refresh_balances',
-  DB_UPLOAD_RESULT: 'database_upload_result'
+  DB_UPLOAD_RESULT: 'database_upload_result',
+  ACCOUNTING_RULE_CONFLICT: 'accounting_rule_conflict'
 } as const;
 
 export type SocketMessageType =
@@ -211,19 +231,26 @@ const RefreshBalancesMessage = z.object({
   data: RefreshBalancesData
 });
 
-export const WebsocketMessage = UnknownWebsocketMessage.or(
-  LegacyWebsocketMessage
-)
-  .or(BalancesSnapshotErrorMessage)
-  .or(EvmTransactionStatusMessage)
-  .or(HistoryEventsStatusMessage)
-  .or(PremiumStatusUpdateMessage)
-  .or(DbUpgradeStatusMessage)
-  .or(DataMigrationStatusMessage)
-  .or(MigratedAccountsMessage)
-  .or(NewEvmTokenDetectedMessage)
-  .or(MissingApiKeyMessage)
-  .or(RefreshBalancesMessage)
-  .or(DbUploadResultMessage);
+const AccountingRuleConflictMessage = z.object({
+  type: z.literal(SocketMessageType.ACCOUNTING_RULE_CONFLICT),
+  data: AccountingRuleConflictData
+});
+
+export const WebsocketMessage = z.union([
+  UnknownWebsocketMessage,
+  LegacyWebsocketMessage,
+  BalancesSnapshotErrorMessage,
+  EvmTransactionStatusMessage,
+  HistoryEventsStatusMessage,
+  PremiumStatusUpdateMessage,
+  DbUpgradeStatusMessage,
+  DataMigrationStatusMessage,
+  MigratedAccountsMessage,
+  NewEvmTokenDetectedMessage,
+  MissingApiKeyMessage,
+  RefreshBalancesMessage,
+  DbUploadResultMessage,
+  AccountingRuleConflictMessage
+]);
 
 export type WebsocketMessage = z.infer<typeof WebsocketMessage>;

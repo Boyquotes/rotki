@@ -55,7 +55,7 @@
       "addresses": "Addresses",
       "addresses_entries": "no entries | {count} unique entry | {count} unique entries",
       "addresses_hint": "Insert multiple comma separated addresses",
-      "blockchain": "Choose blockchain",
+      "blockchain": "Επιλέξτε blockchain | Επιλέξτε blockchains",
       "btc": {
         "derivation_path": "Derivation Path",
         "derivation_path_hint": "Optional",
@@ -128,6 +128,7 @@
   },
   "account_settings_display": {
     "account_asset_movement": "Account asset movement fees were taken into account:",
+    "cost_basis_fees": "Cost basis fees were taken into account:",
     "cost_basis_method": "Cost basis method:",
     "crypto2crypto": "Crypto to crypto trades were taken into account:",
     "days": "{days} days",
@@ -144,6 +145,7 @@
       "labels": {
         "account_for_assets_movements": "Take into account assets movements fees",
         "calculate_past_cost_basis": "Calculate past cost basis when creating the report",
+        "include_fees_in_cost_basis": "Take into account cost basis fees",
         "cost_basis_method": "Cost basis method",
         "eth_staking_taxable_after_withdrawal_enabled": "Should omit ETH staking events from accounting until withdrawals are enabled",
         "include_crypto2crypto": "Take into account crypto to crypto trades",
@@ -563,6 +565,13 @@
       "error": {
         "description": "Failed to query history events: {error}",
         "title": "History Events Query"
+      },
+      "missing_rule": {
+        "title": "Γεγονός που λείπει λογιστικός κανόνας",
+        "message": "Το γεγονός αυτό δεν θα υποβληθεί σε λογιστική επεξεργασία. Για να το χειριστείτε, πρέπει να επιλέξετε μία από αυτές τις επιλογές:",
+        "re_decode": "Επανακωδικοποίηση συμβάντος",
+        "edit": "Επεξεργασία συμβάντος",
+        "add_rule": "Προσθήκη λογιστικού κανόνα που λείπει"
       }
     },
     "history_events_export": {
@@ -931,7 +940,7 @@
     "name": "rotki"
   },
   "asset_balances": {
-    "loading": "Please wait while rotki queries the blockchain..."
+    "loading": "Περιμένετε όσο η rotki ζητά τα υπόλοιπα..."
   },
   "asset_form": {
     "fetch_latest_icon": {
@@ -1414,7 +1423,6 @@
     "select_directory": "Επιλέξτε έναν κατάλογο",
     "status": "Κατάσταση",
     "total": "Total",
-    "tx": "Tx",
     "tx_hash": "Tx Hash",
     "type": "Type",
     "unclaimed": "αδιεκδίκητος",
@@ -1460,16 +1468,16 @@
     "message": "Connecting to rotki backend"
   },
   "cost_basis_table": {
-    "complete": "(Complete)",
+    "complete": "Complete",
     "cost_basis": "Cost Basis",
     "headers": {
       "amount": "Amount Sold",
       "full_amount": "Total acquired by event",
       "rate": "{currency} Rate",
       "remaining_amount": "Remaining after selling",
-      "taxable": "Taxable ?"
+      "taxable": "Taxable"
     },
-    "incomplete": "(Incomplete)"
+    "incomplete": "Incomplete"
   },
   "create_account": {
     "credentials": {
@@ -1478,20 +1486,20 @@
       "label_password": "Κωδικός πρόσβασης",
       "label_password_backup_reminder": "Το rotki αποθηκεύει όλα τα δεδομένα χρήστη τοπικά. Κατανοώ ότι εάν χάσω τον κωδικό πρόσβασής μου, χάνω την πρόσβαση στα δεδομένα μου. Έχω δημιουργήσει ένα αντίγραφο ασφαλείας του κωδικού πρόσβασης.",
       "label_password_repeat": "Επανάληψη κωδικού πρόσβασης",
-      "label_username": "Όνομα χρήστη",
+      "label_username": "Ονομα προφίλ",
       "password_sync_requirement": "Βεβαιωθείτε ότι ο λογαριασμός χρησιμοποιεί τον ίδιο κωδικό πρόσβασης με την αρχική βάση δεδομένων. Δεν μπορείτε να αποκτήσετε πρόσβαση στη βάση δεδομένων αν εισαγάγετε διαφορετικό κωδικό πρόσβασης.",
       "validation": {
         "check_prompt": "Επιβεβαιώστε ότι έχετε διαβάσει και δημιουργήσει αντίγραφο ασφαλείας",
         "non_empty_password": "Παρακαλώ δώστε έναν κωδικό πρόσβασης",
         "non_empty_password_confirmation": "Παρακαλώ δώστε επιβεβαίωση κωδικού πρόσβασης",
-        "non_empty_username": "Παρακαλώ δώστε ένα όνομα χρήστη",
+        "non_empty_username": "Δώστε ένα όνομα προφίλ",
         "password_confirmation_mismatch": "Η επιβεβαίωση του κωδικού πρόσβασης δεν ταιριάζει με τον παρεχόμενο κωδικό πρόσβασης",
-        "valid_username": "Ένα όνομα χρήστη πρέπει να περιέχει μόνο αλφαριθμητικούς χαρακτήρες και να μην περιέχει κενά"
+        "valid_username": "Ένα όνομα προφίλ πρέπει να περιέχει μόνο αλφαριθμητικούς χαρακτήρες και να μην έχει κενά"
       }
     },
     "have_account": {
       "description": "Έχετε ήδη λογαριασμό;",
-      "log_in": "Σύνδεση"
+      "log_in": "Ξεκλειδώστε τον λογαριασμό σας"
     },
     "introduction": {
       "description": "Το rotki είναι μια τοπική εφαρμογή που σέβεται την ιδιωτικότητά σας.\n\nΟι λογαριασμοί του rotki κρυπτογραφούνται χρησιμοποιώντας τον κωδικό πρόσβασής σας και το {highlight}.\n\nΟ λογαριασμός που δημιουργείτε εδώ είναι χρήσιμος μόνο για την εφαρμογή, στον ιστό χρησιμοποιούμε διαφορετική βάση δεδομένων.",
@@ -1609,7 +1617,7 @@
               "location": "This is optional. If specified, the location balance data will be adjusted automatically. If not, you have to update location balance data manually."
             },
             "nft": "NFT",
-            "nft_hint": "Accepted format: \"_nft_{ETH address}_{collection number}\"",
+            "nft_hint": "Accepted format: \"_nft_{'ETH address'}_{'collection number'}\"",
             "optional": "Optional",
             "preview": {
               "from": "From",
@@ -1878,7 +1886,11 @@
     }
   },
   "error": {
-    "process_running": "A rotki backend process is already running. This is known to cause problems with the operation of the application. Please kill these processes pids: [{pids}] and restart the application."
+    "process_running": "A rotki backend process is already running. This is known to cause problems with the operation of the application. Please kill these processes pids: [{pids}] and restart the application.",
+    "generic": {
+      "title": "Κάτι πήγε στραβά",
+      "message": "Αντιμετωπίσαμε ένα εσωτερικό σφάλμα κατά την επεξεργασία του αιτήματός σας. Εάν αυτό το πρόβλημα παραμένει, επικοινωνήστε με την ομάδα υποστήριξής μας με τα παρακάτω στοιχεία: \nΚωδικός σφάλματος: {code} \nΜήνυμα σφάλματος: {message} \nΔιαδρομή: {path}"
+    }
   },
   "error_screen": {
     "backend_error": "There is a problem with the backend.",
@@ -2027,12 +2039,18 @@
     "tx_url": "Transactions will open at {txUrl}"
   },
   "external_services": {
+    "api_key": "API key",
     "beaconchain": {
       "delete_tooltip": "Deletes the Beaconcha.in API key",
       "description": "rotki uses Beaconcha.in to obtain information about ETH staking in your portfolio. An API key is only needed if you are being rate-limited.",
       "hint": "Enter your Beaconcha.in API key",
-      "label": "API key",
       "title": "Beaconcha.in"
+    },
+    "blockscout": {
+      "delete_tooltip": "Διαγράφει το κλειδί Blockscout API",
+      "description": "Το rotki χρησιμοποιεί το Blockscout για να λαμβάνει πληροφορίες σχετικά με τα ερωτήματα ανάληψης ETH και άλλα. Ένα κλειδί API είναι απαραίτητο μόνο αν έχετε περιορισμένο ρυθμό.",
+      "hint": "Εισαγάγετε το κλειδί για το Blockscout API",
+      "title": "Blockscout"
     },
     "confirmation": {
       "message": "Are you sure you want to delete this API Key?",
@@ -2042,14 +2060,12 @@
       "delete_tooltip": "Deletes the Covalent API key",
       "description": "rotki can use Covalent to get historical data for various chains",
       "hint": "Enter your Covalent API key",
-      "label": "API key",
       "title": "Covalent"
     },
     "cryptocompare": {
       "delete_tooltip": "Deletes the CryptoCompare API key",
       "description": "rotki uses cryptocompare to obtain price information about assets in your portfolio. An API key is only needed if you have a lot of assets and are being rate-limited.",
       "hint": "Enter your CryptoCompare API key",
-      "label": "API key",
       "title": "CryptoCompare"
     },
     "delete_error": {
@@ -2059,14 +2075,12 @@
       "delete_tooltip": "Deletes the Etherscan API key",
       "description": "Recommended for any EVM blockchain balances or transactions if you are not using your own node.",
       "hint": "Enter your Etherscan API key",
-      "label": "API key",
       "title": "Etherscan"
     },
     "loopring": {
       "delete_tooltip": "Delete your Loopring API key",
       "description": "Used to query balances in Loopring. This API key will only be able to query the account that generated this key.",
       "hint": "Enter your Loopring API key",
-      "label": "API key",
       "not_enabled": "The Loopring module is not enabled. Your balances won't be retrieved unless you enable the loopring module",
       "settings": "Settings",
       "title": "Loopring"
@@ -2075,7 +2089,6 @@
       "delete_tooltip": "Delete your OpenSea API key",
       "description": "Used to query NFT information and balances from OpenSea.",
       "hint": "Enter your OpenSea API key",
-      "label": "API Key",
       "link": "You can apply for an API key {link}",
       "title": "Opensea"
     },
@@ -2293,7 +2306,8 @@
       "language": "Selected language",
       "treat_eth2_as_eth": "Should treat ETH2 (Staked ETH) as ETH",
       "version_update_check": "Set the version update check period while in app",
-      "version_update_check_enabled": "Enabled"
+      "version_update_check_enabled": "Enabled",
+      "chains_to_skip_detection": "Αλυσίδες EVM για τις οποίες πρέπει να παραλειφθεί η αυτόματη ανίχνευση"
     },
     "language_contribution_tooltip": "This feature is experimental and may not work as expected for some languages. This is because all static sentences in the app have to be manually translated and that is a long and ongoing process. Therefore, we need your contribution to speed it up. Click here for more information.",
     "nft_setting": {
@@ -2383,6 +2397,10 @@
         "error": "Error setting version update check frequency",
         "invalid_frequency": "Period must be between {start} and {end} hours",
         "non_empty": "Please enter the number of hours"
+      },
+      "chains_to_skip_detection": {
+        "error": "Σφάλμα ρύθμισης των αλυσίδων EVM για τις οποίες θα παραλειφθεί η αυτόματη ανίχνευση μαρκών",
+        "success": "Αλυσίδες EVM για τις οποίες πρέπει να παραλείψετε την αυτόματη ανίχνευση token αποθηκεύτηκαν με επιτυχία"
       }
     },
     "version_update_check_hint": "How often (in hours) your app version will be checked for update"
@@ -2722,7 +2740,7 @@
   },
   "login": {
     "button_no_account": "Δεν έχετε λογαριασμό;",
-    "button_signup": "Εγγραφείτε",
+    "button_create_account": "Δημιουργήστε λογαριασμό",
     "credential_error": {
       "description": "Εάν δεν έχετε δημιουργήσει ακόμη λογαριασμό εφαρμογής, θα πρέπει να το κάνετε για να συνδεθείτε.",
       "support": "Εάν χρειάζεστε βοήθεια, επικοινωνήστε μαζί μας στο κανάλι υποστήριξης στο discord.",
@@ -2745,18 +2763,18 @@
       "welcome": "Καλως ΗΡΘΑΤΕ! Παρακαλώ εισάγετε τα στοιχεία σας."
     },
     "label_password": "Password",
-    "label_username": "Username",
+    "label_username": "Profile Name",
     "logout": "Logout",
     "remember_password": "Remember Password",
     "remember_password_tooltip": "The password will be saved on password management tool on your local machine (e.g. Keychain in MacOS)",
-    "remember_username": "Remember Username",
+    "remember_username": "Θυμηθείτε το όνομα προφίλ",
     "sync_error": {
       "local_modified": "Local last modified: {0}",
       "question": "Do you want to replace your local database?",
       "remote_modified": "Remote last modified: {0}",
       "title": "User action required for DB sync"
     },
-    "title": "Συνδεθείτε",
+    "title": "Ξεκλείδωμα λογαριασμού",
     "upgrading_db": {
       "current": "Βήμα {currentStep} από {totalSteps} της αναβάθμισής της βάσης δεδομένων v{currentVersion}.",
       "title": "Αναβάθμιση βάσης δεδομένων",
@@ -2764,12 +2782,12 @@
     },
     "validation": {
       "non_empty_password": "Please provide a password",
-      "non_empty_username": "Please provide a user name",
-      "valid_username": "A username must contain only alphanumeric characters and have no spaces"
+      "non_empty_username": "Δώστε ένα όνομα προφίλ",
+      "valid_username": "Ένα όνομα προφίλ πρέπει να περιέχει μόνο αλφαριθμητικούς χαρακτήρες και να μην έχει κενά"
     },
     "welcome_description": "Καλώς ήρθατε στον διαχειριστή χαρτοφυλακίου ανοιχτού κώδικα που προστατεύει το απόρρητό σας.",
     "welcome_title": "Καλώς ήρθατε στο rotki",
-    "welcome_update_message": "Συνδεθείτε για να εξερευνήσετε τις αλλαγές που έχουμε κάνει."
+    "welcome_update_message": "Ξεκλειδώστε τον λογαριασμό σας για να εξερευνήσετε τις αλλαγές που κάναμε."
   },
   "macos_unsupported": {
     "header": "Unsupported macOS Version",
@@ -3063,7 +3081,7 @@
     },
     "missing_api_key": {
       "action": "Εισάγετε κλειδί",
-      "message": "Δεν έχετε διαμορφώσει ένα κλειδί API {location} {service}. Τα ερωτήματα rotki {service} θα εξακολουθούν να λειτουργούν αλλά θα είναι πολύ αργά. Εάν δεν χρησιμοποιείτε τον δικό σας κόμβο {location}, συνιστάται να μεταβείτε στο {url}, να δημιουργήσετε ένα κλειδί API και, στη συνέχεια, να το εισαγάγετε στη ρύθμιση διαπιστευτηρίων εξωτερικής υπηρεσίας του rotki",
+      "message": "Δεν έχετε διαμορφώσει ένα κλειδί API {location} {service}. Τα ερωτήματα rotki {location} {service} θα εξακολουθούν να λειτουργούν αλλά θα είναι πολύ αργά. Εάν δεν χρησιμοποιείτε τον δικό σας κόμβο {location}, συνιστάται να μεταβείτε στο {url}, να δημιουργήσετε ένα κλειδί API και, στη συνέχεια, να το εισαγάγετε στη ρύθμιση διαπιστευτηρίων εξωτερικής υπηρεσίας του rotki",
       "title": "Κλειδί API {location} {service}"
     },
     "new_detected_token": {
@@ -3355,11 +3373,13 @@
     "to_asset": "To Asset"
   },
   "price_oracle_selection": {
-    "hint": "* Disabling all the oracles will make it impossible to query prices for assets."
+    "hint": "* Η απενεργοποίηση όλων των μαντείων θα καταστήσει αδύνατη την αναζήτηση τιμών για στοιχεία. Ίσως χρειαστεί να κάνετε κλικ στην επιλογή 'Ανανέωση τιμών' για να εφαρμόσετε τις αλλαγές."
   },
   "price_oracle_settings": {
+    "data_name": "price oracle",
     "historic_prices": "Historic Prices",
     "latest_prices": "Latest Prices",
+    "latest_prices_update": "Ενημερώθηκαν οι τελευταίες τιμές παραγγελιών. Ίσως χρειαστεί να κάνετε κλικ στο κουμπί 'Ανανέωση τιμών' για να εφαρμόσετε τις αλλαγές.",
     "subtitle": "Manage which price oracles are used, in which order.",
     "title": "Price oracle settings"
   },
@@ -3877,9 +3897,6 @@
       },
       "title": "Ethereum Transaction Query Status"
     },
-    "redecode_events": {
-      "title": "Redecode EVM Events"
-    },
     "refresh_tooltip": "Fetch latest events",
     "title": "History Events",
     "unignore": "Unignore Tx in Accounting"
@@ -3905,7 +3922,7 @@
     }
   },
   "uniswap": {
-    "assets_non_premium": "Upgrade to {0} to see assets information",
+    "assets_non_premium": "Upgrade to @:uniswap.premium to see assets information",
     "loading": "Please wait while your liquidity pools are getting loaded...",
     "loading_non_premium": "Loading the liquidity pool balances might take a while... Consider upgrading to {0} for faster load times.",
     "premium": "premium",
@@ -3928,7 +3945,6 @@
       "message": "An error occurred while installing the application update: {message}"
     },
     "messages": "A new version of rotki is available. See {releaseNotes}.",
-    "progress": "{percentage} %",
     "release_notes": "release notes",
     "restart": "rotki will restart in a moment to apply the update."
   },

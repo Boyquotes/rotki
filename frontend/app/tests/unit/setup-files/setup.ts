@@ -52,6 +52,19 @@ beforeAll(() => {
     };
   });
 
+  vi.mock('@vueuse/core', async () => {
+    const mod =
+      await vi.importActual<typeof import('@vueuse/core')>('@vueuse/core');
+
+    return {
+      ...mod,
+      useElementBounding: vi
+        .fn()
+        .mockReturnValue({ left: 0, right: 0, top: 0, bottom: 0 }),
+      useFocus: vi.fn().mockReturnValue({ focused: false })
+    };
+  });
+
   vi.mock('@/composables/usei18n', async () => ({
     useI18n: () => ({
       t: mockT,

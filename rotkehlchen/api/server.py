@@ -2,7 +2,7 @@ import json
 import logging
 import sys
 from http import HTTPStatus
-from typing import Any, Optional, Union
+from typing import Any
 
 import werkzeug
 from flask import Blueprint, Flask, Response, abort, jsonify, request
@@ -23,6 +23,7 @@ from rotkehlchen.api.v1.resources import (
     AccountingLinkablePropertiesResource,
     AccountingReportDataResource,
     AccountingReportsResource,
+    AccountingRulesConflictsResource,
     AccountingRulesResource,
     AddressbookResource,
     AirdropsMetadataResource,
@@ -153,10 +154,7 @@ from rotkehlchen.api.websockets.notifier import RotkiNotifier, RotkiWSApp
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 
 URLS = list[
-    Union[
-        tuple[str, type[MethodView]],
-        tuple[str, type[MethodView], str],
-    ]
+    tuple[str, type[MethodView]] | tuple[str, type[MethodView], str]
 ]
 
 
@@ -232,6 +230,7 @@ URLS_V1: URLS = [
         'per_report_data_resource',
     ),
     ('/accounting/rules', AccountingRulesResource),
+    ('/accounting/rules/conflicts', AccountingRulesConflictsResource),
     ('/accounting/rules/info', AccountingLinkablePropertiesResource),
     ('/queried_addresses', QueriedAddressesResource),
     ('/blockchains/supported', SupportedChainsResource),
@@ -333,10 +332,10 @@ def setup_urls(
 ) -> None:
     for url_tuple in urls:
         if len(url_tuple) == 2:
-            route, resource_cls = url_tuple  # type: ignore
+            route, resource_cls = url_tuple
             endpoint = resource_cls.__name__.lower()
         elif len(url_tuple) == 3:
-            route, resource_cls, endpoint = url_tuple  # type: ignore
+            route, resource_cls, endpoint = url_tuple
         else:
             raise ValueError(f'Invalid URL format: {url_tuple!r}')
         blueprint.add_url_rule(
@@ -361,8 +360,8 @@ def handle_request_parsing_error(
         err: ValidationError,
         _request: werkzeug.local.LocalProxy,
         _schema: Schema,
-        error_status_code: Optional[int],  # pylint: disable=unused-argument
-        error_headers: Optional[dict],  # pylint: disable=unused-argument
+        error_status_code: int | None,  # pylint: disable=unused-argument
+        error_headers: dict | None,  # pylint: disable=unused-argument
 ) -> None:
     """ This handles request parsing errors generated for example by schema
     field validation failing."""
@@ -387,7 +386,7 @@ class APIServer:
             self,
             rest_api: RestAPI,
             ws_notifier: RotkiNotifier,
-            cors_domain_list: Optional[list[str]] = None,
+            cors_domain_list: list[str] | None = None,
     ) -> None:
         flask_app = Flask(__name__)
         if cors_domain_list:
@@ -404,7 +403,7 @@ class APIServer:
         self.flask_app = flask_app
         self.blueprint = blueprint
 
-        self.wsgiserver: Optional[WSGIServer] = None
+        self.wsgiserver: WSGIServer | None = None
         self.flask_app.register_blueprint(self.blueprint)
 
         self.flask_app.errorhandler(HTTPStatus.NOT_FOUND)(endpoint_not_found)

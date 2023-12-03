@@ -38,6 +38,7 @@ const props = withDefaults(
     loadingText?: string;
     options?: TablePagination<any> | null;
     disableFloatingHeader?: boolean;
+    disableHeaderPagination?: boolean;
     customGroup?: (
       items: any[],
       groupBy: string[],
@@ -57,6 +58,7 @@ const props = withDefaults(
     loadingText: '',
     options: () => null,
     disableFloatingHeader: false,
+    disableHeaderPagination: false,
     customGroup: undefined,
     flat: false
   }
@@ -244,11 +246,11 @@ const { dark } = useTheme();
       </template>
 
       <template
-        v-if="!hideDefaultFooter"
+        v-if="!hideDefaultFooter && !disableHeaderPagination"
         #top="{ pagination, options: opt, updateOptions }"
       >
         <VDataFooter
-          class="!border-t-0"
+          class="!border-t-0 border-b"
           v-bind="footerProps"
           :pagination="pagination"
           :options="opt"
@@ -304,6 +306,10 @@ const { dark } = useTheme();
     }
   }
 
+  .v-data-footer {
+    border-color: var(--border-color);
+  }
+
   &.v-data-table--dense {
     .v-data-footer__pagination {
       @apply ml-2 -mr-4;
@@ -324,6 +330,67 @@ const { dark } = useTheme();
           .table-expand-container {
             height: auto !important;
             display: block;
+          }
+        }
+      }
+    }
+  }
+
+  tbody {
+    &:hover {
+      td {
+        &[rowspan] {
+          @apply bg-rui-grey-200;
+        }
+      }
+    }
+
+    tr {
+      &.append-row {
+        border-color: var(--border-color);
+
+        td {
+          @apply border-none;
+        }
+
+        @apply border-b;
+      }
+
+      &:not(.v-data-table__expanded__content) {
+        &:not(.v-data-table__empty-wrapper) {
+          &:hover {
+            td {
+              @apply bg-rui-grey-200;
+            }
+          }
+        }
+      }
+
+      td {
+        border-color: var(--border-color);
+        @apply border-b;
+      }
+    }
+  }
+
+  &.theme {
+    &--dark {
+      tbody {
+        tr {
+          &:not(.v-data-table__expanded__content) {
+            &:hover {
+              td {
+                @apply bg-rui-grey-800;
+              }
+            }
+          }
+        }
+
+        &:hover {
+          td {
+            &[rowspan] {
+              @apply bg-rui-grey-800;
+            }
           }
         }
       }
@@ -361,18 +428,6 @@ const { dark } = useTheme();
     &:empty {
       + div {
         display: none;
-      }
-    }
-  }
-}
-
-.theme {
-  &--dark {
-    :deep(.v-data-table) {
-      .v-data-table__expanded {
-        &__content {
-          background-color: var(--v-dark-lighten1) !important;
-        }
       }
     }
   }

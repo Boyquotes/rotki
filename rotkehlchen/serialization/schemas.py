@@ -135,7 +135,7 @@ class CryptoAssetSchema(CryptoAssetFieldsSchema):
             identifier_required: bool,
             coingecko: Optional['Coingecko'] = None,
             cryptocompare: Optional['Cryptocompare'] = None,
-            expected_asset_type: Optional[AssetType] = None,
+            expected_asset_type: AssetType | None = None,
     ) -> None:
         super().__init__(
             identifier_required=identifier_required,
@@ -185,8 +185,7 @@ class EvmTokenSchema(CryptoAssetFieldsSchema):
         strict=True,
         validate=webargs.validate.Range(
             min=0,
-            max=18,
-            error='Evm token decimals should range from 0 to 18',
+            error='Evm token decimals should be greater than or equal to 0',
         ),
         required=True,
     )
@@ -307,7 +306,7 @@ class AssetSchema(Schema):
     def __init__(
             self,
             identifier_required: bool,
-            disallowed_asset_types: Optional[list[AssetType]] = None,
+            disallowed_asset_types: list[AssetType] | None = None,
             coingecko: Optional['Coingecko'] = None,
             cryptocompare: Optional['Cryptocompare'] = None,
             **kwargs: Any,

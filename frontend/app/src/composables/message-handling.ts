@@ -6,9 +6,11 @@ import {
   Severity
 } from '@rotki/common/lib/messages';
 import {
+  type AccountingRuleConflictData,
   type BalanceSnapshotError,
   type DbUploadResult,
   type EvmTransactionQueryData,
+  type EvmUndecodedTransactionsData,
   type HistoryEventsQueryData,
   MESSAGE_WARNING,
   type MissingApiKey,
@@ -25,6 +27,7 @@ import { SYNC_UPLOAD } from '@/types/session/sync';
 export const useMessageHandling = () => {
   const { setQueryStatus: setTxQueryStatus } = useTxQueryStatusStore();
   const { setQueryStatus: setEventsQueryStatus } = useEventsQueryStatusStore();
+  const { setEvmUndecodedTransactions } = useHistoryStore();
   const { updateDataMigrationStatus, updateDbUpgradeStatus } =
     useSessionAuthStore();
   const { fetchBlockchainBalances } = useBlockchainBalances();
@@ -45,6 +48,12 @@ export const useMessageHandling = () => {
 
   const handleEvmTransactionsStatus = (data: EvmTransactionQueryData): void => {
     setTxQueryStatus(data);
+  };
+
+  const handleEvmUndecodedTransaction = (
+    data: EvmUndecodedTransactionsData
+  ): void => {
+    setEvmUndecodedTransactions(data);
   };
 
   const handleHistoryEventsStatus = (data: HistoryEventsQueryData): void => {
@@ -183,6 +192,30 @@ export const useMessageHandling = () => {
     };
   };
 
+  const handleAccountingRuleConflictMessage = (
+    data: AccountingRuleConflictData
+  ): Notification => {
+    const { numOfConflicts } = data;
+
+    return {
+      title: t('notification_messages.accounting_rule_conflict.title'),
+      message: t('notification_messages.accounting_rule_conflict.message', {
+        conflicts: numOfConflicts
+      }),
+      display: true,
+      severity: Severity.WARNING,
+      priority: Priority.ACTION,
+      action: {
+        label: t('notification_messages.accounting_rule_conflict.action'),
+        action: () =>
+          router.push({
+            path: Routes.SETTINGS_ACCOUNTING,
+            query: { resolveConflicts: 'true' }
+          })
+      }
+    };
+  };
+
   const handleMessage = async (data: string): Promise<void> => {
     const message: WebsocketMessage = WebsocketMessage.parse(
       camelCaseTransformer(JSON.parse(data))
@@ -190,6 +223,12 @@ export const useMessageHandling = () => {
     const type = message.type;
 
     const notifications: Notification[] = [];
+
+    const addNotification = (notification: Notification | null) => {
+      if (notification) {
+        notifications.push(notification);
+      }
+    };
 
     if (type === SocketMessageType.MISSING_API_KEY) {
       notifications.push(handleMissingApiKeyMessage(message.data));
@@ -201,13 +240,12 @@ export const useMessageHandling = () => {
       notifications.push(handleLegacyMessage(data.value, isWarning));
     } else if (type === SocketMessageType.EVM_TRANSACTION_STATUS) {
       handleEvmTransactionsStatus(message.data);
+    } else if (type === SocketMessageType.EVM_UNDECODED_TRANSACTIONS) {
+      handleEvmUndecodedTransaction(message.data);
     } else if (type === SocketMessageType.HISTORY_EVENTS_STATUS) {
       handleHistoryEventsStatus(message.data);
     } else if (type === SocketMessageType.PREMIUM_STATUS_UPDATE) {
-      const notification = handlePremiumStatusUpdate(message.data);
-      if (notification) {
-        notifications.push(notification);
-      }
+      addNotification(handlePremiumStatusUpdate(message.data));
     } else if (type === SocketMessageType.DB_UPGRADE_STATUS) {
       updateDbUpgradeStatus(message.data);
     } else if (type === SocketMessageType.DATA_MIGRATION_STATUS) {
@@ -215,20 +253,16 @@ export const useMessageHandling = () => {
     } else if (type === SocketMessageType.EVM_ACCOUNTS_DETECTION) {
       setUpgradedAddresses(message.data);
     } else if (type === SocketMessageType.NEW_EVM_TOKEN_DETECTED) {
-      const notification = handleNewTokenDetectedMessage(message.data);
-      if (notification) {
-        notifications.push(notification);
-      }
+      addNotification(handleNewTokenDetectedMessage(message.data));
     } else if (type === SocketMessageType.REFRESH_BALANCES) {
       await fetchBlockchainBalances({
         blockchain: message.data.blockchain,
         ignoreCache: true
       });
     } else if (type === SocketMessageType.DB_UPLOAD_RESULT) {
-      const notification = handleDbUploadMessage(message.data);
-      if (notification) {
-        notifications.push(notification);
-      }
+      addNotification(handleDbUploadMessage(message.data));
+    } else if (type === SocketMessageType.ACCOUNTING_RULE_CONFLICT) {
+      notifications.push(handleAccountingRuleConflictMessage(message.data));
     } else {
       logger.warn(`Unsupported socket message received: '${type}'`);
     }
@@ -247,6 +281,8 @@ export const useMessageHandling = () => {
         notifications.push(handleSnapshotError(object));
       } else if (object.type === SocketMessageType.EVM_TRANSACTION_STATUS) {
         await handleEvmTransactionsStatus(object);
+      } else if (object.type === SocketMessageType.EVM_UNDECODED_TRANSACTIONS) {
+        await handleEvmUndecodedTransaction(object);
       } else if (object.type === SocketMessageType.DB_UPGRADE_STATUS) {
         await updateDbUpgradeStatus(object);
       } else if (object.type === SocketMessageType.DATA_MIGRATION_STATUS) {

@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from contextlib import suppress
 from http import HTTPStatus
 from json.decoder import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlencode
 
 import gevent
@@ -54,8 +54,8 @@ from rotkehlchen.utils.mixins.lockable import protect_with_lock
 from rotkehlchen.utils.serialization import jsonloads_dict, jsonloads_list
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.base import HistoryEvent
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.history.events.structures.base import HistoryEvent
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -118,7 +118,7 @@ class Coinbasepro(ExchangeInterface):
         )
         self.base_uri = 'https://api.pro.coinbase.com'
         self.msg_aggregator = msg_aggregator
-        self.account_to_currency: Optional[dict[str, AssetWithOracles]] = None
+        self.account_to_currency: dict[str, AssetWithOracles] | None = None
         self.available_products = {0}
 
         self.session.headers.update({
@@ -179,9 +179,9 @@ class Coinbasepro(ExchangeInterface):
             self,
             endpoint: str,
             request_method: Literal['GET', 'POST'] = 'GET',
-            options: Optional[dict[str, Any]] = None,
-            query_options: Optional[dict[str, Any]] = None,
-    ) -> tuple[list[Any], Optional[str]]:
+            options: dict[str, Any] | None = None,
+            query_options: dict[str, Any] | None = None,
+    ) -> tuple[list[Any], str | None]:
         """Performs a coinbase PRO API Query for endpoint
 
         You can optionally provide extra arguments to the endpoint via the options argument.
@@ -222,6 +222,8 @@ class Coinbasepro(ExchangeInterface):
             })
 
         retries_left = CachedSettings().get_query_retry_limit()
+        retry_limit = CachedSettings().get_query_retry_limit()
+        timeout = CachedSettings().get_timeout_tuple()
         while retries_left > 0:
             log.debug(
                 'Coinbase Pro API query',
@@ -235,7 +237,7 @@ class Coinbasepro(ExchangeInterface):
                     request_method.lower(),
                     full_url,
                     data=stringified_options,
-                    timeout=CachedSettings().get_timeout_tuple(),
+                    timeout=timeout,
                 )
             except requests.exceptions.RequestException as e:
                 raise RemoteError(
@@ -245,7 +247,7 @@ class Coinbasepro(ExchangeInterface):
 
             if response.status_code == HTTPStatus.TOO_MANY_REQUESTS:
                 # Backoff a bit by sleeping. Sleep more, the more retries have been made
-                backoff_secs = CachedSettings().get_query_retry_limit() / retries_left
+                backoff_secs = retry_limit / retries_left
                 log.debug(f'Backing off coinbase pro api query for {backoff_secs} secs')
                 gevent.sleep(backoff_secs)
                 retries_left -= 1
@@ -253,7 +255,7 @@ class Coinbasepro(ExchangeInterface):
                 # get out of the retry loop, we did not get 429 complaint
                 break
 
-        json_ret: Union[list[Any], dict[str, Any]]
+        json_ret: list[Any] | dict[str, Any]
         if response.status_code == HTTPStatus.BAD_REQUEST:
             json_ret = jsonloads_dict(response.text)
             if json_ret['message'] == 'invalid signature':
@@ -380,7 +382,7 @@ class Coinbasepro(ExchangeInterface):
     def _paginated_query(
             self,
             endpoint: str,
-            query_options: Optional[dict[str, Any]] = None,
+            query_options: dict[str, Any] | None = None,
             limit: int = COINBASEPRO_PAGINATION_LIMIT,
     ) -> Iterator[list[dict[str, Any]]]:
         if query_options is None:

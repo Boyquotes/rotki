@@ -7,7 +7,7 @@ rotki-content-hash==0.0.3  # fork of content-hash due to https://github.com/fili
 rotki-pysqlcipher3==2023.7.1
 requests==2.31.0
 urllib3==1.26.14
-coincurve==17.0.0
+coincurve==18.0.0
 base58check==1.0.2
 bech32==1.2.0
 gql==2.0.0
@@ -17,11 +17,12 @@ py-ed25519-zebra-bindings==1.0.1
 py-bip39-bindings==0.1.11
 substrate-interface==1.7.4
 beautifulsoup4==4.12.2
-maxminddb==2.4.0
+maxminddb==2.5.1
 miniupnpc==2.0.2; sys_platform != 'win32'
 miniupnpc==2.2.3; sys_platform == 'win32'
-cryptography==41.0.4
+cryptography==41.0.7
 py-machineid==0.4.4
+more-itertools==10.1.0  # for peekable iterators
 
 # For the rest api
 flask-cors==4.0.0
@@ -39,7 +40,7 @@ polyleven==0.8
 # We used to only use this for packaging, but now use it for the version comparison functionality
 packaging==23.1
 
-bip-utils==2.7.1  # require coincurve < 18.0.0 so can't upgrade yet
+bip-utils==2.8.0
 
 typing-extensions==4.5.0 # used for typing.ParamSpec and typing.Concatenate (in stdlib since python 3.10). Also limiting temporarily to 4.5.0 due to a bug in multiformats which is used by rotki-content-hash: https://github.com/hashberg-io/multiformats/issues/10
 

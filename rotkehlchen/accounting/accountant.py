@@ -1,13 +1,12 @@
 import logging
-from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import gevent
+from more_itertools import peekable
 
 from rotkehlchen.accounting.constants import FREE_PNL_EVENTS_LIMIT
 from rotkehlchen.accounting.export.csv import CSVExporter
-from rotkehlchen.accounting.mixins.event import AccountingEventMixin
 from rotkehlchen.accounting.pot import AccountingPot
 from rotkehlchen.accounting.structures.types import ActionType
 from rotkehlchen.accounting.types import MissingPrice
@@ -21,14 +20,22 @@ from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.premium.premium import Premium
 from rotkehlchen.types import EVM_CHAIN_IDS_WITH_TRANSACTIONS, Timestamp
 from rotkehlchen.user_messages import MessagesAggregator
+from rotkehlchen.utils.data_structures import DefaultLRUCache, LRUCacheWithRemove
 
 if TYPE_CHECKING:
+    from rotkehlchen.accounting.mixins.event import AccountingEventMixin
     from rotkehlchen.chain.aggregator import ChainsAggregator
     from rotkehlchen.db.dbhandler import DBHandler
 
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
+
+
+# size assumes a user loads 5 pages of 100 events each one
+# and each event having in average 3 subevents.
+# TODO: Make this changable depending on user's set page size
+PROCESSABLE_EVENTS_CACHE_SIZE = 1500
 
 
 class Accountant:
@@ -38,7 +45,7 @@ class Accountant:
             db: 'DBHandler',
             msg_aggregator: MessagesAggregator,
             chains_aggregator: 'ChainsAggregator',
-            premium: Optional[Premium],
+            premium: Premium | None,
     ) -> None:
         self.db = db
         self.msg_aggregator = msg_aggregator
@@ -51,12 +58,16 @@ class Accountant:
                 database=db,
                 evm_accounting_aggregators=evm_accounting_aggregators,
                 msg_aggregator=msg_aggregator,
+                is_dummy_pot=False,
             ),
         ]
 
         self.currently_processing_timestamp = Timestamp(-1)
         self.first_processed_timestamp = Timestamp(-1)
         self.premium = premium
+        self.processable_events_cache: LRUCacheWithRemove[int, bool] = LRUCacheWithRemove(maxsize=PROCESSABLE_EVENTS_CACHE_SIZE)  # noqa: E501
+        # map event rules signatures to a list of event identifiers affected by them
+        self.processable_events_cache_signatures: DefaultLRUCache[int, list[int]] = DefaultLRUCache(default_factory=list, maxsize=PROCESSABLE_EVENTS_CACHE_SIZE)  # noqa: E501
 
     def activate_premium_status(self, premium: Premium) -> None:
         self.premium = premium
@@ -75,7 +86,7 @@ class Accountant:
     def _process_skipping_exception(
             self,
             exception: Exception,
-            events: list[AccountingEventMixin],
+            events: list['AccountingEventMixin'],
             count: int,
             reason: str,
     ) -> int:
@@ -98,7 +109,7 @@ class Accountant:
             self,
             start_ts: Timestamp,
             end_ts: Timestamp,
-            events: list[AccountingEventMixin],
+            events: list['AccountingEventMixin'],
     ) -> int:
         """Processes the entire history of cryptoworld actions in order to determine
         the price and time at which every asset was obtained and also
@@ -146,7 +157,7 @@ class Accountant:
             prev_time = last_event_ts = Timestamp(0)
             ignored_ids_mapping = self.db.get_ignored_action_ids(cursor=cursor, action_type=None)
 
-        events_iter = iter(events)
+        events_iter = peekable(events)
         while True:
             try:
                 (
@@ -220,7 +231,7 @@ class Accountant:
 
     def _process_event(
             self,
-            events_iterator: Iterator[AccountingEventMixin],
+            events_iterator: "peekable['AccountingEventMixin']",
             start_ts: Timestamp,
             end_ts: Timestamp,
             prev_time: Timestamp,
@@ -295,7 +306,7 @@ class Accountant:
         consumed_events = event.process(self.pots[0], events_iterator)
         return consumed_events, prev_time
 
-    def export(self, directory_path: Optional[Path]) -> tuple[bool, str]:
+    def export(self, directory_path: Path | None) -> tuple[bool, str]:
         """Export the PnL report. Only CSV for now
 
         If a directory is given, it simply exports all event.csv in the given directory.

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { type AccountingRuleWithLinkedProperty } from '@/types/settings/accounting';
-import { useAccountingRuleMappings } from '@/composables/settings/accounting/rule-mapping';
 
 const props = defineProps<{
   identifier: string;
@@ -46,7 +45,7 @@ const value: ComputedRef<boolean> = computed(() => {
     placement="top"
     size="sm"
     color="secondary"
-    class="[&_span]:!px-0"
+    class="[&_span]:!px-0 mt-1"
     :value="!!selectedLinkableSetting"
   >
     <template #icon>

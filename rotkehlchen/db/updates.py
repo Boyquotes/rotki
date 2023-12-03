@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 import requests
 
 from packaging import version as pversion
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.api.websockets.typedefs import WSMessageType
 from rotkehlchen.assets.spam_assets import update_spam_assets
 from rotkehlchen.chain.evm.accounting.structures import BaseEventSettings, TxAccountingTreatment
@@ -14,10 +13,12 @@ from rotkehlchen.db.accounting_rules import DBAccountingRules
 from rotkehlchen.db.addressbook import DBAddressbook
 from rotkehlchen.db.filtering import AccountingRulesFilterQuery
 from rotkehlchen.db.settings import CachedSettings
+from rotkehlchen.db.unresolved_conflicts import ConflictType, DBRemoteConflicts
 from rotkehlchen.errors.misc import InputError, RemoteError
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.fval import FVal
 from rotkehlchen.globaldb.handler import GlobalDBHandler
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.serialization.deserialize import deserialize_evm_address
 from rotkehlchen.types import (
@@ -179,6 +180,8 @@ class RotkiDataUpdater:
         """
         log.info(f'Applying update for accounting rules to v{version}')
         rules_db = DBAccountingRules(self.user_db)
+        serialized_type = ConflictType.ACCOUNTING_RULE.serialize_for_db()
+        conflicts = []
         for rule_data in data:
             try:
                 event_type = HistoryEventType.deserialize(rule_data['event_type'])
@@ -212,16 +215,24 @@ class RotkiDataUpdater:
                     ),
                 )
                 if len(rules) == 1:  # can be either 0 or 1
-                    self.msg_aggregator.add_message(
-                        message_type=WSMessageType.ACCOUNTING_RULE_CONFLICT,
-                        data={
-                            'local_rule': rules[0],
-                            'remote_rule': rule_data,
-                        },
-                    )
+                    conflicts.append((
+                        rules[0]['identifier'],
+                        json.dumps(rule_data),
+                        serialized_type,
+                    ))
 
                 log.debug(f'Failed to add accounting rule {rule_data} due to {e}')
                 continue
+
+        if len(conflicts) == 0:
+            return
+
+        conflicts_db = DBRemoteConflicts(self.user_db)
+        conflicts_db.save_conflicts(conflicts=conflicts)
+        self.msg_aggregator.add_message(
+            message_type=WSMessageType.ACCOUNTING_RULE_CONFLICT,
+            data={'num_of_conflicts': len(conflicts)},
+        )
 
     def update_contracts(self, data: dict[str, Any], version: int) -> None:
         """

@@ -1,7 +1,7 @@
 from abc import ABCMeta
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.chain.ethereum.modules.balancer.v2.constants import (
     V2_SWAP as BALANCER_V2_SWAP_SIGNATURE,
 )
@@ -24,18 +24,20 @@ from rotkehlchen.chain.evm.structures import EvmTxReceiptLog
 from rotkehlchen.chain.optimism.modules.velodrome.decoder import (
     SWAP_V2 as VELODROME_SWAP_SIGNATURE,
 )
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.types import ChecksumEvmAddress, EvmTransaction
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
     from rotkehlchen.user_messages import MessagesAggregator
     from rotkehlchen.chain.evm.decoding.base import BaseDecoderTools
-    from rotkehlchen.accounting.structures.evm_event import EvmEvent
+    from rotkehlchen.history.events.structures.evm_event import EvmEvent
 
 from rotkehlchen.chain.ethereum.modules.weth.decoder import WETH_DEPOSIT_TOPIC, WETH_WITHDRAW_TOPIC
 
 
-class Oneinchv4DecoderBase(OneinchCommonDecoder, metaclass=ABCMeta):
+class Oneinchv3n4DecoderBase(OneinchCommonDecoder, metaclass=ABCMeta):
+    """Base class for Oneinch v3 and v4"""
 
     def __init__(
             self,
@@ -123,7 +125,11 @@ class Oneinchv4DecoderBase(OneinchCommonDecoder, metaclass=ABCMeta):
                 event.counterparty = self.counterparty
                 event.notes = f'Receive {event.balance.amount} {event.asset.symbol_or_name()} as a result of a {self.counterparty} swap'  # noqa: E501
                 in_event = event
-            elif event.event_type == HistoryEventType.SPEND and event.event_subtype != HistoryEventSubType.FEE and event.location_label == sender:  # noqa: E501
+            elif (
+                    event.event_type in (HistoryEventType.SPEND, HistoryEventType.TRADE) and
+                    event.event_subtype != HistoryEventSubType.FEE and
+                    event.location_label == sender
+            ):
                 event.event_type = HistoryEventType.TRADE
                 event.event_subtype = HistoryEventSubType.SPEND
                 event.counterparty = self.counterparty

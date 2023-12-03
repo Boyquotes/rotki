@@ -5,9 +5,9 @@ import shutil
 import tempfile
 import zlib
 from pathlib import Path
-from typing import Optional
 
 from rotkehlchen.assets.asset import Asset
+from rotkehlchen.constants.misc import USERDB_NAME, USERSDIR_NAME
 from rotkehlchen.crypto import decrypt, encrypt
 from rotkehlchen.db.dbhandler import DBHandler
 from rotkehlchen.db.settings import ModifiableDBSettings
@@ -40,7 +40,7 @@ class DataHandler:
     def logout(self) -> None:
         if self.logged_in:
             self.username = 'no_user'
-            self.user_data_dir: Optional[Path] = None
+            self.user_data_dir: Path | None = None
             db = getattr(self, 'db', None)
             if db is not None:
                 with self.db.conn.read_ctx() as cursor:
@@ -54,7 +54,7 @@ class DataHandler:
             password: str,
             create_new: bool,
             resume_from_backup: bool,
-            initial_settings: Optional[ModifiableDBSettings] = None,
+            initial_settings: ModifiableDBSettings | None = None,
     ) -> Path:
         """Unlocks a user, either logging them in or creating a new user
 
@@ -68,15 +68,15 @@ class DataHandler:
         than the one supported.
         - DBSchemaError if database schema is malformed
         """
-        user_data_dir = self.data_directory / username
+        user_data_dir = self.data_directory / USERSDIR_NAME / username
         if create_new:
             try:
-                if (user_data_dir / 'rotkehlchen.db').exists():
+                if (user_data_dir / USERDB_NAME).exists():
                     raise AuthenticationError(
                         f'User {username} already exists. User data dir: {user_data_dir}',
                     )
 
-                user_data_dir.mkdir(exist_ok=True)
+                user_data_dir.mkdir(parents=True, exist_ok=True)
             except PermissionError as e:
                 raise SystemPermissionError(
                     f'Failed to create directory for user: {e!s}',
@@ -87,7 +87,7 @@ class DataHandler:
                 if not user_data_dir.exists():
                     raise AuthenticationError(f'User {username} does not exist')
 
-                if not (user_data_dir / 'rotkehlchen.db').exists():
+                if not (user_data_dir / USERDB_NAME).exists():
                     raise PermissionError
 
             except PermissionError as e:
@@ -98,7 +98,7 @@ class DataHandler:
                 # user account can be created
                 shutil.move(
                     user_data_dir,
-                    self.data_directory / f'auto_backup_{username}_{ts_now()}',
+                    self.data_directory / USERSDIR_NAME / f'auto_backup_{username}_{ts_now()}',
                 )
 
                 raise SystemPermissionError(
@@ -121,7 +121,7 @@ class DataHandler:
         self.username = username
         return user_data_dir
 
-    def add_ignored_assets(self, assets: list[Asset]) -> tuple[Optional[set[str]], str]:
+    def add_ignored_assets(self, assets: list[Asset]) -> tuple[set[str] | None, str]:
         """Adds ignored assets to the DB.
 
         If any of the given assets is already in the DB the function does nothing
@@ -142,7 +142,7 @@ class DataHandler:
 
             return self.db.get_ignored_asset_ids(cursor), ''
 
-    def remove_ignored_assets(self, assets: list[Asset]) -> tuple[Optional[set[str]], str]:
+    def remove_ignored_assets(self, assets: list[Asset]) -> tuple[set[str] | None, str]:
         """Removes ignored assets from the DB.
 
         If any of the given assets is not in the DB the call function does nothing
@@ -170,10 +170,14 @@ class DataHandler:
         particular user is logged in or not
         """
         users = {}
-        for x in self.data_directory.iterdir():
+        users_dir = self.data_directory / USERSDIR_NAME
+        if not users_dir.exists():
+            return {}
+
+        for x in users_dir.iterdir():
             try:
-                if x.is_dir() and (x / 'rotkehlchen.db').exists():
-                    users[x.stem] = 'loggedin' if x.stem == self.username else 'loggedout'
+                if x.is_dir() and (x / USERDB_NAME).exists():
+                    users[x.name] = 'loggedin' if x.name == self.username else 'loggedout'
             except PermissionError:
                 # ignore directories that can't be accessed
                 continue
@@ -225,9 +229,10 @@ class DataHandler:
         log.info('Decompress and decrypt DB')
         # First make a backup of the DB we are about to replace
         date = timestamp_to_date(ts=ts_now(), formatstr='%Y_%m_%d_%H_%M_%S', treat_as_local=True)
+        users_dir = self.data_directory / USERSDIR_NAME
         shutil.copyfile(
-            self.data_directory / self.username / 'rotkehlchen.db',
-            self.data_directory / self.username / f'rotkehlchen_db_{date}.backup',
+            users_dir / self.username / USERDB_NAME,
+            users_dir / self.username / f'rotkehlchen_db_{date}.backup',
         )
 
         decrypted_data = decrypt(self.db.password.encode(), encrypted_data)

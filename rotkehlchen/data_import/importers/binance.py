@@ -3,21 +3,21 @@ import csv
 import logging
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Optional
+from typing import TYPE_CHECKING, Any, Final
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.base import HistoryBaseEntry, HistoryEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.converters import asset_from_binance
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import A_USD
 from rotkehlchen.data_import.utils import BaseExchangeImporter, hash_csv_row
 from rotkehlchen.db.drivers.gevent import DBCursor
-from rotkehlchen.errors.asset import UnknownAsset
+from rotkehlchen.errors.asset import UnknownAsset, UnsupportedAsset
 from rotkehlchen.errors.misc import InputError
 from rotkehlchen.errors.price import NoPriceForGivenTimestamp
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.exchanges.data_structures import AssetMovement, Trade
+from rotkehlchen.history.events.structures.base import HistoryBaseEntry, HistoryEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.history.price import PriceHistorian
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.serialization.deserialize import (
@@ -215,7 +215,7 @@ class BinanceTradeEntry(BinanceMultipleEntry):
 
         # Checking assets
         same_assets = True
-        assets: dict[str, Optional[AssetWithOracles]] = defaultdict(lambda: None)
+        assets: dict[str, AssetWithOracles | None] = defaultdict(lambda: None)
         for row in data:
             if row['Operation'] in {'Fee', 'Transaction Fee'}:
                 cur_operation = 'Fee'
@@ -264,13 +264,13 @@ class BinanceTradeEntry(BinanceMultipleEntry):
         # Creating trades structures based on grouped rows data
         raw_trades: list[Trade] = []
         for trade_rows in grouped_trade_rows:
-            to_asset: Optional[AssetWithOracles] = None
-            to_amount: Optional[AssetAmount] = None
-            from_asset: Optional[AssetWithOracles] = None
-            from_amount: Optional[AssetAmount] = None
-            fee_asset: Optional[AssetWithOracles] = None
-            fee_amount: Optional[Fee] = None
-            trade_type: Optional[TradeType] = None
+            to_asset: AssetWithOracles | None = None
+            to_amount: AssetAmount | None = None
+            from_asset: AssetWithOracles | None = None
+            from_amount: AssetAmount | None = None
+            fee_asset: AssetWithOracles | None = None
+            fee_amount: Fee | None = None
+            trade_type: TradeType | None = None
 
             for row in trade_rows:
                 cur_asset = row['Coin']
@@ -673,7 +673,7 @@ def _group_binance_rows(
             csv_row['Coin'] = asset_from_binance(csv_row['Coin'])
             csv_row['Change'] = deserialize_asset_amount(csv_row['Change'])
             multirows[timestamp].append(csv_row)
-        except (DeserializationError, UnknownAsset) as e:
+        except (DeserializationError, UnknownAsset, UnsupportedAsset) as e:
             log.warning(f'Skipped binance csv row {csv_row} because of {e!s}')
             skipped_count += 1
         except KeyError as e:
@@ -729,7 +729,7 @@ class BinanceImporter(BaseExchangeImporter):
             write_cursor: DBCursor,
             timestamp: Timestamp,
             rows: list[BinanceCsvRow],
-    ) -> tuple[Optional[BinanceEntry], int]:
+    ) -> tuple[BinanceEntry | None, int]:
         """Processes binance entries that are represented with 2+ rows in a csv file.
         Returns Entry type and entries count if any entries were processed. Otherwise, None and 0.
         """

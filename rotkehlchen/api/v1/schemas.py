@@ -1,5 +1,6 @@
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Final, Literal, Optional, Union, get_args
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Final, Literal, get_args
 
 import marshmallow
 import webargs
@@ -8,20 +9,9 @@ from marshmallow import INCLUDE, Schema, fields, post_load, validate, validates_
 from marshmallow.exceptions import ValidationError
 
 from rotkehlchen.accounting.structures.balance import Balance, BalanceType
-from rotkehlchen.accounting.structures.base import HistoryBaseEntryType, HistoryEvent
-from rotkehlchen.accounting.structures.eth2 import (
-    EthBlockEvent,
-    EthDepositEvent,
-    EthWithdrawalEvent,
-)
-from rotkehlchen.accounting.structures.evm_event import EvmEvent, EvmProduct
-from rotkehlchen.accounting.structures.types import (
-    ActionType,
-    HistoryEventSubType,
-    HistoryEventType,
-)
+from rotkehlchen.accounting.structures.types import ActionType
 from rotkehlchen.accounting.types import SchemaEventType
-from rotkehlchen.assets.asset import Asset, AssetWithNameAndType, AssetWithOracles, CryptoAsset
+from rotkehlchen.assets.asset import Asset, AssetWithNameAndType, AssetWithOracles
 from rotkehlchen.assets.types import AssetType
 from rotkehlchen.assets.utils import IgnoredAssetsHandling
 from rotkehlchen.balances.manual import ManuallyTrackedBalance
@@ -66,6 +56,7 @@ from rotkehlchen.db.filtering import (
     HistoryEventFilterQuery,
     LevenshteinFilterQuery,
     NFTFilterQuery,
+    PaginatedFilterQuery,
     ReportDataFilterQuery,
     TradesFilterQuery,
     UserNotesFilterQuery,
@@ -76,6 +67,14 @@ from rotkehlchen.errors.misc import InputError, RemoteError, XPUBError
 from rotkehlchen.errors.serialization import DeserializationError, EncodingError
 from rotkehlchen.exchanges.constants import ALL_SUPPORTED_EXCHANGES, SUPPORTED_EXCHANGES
 from rotkehlchen.exchanges.kraken import KrakenAccountType
+from rotkehlchen.history.events.structures.base import HistoryBaseEntryType, HistoryEvent
+from rotkehlchen.history.events.structures.eth2 import (
+    EthBlockEvent,
+    EthDepositEvent,
+    EthWithdrawalEvent,
+)
+from rotkehlchen.history.events.structures.evm_event import EvmEvent, EvmProduct
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.history.types import HistoricalPriceOracle
 from rotkehlchen.icons import ALLOWED_ICON_EXTENSIONS
 from rotkehlchen.inquirer import CurrentPriceOracle
@@ -92,6 +91,7 @@ from rotkehlchen.types import (
     AddressbookType,
     AssetMovementCategory,
     BTCAddress,
+    ChainID,
     ChecksumEvmAddress,
     CostBasisMethod,
     ExchangeLocationID,
@@ -140,12 +140,7 @@ from .fields import (
     TimestampUntilNowField,
     XpubField,
 )
-from .types import (
-    EvmPendingTransactionDecodingApiData,
-    IncludeExcludeFilterData,
-    ModuleWithBalances,
-    ModuleWithStats,
-)
+from .types import IncludeExcludeFilterData, ModuleWithBalances, ModuleWithStats
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.aggregator import ChainsAggregator
@@ -344,38 +339,23 @@ class EvmTransactionDecodingSchema(AsyncIgnoreCacheQueryArgumentSchema):
     data = NonEmptyList(fields.Nested(SingleEVMTransactionDecodingSchema), required=True)
 
 
-class SingleEvmPendingTransactionDecodingSchema(Schema):
-    evm_chain = EvmChainNameField(required=True)
-    addresses = fields.List(EvmAddressField(), load_default=None)
-
-    @validates_schema
-    def validate_schema(
-            self,
-            data: dict[str, Any],
-            **_kwargs: Any,
-    ) -> None:
-        addresses = data.get('addresses')
-        if addresses is not None and len(addresses) == 0:
-            raise ValidationError(
-                message='Empty list of addresses is a noop. Did you mean to omit the list?',
-                field_name='addresses',
-            )
-
-
 class EvmPendingTransactionDecodingSchema(AsyncQueryArgumentSchema):
-    data = fields.List(fields.Nested(SingleEvmPendingTransactionDecodingSchema), required=True)
+    evm_chains = fields.List(
+        EvmChainNameField(limit_to=list(EVM_CHAIN_IDS_WITH_TRANSACTIONS)),
+        load_default=EVM_CHAIN_IDS_WITH_TRANSACTIONS,
+    )
 
     @validates_schema
     def validate_schema(
             self,
-            data: list[EvmPendingTransactionDecodingApiData],
+            evm_chains: list[ChainID],
             **_kwargs: Any,
     ) -> None:
 
-        if len(data) == 0:
+        if len(evm_chains) == 0:
             raise ValidationError(
-                message='The list of data should not be empty',
-                field_name='data',
+                message='The list of evm chains should not be empty',
+                field_name='evm_chains',
             )
 
 
@@ -430,8 +410,8 @@ class TradesQuerySchema(
             data: dict[str, Any],
             **_kwargs: Any,
     ) -> dict[str, Any]:
-        base_assets: Optional[tuple[Asset, ...]] = None
-        quote_assets: Optional[tuple[Asset, ...]] = None
+        base_assets: tuple[Asset, ...] | None = None
+        quote_assets: tuple[Asset, ...] | None = None
         trades_idx_to_ignore = None
         with self.db.conn.read_ctx() as cursor:
             treat_eth2_as_eth = self.db.get_settings(cursor).treat_eth2_as_eth
@@ -486,7 +466,7 @@ class BaseStakingQuerySchema(
     def _get_assets_list(
             self,
             data: dict[str, Any],
-    ) -> Optional[tuple['AssetWithOracles', ...]]:
+    ) -> tuple['AssetWithOracles', ...] | None:
         return (data['asset'],) if data['asset'] is not None else None
 
     def _make_query(
@@ -495,8 +475,8 @@ class BaseStakingQuerySchema(
             data: dict[str, Any],
             event_types: list[HistoryEventType],
             value_event_subtypes: list[HistoryEventSubType],
-            query_event_subtypes: Optional[list[HistoryEventSubType]] = None,
-            exclude_event_subtypes: Optional[list[HistoryEventSubType]] = None,
+            query_event_subtypes: list[HistoryEventSubType] | None = None,
+            exclude_event_subtypes: list[HistoryEventSubType] | None = None,
     ) -> dict[str, Any]:
         if data['order_by_attributes'] is not None:
             attributes = []
@@ -563,7 +543,7 @@ class StakingQuerySchema(BaseStakingQuerySchema):
     def _get_assets_list(
             self,
             data: dict[str, Any],
-    ) -> Optional[tuple['AssetWithOracles', ...]]:
+    ) -> tuple['AssetWithOracles', ...] | None:
         asset_list = super()._get_assets_list(data)
         if self.treat_eth2_as_eth is True and data['asset'] == A_ETH:
             asset_list = (
@@ -615,11 +595,12 @@ class HistoryEventSchema(
     event_identifiers = DelimitedOrNormalList(fields.String(), load_default=None)
     location = SerializableEnumField(Location, load_default=None)
     location_labels = DelimitedOrNormalList(fields.String(), load_default=None)
-    asset = AssetField(expected_type=CryptoAsset, load_default=None)
+    asset = AssetField(expected_type=Asset, load_default=None)
     entry_types = IncludeExcludeListField(
         SerializableEnumField(enum_class=HistoryBaseEntryType),
         load_default=None,
     )
+    customized_events_only = fields.Boolean(load_default=False)
 
     # EvmEvent only
     tx_hashes = DelimitedOrNormalList(EVMTransactionHashField(), load_default=None)
@@ -706,9 +687,10 @@ class HistoryEventSchema(
             'event_types': data['event_types'],
             'event_subtypes': data['event_subtypes'],
             'location': data['location'],
+            'customized_events_only': data['customized_events_only'],
         }
 
-        filter_query: Union[HistoryEventFilterQuery, EvmEventFilterQuery, EthStakingEventFilterQuery]  # noqa: E501
+        filter_query: HistoryEventFilterQuery | (EvmEventFilterQuery | EthStakingEventFilterQuery)
         if should_query_evm_event:
             filter_query = EvmEventFilterQuery.make(
                 **common_arguments,
@@ -939,7 +921,7 @@ class AssetMovementsQuerySchema(
             data: dict[str, Any],
             **_kwargs: Any,
     ) -> dict[str, Any]:
-        asset_list: Optional[tuple[Asset, ...]] = None
+        asset_list: tuple[Asset, ...] | None = None
         if data['asset'] is not None:
             asset_list = (data['asset'],)
         if self.treat_eth2_as_eth is True and data['asset'] == A_ETH:
@@ -1225,6 +1207,12 @@ class ModifiableSettingsSchema(Schema):
         # Check that all values are unique
         validate=lambda data: len(data) == len(set(data)),
     )
+    evmchains_to_skip_detection = fields.List(
+        EvmChainNameField,
+        load_default=None,
+        # Check that all values are unique
+        validate=lambda data: len(data) == len(set(data)),
+    )
     cost_basis_method = SerializableEnumField(enum_class=CostBasisMethod, load_default=None)
     eth_staking_taxable_after_withdrawal_enabled = fields.Boolean(load_default=None)
     address_name_priority = fields.List(fields.String(
@@ -1298,6 +1286,7 @@ class ModifiableSettingsSchema(Schema):
             pnl_csv_have_summary=data['pnl_csv_have_summary'],
             ssf_graph_multiplier=data['ssf_graph_multiplier'],
             non_syncing_exchanges=data['non_syncing_exchanges'],
+            evmchains_to_skip_detection=data['evmchains_to_skip_detection'],
             cost_basis_method=data['cost_basis_method'],
             treat_eth2_as_eth=data['treat_eth2_as_eth'],
             eth_staking_taxable_after_withdrawal_enabled=data['eth_staking_taxable_after_withdrawal_enabled'],
@@ -2236,7 +2225,7 @@ class AssetUpdatesRequestSchema(AsyncQueryArgumentSchema):
     conflicts = AssetConflictsField(load_default=None)
 
 
-class AssetResetRequestSchema(Schema):
+class AssetResetRequestSchema(AsyncQueryArgumentSchema):
     reset = fields.String(required=True)
     ignore_warnings = fields.Boolean(load_default=False)
 
@@ -2466,7 +2455,7 @@ class HistoryEventsDeletionSchema(IdentifiersListSchema):
     force_delete = fields.Boolean(load_default=False)
 
 
-class AssetsImportingSchema(Schema):
+class AssetsImportingSchema(AsyncQueryArgumentSchema):
     file = FileField(allowed_extensions=['.zip', '.json'], load_default=None)
     destination = DirectoryField(load_default=None)
     action = fields.String(
@@ -2489,7 +2478,7 @@ class AssetsImportingSchema(Schema):
             )
 
 
-class AssetsImportingFromFormSchema(Schema):
+class AssetsImportingFromFormSchema(AsyncQueryArgumentSchema):
     file = FileField(allowed_extensions=['.zip', '.json'], required=True)
 
 
@@ -3159,3 +3148,70 @@ class AccountingRulesQuerySchema(
         return {
             'filter_query': filter_query,
         }
+
+
+class AccountingRuleConflictResolutionSchema(Schema):
+    local_id = fields.Integer(required=True, validate=webargs.validate.Range(
+        min=0,
+        error='local_id must be an integer >= 0',
+    ))
+    solve_using = fields.String(
+        validate=webargs.validate.OneOf(choices=('local', 'remote')),
+        required=True,
+    )
+
+
+class MultipleAccountingRuleConflictsResolutionSchema(Schema):
+    conflicts = fields.List(
+        fields.Nested(AccountingRuleConflictResolutionSchema),
+        required=False,
+        load_default=None,
+    )
+    solve_all_using = fields.String(
+        validate=webargs.validate.OneOf(choices=('local', 'remote')),
+        required=False,
+        load_default=None,
+    )
+
+    @validates_schema
+    def validate_schema(
+            self,
+            data: dict[str, Any],
+            **_kwargs: Any,
+    ) -> None:
+        """Check that the endpoint receives either conflicts or solve_all_using"""
+        if (
+            data['conflicts'] is None and data['solve_all_using'] is None or
+            data['conflicts'] is not None and data['solve_all_using'] is not None
+        ):
+            raise ValidationError(
+                message='Conflict resolution can either choose to solve all or a subset but not both or none',  # noqa: E501
+                field_name='conflicts',
+            )
+
+    @post_load
+    def extract_conflicts(
+            self,
+            data: dict[str, Any],
+            **_kwargs: Any,
+    ) -> dict[str, Any]:
+        processed_entries = [
+            (conflict['local_id'], conflict['solve_using'])
+            for conflict in data['conflicts']
+        ] if data['conflicts'] is not None else []
+        return {'conflicts': processed_entries, 'solve_all_using': data['solve_all_using']}
+
+
+class AccountingRuleConflictsPagination(DBPaginationSchema):
+    @post_load
+    def make_rules_query(
+            self,
+            data: dict[str, Any],
+            **_kwargs: Any,
+    ) -> dict[str, Any]:
+        filter_query = PaginatedFilterQuery.make(
+            limit=data['limit'],
+            offset=data['offset'],
+            order_by_rules=[('accounting_rules.identifier', False)],
+        )
+        return {'filter_query': filter_query}

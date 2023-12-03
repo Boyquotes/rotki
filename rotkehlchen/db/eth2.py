@@ -1,17 +1,18 @@
 import logging
-from typing import TYPE_CHECKING, Literal, Union
+from typing import TYPE_CHECKING, Literal
 
 from pysqlcipher3 import dbapi2 as sqlcipher
 
-from rotkehlchen.accounting.structures.base import HistoryBaseEntryType
 from rotkehlchen.chain.ethereum.modules.eth2.structures import Eth2Validator, ValidatorDailyStats
+from rotkehlchen.chain.ethereum.modules.eth2.utils import form_withdrawal_notes, timestamp_to_epoch
 from rotkehlchen.constants import ONE, ZERO
 from rotkehlchen.constants.timing import DAY_IN_SECONDS
 from rotkehlchen.db.filtering import ETH_STAKING_EVENT_JOIN, EthStakingEventFilterQuery
 from rotkehlchen.errors.misc import InputError
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.base import HistoryBaseEntryType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
-from rotkehlchen.types import Timestamp, TimestampMS
+from rotkehlchen.types import Timestamp
 from rotkehlchen.utils.misc import ts_ms_to_sec
 
 if TYPE_CHECKING:
@@ -22,44 +23,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
-# How much time more than the last time a withdrawal happened to have allowed to pass
-# in order to recheck withdrawals for a given validator. In average at time of writing
-# withdrawals occur every 4-7 days for a single validator
-WITHDRAWALS_RECHECK_PERIOD = 4 * DAY_IN_SECONDS * 1000  # 4 days in milliseconds
-
 
 class DBEth2:
 
     def __init__(self, database: 'DBHandler') -> None:
         self.db = database
-
-    def get_validators_to_query_for_withdrawals(self, up_to_tsms: TimestampMS) -> list[tuple[int, TimestampMS]]:  # noqa: E501
-        """Gets a list of validators that need to be queried for new withdrawals
-
-        Validators need to be queried if last time they are queried was more than X seconds.
-
-        Returns a list of tuples. First entry is validator index and second entry is
-        last queried timestamp in milliseconds for daily stats of that validator.
-        """
-        query_str = """
-            SELECT V.validator_index, E.timestamp FROM eth2_validators V
-            LEFT JOIN eth_staking_events_info S ON S.validator_index = V.validator_index
-            LEFT JOIN history_events E ON
-            E.identifier = S.identifier WHERE ? - (SELECT MAX(timestamp) FROM history_events WHERE identifier=S.identifier) > ? AND S.validator_index IS NOT NULL
-            AND E.entry_type=? GROUP BY V.validator_index HAVING MAX(E.timestamp)
-            UNION
-            SELECT DISTINCT V2.validator_index, 0 FROM eth2_validators V2 WHERE
-            V2.validator_index NOT IN (
-                SELECT validator_index FROM eth_staking_events_info S2 LEFT JOIN
-                history_events E2 ON S2.identifier=E2.identifier WHERE E2.entry_type=?
-            )
-        """  # noqa: E501
-        with self.db.conn.read_ctx() as cursor:
-            result = cursor.execute(
-                query_str,
-                (up_to_tsms, WITHDRAWALS_RECHECK_PERIOD, HistoryBaseEntryType.ETH_WITHDRAWAL_EVENT.serialize_for_db(), HistoryBaseEntryType.ETH_WITHDRAWAL_EVENT.serialize_for_db()),  # noqa: E501
-            ).fetchall()
-        return result
 
     def get_validators_to_query_for_stats(self, up_to_ts: Timestamp) -> list[tuple[int, Timestamp, Timestamp]]:  # noqa: E501
         """Gets a list of validators that need to be queried for new daily stats
@@ -167,7 +135,7 @@ class DBEth2:
             self,
             cursor: 'DBCursor',
             field: Literal['validator_index', 'public_key'],
-            arg: Union[int, str],
+            arg: int | str,
     ) -> bool:
         cursor.execute(f'SELECT COUNT(*) from eth2_validators WHERE {field}=?', (arg,))
         return cursor.fetchone()[0] == 1  # count always returns
@@ -176,15 +144,55 @@ class DBEth2:
         cursor.execute('SELECT * from eth2_validators;')
         return [Eth2Validator.deserialize_from_db(x) for x in cursor]
 
+    def get_active_validator_indices(self, cursor: 'DBCursor') -> set[int]:
+        """Returns the indices of the tracked validators that we know have not exited
+
+        Does so by using processed events, so will only return a list as up to date
+        as the events we got
+        """
+        cursor.execute(
+            'SELECT EV.validator_index FROM eth2_validators EV LEFT JOIN '
+            'eth_staking_events_info SE ON EV.validator_index = SE.validator_index '
+            'WHERE SE.validator_index IS NULL '
+            'UNION '
+            'SELECT DISTINCT EV.validator_index FROM eth2_validators EV INNER JOIN '
+            'eth_staking_events_info SE ON EV.validator_index = SE.validator_index '
+            'WHERE EV.validator_index NOT IN ('
+            'SELECT validator_index from eth_staking_events_info WHERE is_exit_or_blocknumber=1)',
+        )
+        return {x[0] for x in cursor}
+
     def get_exited_validator_indices(self, cursor: 'DBCursor') -> set[int]:
         """Returns the indices of the tracked validators that we know have exited
 
-        Does so by processing events, so will only return a list as up to date as the events we got
+        Does so by using processed events, so will only return a list as up to date
+        as the events we got
         """
         cursor.execute(
             'SELECT validator_index FROM eth_staking_events_info WHERE is_exit_or_blocknumber=1',
         )  # checking against literal 1 is safe since block 1 was not mined during PoS
         return {x[0] for x in cursor}
+
+    def set_validator_exit(self, write_cursor: 'DBCursor', index: int, exit_epoch: int) -> None:
+        """If the validator has withdrawal events, find last one and mark as exit if after exit epoch"""  # noqa: E501
+        write_cursor.execute(
+            'SELECT HE.identifier, HE.timestamp, HE.amount FROM history_events HE LEFT JOIN '
+            'eth_staking_events_info SE ON SE.identifier = HE.identifier '
+            'WHERE SE.validator_index=? ORDER BY HE.timestamp DESC LIMIT 1',
+            (index,),
+        )
+        if (latest_result := write_cursor.fetchone()) is None:
+            return  # no event found so nothing to do
+
+        if timestamp_to_epoch(ts_ms_to_sec(latest_result[1])) > exit_epoch:
+            write_cursor.execute(
+                'UPDATE eth_staking_events_info SET is_exit_or_blocknumber=? WHERE identifier=?',
+                (1, latest_result[0]),
+            )
+            write_cursor.execute(
+                'UPDATE history_events SET notes=? WHERE identifier=?',
+                (form_withdrawal_notes(is_exit=True, validator_index=index, amount=latest_result[2]), latest_result[0]),  # noqa: E501
+            )
 
     def add_validators(self, write_cursor: 'DBCursor', validators: list[Eth2Validator]) -> None:
         write_cursor.executemany(

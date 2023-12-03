@@ -146,6 +146,7 @@ const tableHeaders = computed<DataTableHeader[]>(() => {
         <LocationDisplay
           :identifier="item.location"
           :detail-path="item.detailPath"
+          class="py-2"
         />
       </template>
       <template #item.label="{ item }">

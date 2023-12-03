@@ -7,7 +7,8 @@ import {
 import { isEqual } from 'lodash-es';
 import { type ComputedRef, type Ref } from 'vue';
 import { not } from '@vueuse/math';
-import { type HistoryEventEntryType } from '@rotki/common/lib/history/events';
+import { HistoryEventEntryType } from '@rotki/common/lib/history/events';
+import { type AccountingRuleEntry } from '@/types/settings/accounting';
 import { type DataTableHeader } from '@/types/vuetify';
 import { type Collection } from '@/types/collection';
 import { SavedFilterLocation } from '@/types/filtering';
@@ -77,6 +78,8 @@ const {
 const nextSequence: Ref<string | null> = ref(null);
 const selectedGroupEventHeader: Ref<HistoryEvent | null> = ref(null);
 const eventToDelete: Ref<HistoryEventEntry | null> = ref(null);
+const eventWithMissingRules: Ref<HistoryEventEntry | null> = ref(null);
+const missingRulesDialog: Ref<boolean> = ref(false);
 const transactionToIgnore: Ref<HistoryEventEntry | null> = ref(null);
 const accounts: Ref<GeneralAccount[]> = ref([]);
 const locationOverview = ref(get(location));
@@ -131,8 +134,11 @@ const txChains = useArrayMap(txEvmChains, x => x.id);
 
 const { fetchHistoryEvents, deleteHistoryEvent } = useHistoryEvents();
 
-const { refreshTransactions, fetchTransactionEvents } =
-  useHistoryTransactions();
+const { refreshTransactions } = useHistoryTransactions();
+
+const { fetchTransactionEvents } = useHistoryTransactionDecoding();
+
+const vueRouter = useRouter();
 
 const {
   options,
@@ -165,7 +171,9 @@ const {
         protocols: get(protocols).length > 0,
         locations: !!get(location),
         period: !!get(period),
-        validators: !!get(validators)
+        validators: !!get(validators),
+        eventTypes: get(eventTypes).length > 0,
+        eventSubtypes: get(eventSubTypes).length > 0
       },
       entryTypes
     ),
@@ -264,16 +272,22 @@ const onFilterAccountsChanged = (acc: Account<BlockchainSelection>[]) => {
 };
 
 const redecodeAllEvmEvents = () => {
+  set(decodingStatusDialogPersistent, true);
   show(
     {
-      title: t('transactions.redecode_events.title'),
-      message: t('transactions.redecode_events.confirmation')
+      title: t('transactions.events_decoding.redecode_all'),
+      message: t('transactions.events_decoding.confirmation')
     },
-    () => redecodeAllEvmEventsHandler()
+    () => redecodeAllEvmEventsHandler(),
+    () => {
+      set(decodingStatusDialogPersistent, false);
+    }
   );
 };
 
 const redecodeAllEvmEventsHandler = async () => {
+  set(decodingStatusDialogPersistent, false);
+
   const chains = get(onlyChains);
   const evmChains: { evmChain: string }[] = [];
 
@@ -376,7 +390,10 @@ const addEvent = (groupHeader?: HistoryEvent) => {
   setOpenDialog(true);
 };
 
-const editEventHandler = (event: HistoryEvent, groupHeader: HistoryEvent) => {
+const editEventHandler = (
+  event: HistoryEvent,
+  groupHeader: HistoryEvent | null
+) => {
   set(selectedGroupEventHeader, groupHeader);
   set(editableItem, event);
   set(nextSequence, null);
@@ -448,7 +465,7 @@ watch(
 const premium = usePremium();
 const { isLoading: isSectionLoading } = useStatusStore();
 const sectionLoading = isSectionLoading(Section.HISTORY_EVENT);
-const eventTaskLoading = isTaskRunning(TaskType.HISTORY_EVENTS);
+const eventTaskLoading = isTaskRunning(TaskType.EVM_EVENTS_DECODING);
 const onlineHistoryEventsLoading = isTaskRunning(TaskType.QUERY_ONLINE_EVENTS);
 
 const { isAllFinished: isQueryingTxsFinished } = toRefs(
@@ -492,9 +509,36 @@ watch(shouldFetchEventsRegularly, shouldFetchEventsRegularly => {
 
 const { show } = useConfirmStore();
 
+const onAddMissingRule = (
+  data: Pick<AccountingRuleEntry, 'eventType' | 'eventSubtype' | 'counterparty'>
+) => {
+  vueRouter.push({
+    path: '/settings/accounting',
+    query: { 'add-rule': 'true', ...data }
+  });
+};
+
 const resetPendingDeletion = () => {
   set(eventToDelete, null);
   set(transactionToIgnore, null);
+};
+
+const setMissingRulesDialog = (
+  event: HistoryEventEntry,
+  groupHeader: HistoryEvent
+) => {
+  set(eventWithMissingRules, event);
+  set(selectedGroupEventHeader, groupHeader);
+  set(missingRulesDialog, true);
+};
+
+const editMissingRulesEntry = (event: HistoryEventEntry | null) => {
+  if (!event) {
+    return;
+  }
+  const groupHeader = get(selectedGroupEventHeader);
+  set(missingRulesDialog, false);
+  editEventHandler(event, groupHeader);
 };
 
 const showDeleteConfirmation = () => {
@@ -520,7 +564,11 @@ onMounted(async () => {
 });
 
 const refresh = async (userInitiated = false) => {
-  await refreshTransactions(get(onlyChains), userInitiated);
+  const entryTypesVal = get(entryTypes) || [];
+  const disableEvmEvents =
+    entryTypesVal.length > 0 &&
+    !entryTypesVal.includes(HistoryEventEntryType.EVM_EVENT);
+  await refreshTransactions(get(onlyChains), disableEvmEvents, userInitiated);
   startPromise(Promise.all([fetchData(), fetchAssociatedLocations()]));
 };
 
@@ -568,6 +616,17 @@ const includeOnlineEvents: ComputedRef<boolean> = useEmptyOrSome(
   entryTypes,
   type => isOnlineHistoryEventType(type)
 );
+
+const decodingStatusDialogPersistent: Ref<boolean> = ref(false);
+const decodingStatusDialogOpen: Ref<boolean> = ref(false);
+const route = useRoute();
+
+watchImmediate(route, async route => {
+  if (route.query.openDecodingStatusDialog) {
+    set(decodingStatusDialogOpen, true);
+    await vueRouter.replace({ query: {} });
+  }
+});
 </script>
 
 <template>
@@ -603,25 +662,64 @@ const includeOnlineEvents: ComputedRef<boolean> = useEmptyOrSome(
         </template>
         {{ t('transactions.actions.add_event') }}
       </RuiButton>
-      <VMenu offset-y left :close-on-content-click="false">
-        <template #activator="{ on }">
-          <RuiButton variant="text" icon size="sm" class="!p-2" v-on="on">
-            <RuiIcon name="more-2-fill" />
+
+      <VDialog
+        v-model="decodingStatusDialogOpen"
+        max-width="600"
+        :persistent="decodingStatusDialogPersistent"
+      >
+        <HistoryEventsDecodingStatus
+          v-if="decodingStatusDialogOpen"
+          :refreshing="refreshing"
+          @redecode-all-evm-events="redecodeAllEvmEvents()"
+        >
+          <RuiButton
+            variant="text"
+            icon
+            @click="decodingStatusDialogOpen = false"
+          >
+            <RuiIcon name="close-line" />
           </RuiButton>
+        </HistoryEventsDecodingStatus>
+      </VDialog>
+
+      <VMenu offset-y left>
+        <template #activator="{ on }">
+          <RuiBadge
+            :value="eventTaskLoading"
+            color="primary"
+            dot
+            placement="top"
+            offset-y="12"
+            offset-x="-12"
+          >
+            <RuiButton variant="text" icon size="sm" class="!p-2" v-on="on">
+              <RuiIcon name="more-2-fill" />
+            </RuiButton>
+          </RuiBadge>
         </template>
         <VList>
-          <RuiButton
-            v-if="includeEvmEvents"
-            class="!p-3 rounded-none w-full justify-start whitespace-nowrap"
-            :loading="eventTaskLoading"
-            :disabled="refreshing"
-            @click="redecodeAllEvmEvents()"
-          >
-            <template #prepend>
-              <RuiIcon name="restart-line" />
-            </template>
-            {{ t('transactions.redecode_events.title') }}
-          </RuiButton>
+          <template v-if="includeEvmEvents">
+            <RuiButton
+              variant="text"
+              class="!p-3 rounded-none w-full justify-start whitespace-nowrap"
+              @click="decodingStatusDialogOpen = true"
+            >
+              <template #prepend>
+                <RuiBadge
+                  :value="eventTaskLoading"
+                  color="primary"
+                  dot
+                  placement="top"
+                  offset-y="4"
+                  offset-x="-4"
+                >
+                  <RuiIcon name="file-info-line" />
+                </RuiBadge>
+              </template>
+              {{ t('transactions.events_decoding.title') }}
+            </RuiButton>
+          </template>
 
           <RuiButton
             variant="text"
@@ -662,11 +760,12 @@ const includeOnlineEvents: ComputedRef<boolean> = useEmptyOrSome(
             <template #tooltip>
               <i18n tag="span" path="transactions.filtering_premium_hint">
                 <template #link>
-                  <b>
-                    <ExternalLink url="https://rotki.com/products">
-                      {{ t('common.website') }}
-                    </ExternalLink>
-                  </b>
+                  <ExternalLink
+                    class="font-bold"
+                    url="https://rotki.com/products"
+                  >
+                    {{ t('common.website') }}
+                  </ExternalLink>
                 </template>
               </i18n>
             </template>
@@ -747,6 +846,7 @@ const includeOnlineEvents: ComputedRef<boolean> = useEmptyOrSome(
                 :loading="sectionLoading || eventTaskLoading"
                 @edit:event="editEventHandler($event, item)"
                 @delete:event="promptForDelete($event)"
+                @show:missing-rule-action="setMissingRulesDialog($event, item)"
               />
             </template>
             <template #body.prepend="{ headers }">
@@ -781,6 +881,15 @@ const includeOnlineEvents: ComputedRef<boolean> = useEmptyOrSome(
       />
 
       <TransactionFormDialog :loading="sectionLoading" />
+
+      <MissingRulesDialog
+        v-if="missingRulesDialog"
+        v-model="missingRulesDialog"
+        :event="eventWithMissingRules"
+        @edit="editMissingRulesEntry($event)"
+        @re-decode="forceRedecodeEvmEvents($event)"
+        @add-rule="onAddMissingRule($event)"
+      />
     </RuiCard>
   </TablePageLayout>
 </template>

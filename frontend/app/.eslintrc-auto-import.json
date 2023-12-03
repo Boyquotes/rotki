@@ -718,6 +718,13 @@
     "injectLocal": true,
     "provideLocal": true,
     "useAssetPageNavigation": true,
-    "useAccountingRuleMappings": true
+    "useAccountingRuleMappings": true,
+    "getPlaceholderRule": true,
+    "compareTextByKeyword": true,
+    "getTextToken": true,
+    "useDynamicMessages": true,
+    "useUpdateMessage": true,
+    "useHistoryTransactionDecoding": true,
+    "guessTimezone": true
   }
 }

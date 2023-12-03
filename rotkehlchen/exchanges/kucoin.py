@@ -3,11 +3,12 @@ import hashlib
 import hmac
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from enum import Enum, auto
 from functools import partial
 from http import HTTPStatus
 from json.decoder import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Union, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 from urllib.parse import urlencode
 
 import gevent
@@ -50,8 +51,8 @@ from rotkehlchen.utils.mixins.lockable import protect_with_lock
 from rotkehlchen.utils.serialization import jsonloads_dict
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.base import HistoryEvent
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.history.events.structures.base import HistoryEvent
 
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ def _deserialize_ts(case: KucoinCase, time: int) -> Timestamp:
     return Timestamp(int(time / 1000))
 
 
-DeserializationMethod = Callable[..., Union[Trade, AssetMovement]]
+DeserializationMethod = Callable[..., Trade | AssetMovement]
 
 
 def deserialize_trade_pair(trade_pair_symbol: str) -> tuple[AssetWithOracles, AssetWithOracles]:
@@ -179,7 +180,7 @@ class Kucoin(ExchangeInterface):
     def _api_query(
             self,
             case: KucoinCase,
-            options: Optional[dict[str, Any]] = None,
+            options: dict[str, Any] | None = None,
     ) -> Response:
         """Request a KuCoin API v1 endpoint
 
@@ -214,6 +215,7 @@ class Kucoin(ExchangeInterface):
 
         retries_left = API_REQUEST_RETRY_TIMES
         retries_after_seconds = API_REQUEST_RETRIES_AFTER_SECONDS
+        timeout = CachedSettings().get_timeout_tuple()
         while retries_left >= 0:
             timestamp = str(ts_now_in_ms())
             method = 'GET'
@@ -243,7 +245,7 @@ class Kucoin(ExchangeInterface):
             })
             log.debug('Kucoin API request', request_url=request_url)
             try:
-                response = self.session.get(url=request_url, timeout=CachedSettings().get_timeout_tuple())  # noqa: E501
+                response = self.session.get(url=request_url, timeout=timeout)
             except requests.exceptions.RequestException as e:
                 raise RemoteError(
                     f'Kucoin {method} request at {request_url} connection error: {e!s}.',
@@ -308,7 +310,7 @@ class Kucoin(ExchangeInterface):
             ],
             start_ts: Timestamp,
             end_ts: Timestamp,
-    ) -> Union[list[Trade], list[AssetMovement]]:
+    ) -> list[Trade] | list[AssetMovement]:
         """Request endpoints paginating via an options attribute
 
         May raise RemoteError
@@ -412,7 +414,7 @@ class Kucoin(ExchangeInterface):
                         error=error_msg,
                         raw_result=raw_result,
                     )
-                    if isinstance(e, (UnknownAsset, UnsupportedAsset)):
+                    if isinstance(e, UnknownAsset | UnsupportedAsset):
                         asset_tag = 'unknown' if isinstance(e, UnknownAsset) else 'unsupported'
                         error_msg = f'Found {asset_tag} kucoin asset {e.identifier}'
 
@@ -657,11 +659,7 @@ class Kucoin(ExchangeInterface):
                 KucoinCase.DEPOSITS,
                 KucoinCase.WITHDRAWALS,
             ],
-    ) -> Union[
-        list,
-        tuple[bool, str],
-        ExchangeQueryBalances,
-    ]:
+    ) -> list | (tuple[bool, str] | ExchangeQueryBalances):
         """Process unsuccessful responses
 
         May raise RemoteError

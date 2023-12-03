@@ -48,6 +48,7 @@ const GeneralSettings = z.object({
   ssfGraphMultiplier: z.number().default(0),
   inferZeroTimedBalances: z.boolean(),
   nonSyncingExchanges: z.array(Exchange),
+  evmchainsToSkipDetection: z.array(z.string()),
   treatEth2AsEth: z.boolean(),
   addressNamePriority: z.array(AddressNamePriorityEnum),
   queryRetryLimit: z.number().min(1),
@@ -74,6 +75,7 @@ export const BaseAccountingSettings = z.object({
   accountForAssetsMovements: z.boolean(),
   profitCurrency: z.string().nullish(),
   ethStakingTaxableAfterWithdrawalEnabled: z.boolean().nullish(),
+  includeFeesInCostBasis: z.boolean().nullish(),
   costBasisMethod: CostBasisMethodEnum.nullish()
 });
 
@@ -121,6 +123,7 @@ const getAccountingSettings = (settings: UserSettings): AccountingSettings => ({
   includeCrypto2crypto: settings.includeCrypto2crypto,
   accountForAssetsMovements: settings.accountForAssetsMovements,
   calculatePastCostBasis: settings.calculatePastCostBasis,
+  includeFeesInCostBasis: settings.includeFeesInCostBasis,
   costBasisMethod: settings.costBasisMethod,
   ethStakingTaxableAfterWithdrawalEnabled:
     settings.ethStakingTaxableAfterWithdrawalEnabled
@@ -142,6 +145,7 @@ const getGeneralSettings = (settings: UserSettings): GeneralSettings => ({
   ssfGraphMultiplier: settings.ssfGraphMultiplier,
   inferZeroTimedBalances: settings.inferZeroTimedBalances,
   nonSyncingExchanges: settings.nonSyncingExchanges,
+  evmchainsToSkipDetection: settings.evmchainsToSkipDetection,
   treatEth2AsEth: settings.treatEth2AsEth,
   addressNamePriority: settings.addressNamePriority,
   queryRetryLimit: settings.queryRetryLimit,
@@ -189,7 +193,8 @@ export const ExternalServiceKeys = z.object({
   covalent: ApiKey.optional(),
   beaconchain: ApiKey.optional(),
   loopring: ApiKey.optional(),
-  opensea: ApiKey.optional()
+  opensea: ApiKey.optional(),
+  blockscout: ApiKey.optional()
 });
 
 export type ExternalServiceKeys = z.infer<typeof ExternalServiceKeys>;

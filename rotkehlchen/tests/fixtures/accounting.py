@@ -3,8 +3,9 @@ import os
 import shutil
 import sys
 from collections import defaultdict
+from contextlib import ExitStack
 from pathlib import Path
-from typing import Optional
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -12,6 +13,7 @@ import requests
 from rotkehlchen.accounting.accountant import Accountant
 from rotkehlchen.config import default_data_directory
 from rotkehlchen.constants import ONE
+from rotkehlchen.constants.misc import USERSDIR_NAME
 from rotkehlchen.db.updates import RotkiDataUpdater
 from rotkehlchen.externalapis.coingecko import Coingecko
 from rotkehlchen.externalapis.cryptocompare import Cryptocompare
@@ -36,8 +38,9 @@ def fixture_use_clean_caching_directory():
 
 @pytest.fixture(name='data_dir')
 def fixture_data_dir(use_clean_caching_directory, tmpdir_factory) -> Path:
-    """The tests data dir is peristent so that we can cache price queries between
-    tests. If use_clean_caching_directory is True then a completely fresh dir is returned"""
+    """The tests data dir is peristent so that we can cache global DB.
+    Adjusted from old code. Not sure if it makes sense to keep. Could also just
+    force clean caching directory everywhere"""
     if use_clean_caching_directory:
         return Path(tmpdir_factory.mktemp('test_data_dir'))
 
@@ -47,20 +50,8 @@ def fixture_data_dir(use_clean_caching_directory, tmpdir_factory) -> Path:
         data_directory = default_data_directory().parent / 'test_data'
 
     data_directory.mkdir(parents=True, exist_ok=True)
-
-    # do not keep pull github assets between tests. Can really confuse test results
-    # as we may end up with different set of assets in tests
-    (data_directory / 'assets').unlink(missing_ok=True)
-
-    # Remove any old accounts. The only reason we keep this directory around is for
-    # cached price queries, not for user DBs
-    for x in data_directory.iterdir():
-        directory_with_db = (
-            x.is_dir() and
-            ((x / 'rotkehlchen.db').exists() or (x / 'rotkehlchen_transient.db').exists())
-        )
-        if directory_with_db:
-            shutil.rmtree(x, ignore_errors=True)
+    # But always reset users
+    shutil.rmtree(data_directory / USERSDIR_NAME, ignore_errors=True)
 
     return data_directory
 
@@ -71,7 +62,7 @@ def fixture_should_mock_price_queries():
 
 
 @pytest.fixture()
-def default_mock_price_value() -> Optional[FVal]:
+def default_mock_price_value() -> FVal | None:
     """Determines test behavior If a mock price is not found
 
     If it's None, then test fails with an error. If it is any other
@@ -105,7 +96,23 @@ def fixture_initialize_accounting_rules() -> bool:
     accounting rules to the database. It is the case for the rotkehlchen_api_server and its
     variants.
     """
-    return True
+    return False
+
+
+@pytest.fixture(name='accountant_without_rules')
+def fixture_accountant_without_rules() -> bool:
+    """
+    If set to False the accountant fixture will be initialized without pre-loaded rules
+    """
+    return False
+
+
+@pytest.fixture(name='use_dummy_pot')
+def fixture_use_dummy_pot() -> bool:
+    """
+    If set to true then we will initialize the pot in accounting as a dummy pot
+    """
+    return False
 
 
 @pytest.fixture(name='last_accounting_rules_version', scope='session')
@@ -147,7 +154,9 @@ def fixture_accountant(
         rotki_premium_credentials,
         username,
         latest_accounting_rules,
-) -> Optional[Accountant]:
+        accountant_without_rules,
+        use_dummy_pot,
+) -> Accountant | None:
     if not start_with_logged_in_user:
         return None
 
@@ -160,18 +169,28 @@ def fixture_accountant(
         msg_aggregator=function_scope_messages_aggregator,
         user_db=database,
     )
-    with open(latest_accounting_rules, encoding='utf-8') as f:
-        data_updater.update_accounting_rules(
-            data=json.loads(f.read())['accounting_rules'],
-            version=999999,  # only for logs
-        )
 
-    accountant = Accountant(
-        db=database,
-        chains_aggregator=blockchain,
-        msg_aggregator=function_scope_messages_aggregator,
-        premium=premium,
-    )
+    if accountant_without_rules is False:
+        with open(latest_accounting_rules, encoding='utf-8') as f:
+            data_updater.update_accounting_rules(
+                data=json.loads(f.read())['accounting_rules'],
+                version=999999,  # only for logs
+            )
+
+    with ExitStack() as stack:
+        if use_dummy_pot:  # don't load ignored assets if dummy
+            stack.enter_context(patch.object(database, 'get_ignored_asset_ids', lambda _: set()))
+
+        with stack:
+            accountant = Accountant(
+                db=database,
+                chains_aggregator=blockchain,
+                msg_aggregator=function_scope_messages_aggregator,
+                premium=premium,
+            )
+
+        if use_dummy_pot:  # set the dummy behavior
+            accountant.pots[0].is_dummy_pot = use_dummy_pot
 
     if accounting_initialize_parameters:
         with accountant.db.conn.read_ctx() as cursor:
@@ -194,7 +213,7 @@ def fixture_should_mock_current_price_queries():
 
 
 @pytest.fixture(name='ignore_mocked_prices_for')
-def fixture_ignore_mocked_prices_for() -> Optional[list[str]]:
+def fixture_ignore_mocked_prices_for() -> list[str] | None:
     """An optional list of asset identifiers to ignore mocking for"""
     return None
 

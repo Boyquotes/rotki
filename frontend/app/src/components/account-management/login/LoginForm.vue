@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import useVuelidate from '@vuelidate/core';
 import { helpers, required, requiredIf } from '@vuelidate/validators';
+import { toMessages } from '@/utils/validation';
 import { type LoginCredentials, type SyncApproval } from '@/types/login';
 
 const props = withDefaults(
   defineProps<{
     loading: boolean;
+    isDocker?: boolean;
     errors?: string[];
   }>(),
   {
@@ -22,8 +24,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-const { errors } = toRefs(props);
+const isTest = import.meta.env.VITE_TEST;
+const { errors, isDocker } = toRefs(props);
 
+const usersApi = useUsersApi();
 const authStore = useSessionAuthStore();
 const { conflictExist } = storeToRefs(authStore);
 const { resetSyncConflict, resetIncompleteUpgradeConflict } = authStore;
@@ -37,6 +41,7 @@ const { usageGuideUrl } = useInterop();
 const css = useCssModule();
 
 const username: Ref<string> = ref('');
+const usernameSearch: Ref<string> = ref('');
 const password: Ref<string> = ref('');
 const rememberUsername: Ref<boolean> = ref(false);
 const rememberPassword: Ref<boolean> = ref(false);
@@ -122,6 +127,18 @@ const passwordError = useArrayFind(errors, error =>
   error.startsWith('Wrong password ')
 );
 
+const savedUsernames: Ref<string[]> = ref([]);
+
+const orderedUsernamesList = computed(() => {
+  const search = get(usernameSearch) || '';
+  const usernames = get(savedUsernames);
+
+  if (!search) {
+    return usernames;
+  }
+  return usernames.sort((a, b) => compareTextByKeyword(a, b, search));
+});
+
 const hasServerError = computed(
   () => !!get(usernameError) || !!get(passwordError)
 );
@@ -201,7 +218,9 @@ const clearCustomBackend = () => {
 const checkRememberUsername = () => {
   set(
     rememberUsername,
-    !!get(savedRememberUsername) || !!get(savedRememberPassword)
+    !!get(savedRememberUsername) ||
+      !!get(savedRememberPassword) ||
+      !get(isDocker)
   );
 };
 
@@ -224,8 +243,23 @@ const loadSettings = async () => {
   }
 };
 
-onMounted(async () => {
+const router = useRouter();
+
+onBeforeMount(async () => {
   await loadSettings();
+  const profiles = await usersApi.getUserProfiles();
+  set(savedUsernames, profiles);
+  if (profiles.length === 0) {
+    const { currentRoute } = router;
+    if (!currentRoute.query.disableNoUserRedirection) {
+      newAccount();
+    } else {
+      await router.replace({ query: {} });
+    }
+  }
+});
+
+onMounted(async () => {
   updateFocus();
 });
 
@@ -316,6 +350,7 @@ const abortLogin = () => {
         <div>
           <form novalidate @submit.stop.prevent="login()">
             <RuiTextField
+              v-if="isDocker || isTest"
               ref="usernameRef"
               v-model="username"
               variant="outlined"
@@ -328,6 +363,44 @@ const abortLogin = () => {
               data-cy="username-input"
               dense
             />
+            <VAutocomplete
+              v-else
+              ref="usernameRef"
+              v-model="username"
+              :search-input.sync="usernameSearch"
+              :label="t('login.label_username')"
+              :items="orderedUsernamesList"
+              :disabled="loading || conflictExist || customBackendDisplay"
+              :error-messages="usernameErrors"
+              data-cy="username-input"
+              class="mb-2"
+              auto-select-first
+              validate-on-blur
+              :hide-no-data="savedUsernames.length > 0"
+              clearable
+              outlined
+              dense
+            >
+              <template #no-data>
+                <div class="px-4 py-2 text-body-2 font-medium">
+                  <i18n path="login.no_profiles_found">
+                    <template #create_account>
+                      <RuiButton
+                        color="primary"
+                        variant="text"
+                        class="text-[1em] py-0 inline px-1"
+                        :disabled="loading"
+                        type="button"
+                        data-cy="new-account"
+                        @click="newAccount()"
+                      >
+                        {{ t('login.button_create_account') }}
+                      </RuiButton>
+                    </template>
+                  </i18n>
+                </div>
+              </template>
+            </VAutocomplete>
 
             <RuiRevealableTextField
               ref="passwordRef"
@@ -346,6 +419,7 @@ const abortLogin = () => {
             <div class="flex items-center justify-between">
               <div>
                 <RuiCheckbox
+                  v-if="isDocker"
                   v-model="rememberUsername"
                   :disabled="
                     customBackendDisplay || rememberPassword || loading
@@ -384,24 +458,34 @@ const abortLogin = () => {
                   </RuiTooltip>
                 </div>
               </div>
-              <div>
-                <RuiTooltip
-                  open-delay="400"
-                  close-delay="0"
-                  :text="t('login.custom_backend.tooltip')"
-                >
-                  <template #activator>
-                    <RuiButton
-                      :disabled="loading"
-                      type="button"
-                      icon
-                      @click="customBackendDisplay = !customBackendDisplay"
-                    >
-                      <RuiIcon name="server-line" :color="serverColor" />
-                    </RuiButton>
-                  </template>
-                </RuiTooltip>
-              </div>
+              <RuiTooltip
+                open-delay="400"
+                close-delay="0"
+                :text="t('login.custom_backend.tooltip')"
+              >
+                <template #activator>
+                  <RuiButton
+                    :disabled="loading"
+                    variant="text"
+                    type="button"
+                    icon
+                    @click="customBackendDisplay = !customBackendDisplay"
+                  >
+                    <RuiIcon name="server-line" :color="serverColor" />
+                    <template #append>
+                      <RuiIcon
+                        size="16"
+                        class="-ml-2"
+                        :name="
+                          customBackendDisplay
+                            ? 'arrow-up-s-line'
+                            : 'arrow-down-s-line'
+                        "
+                      />
+                    </template>
+                  </RuiButton>
+                </template>
+              </RuiTooltip>
             </div>
 
             <Transition
@@ -412,62 +496,64 @@ const abortLogin = () => {
               leave-to-class="h-0 opacity-0"
               leave-active-class="transition duration-100"
             >
-              <div v-if="customBackendDisplay">
-                <div class="flex flex-col justify-stretch space-y-4 mt-4">
-                  <RuiTextField
-                    v-model="customBackendUrl"
-                    variant="outlined"
-                    :error-messages="
-                      v$.customBackendUrl.$errors.map(e => e.$message)
-                    "
-                    :disabled="customBackendSaved"
-                    :label="t('login.custom_backend.label')"
-                    :placeholder="t('login.custom_backend.placeholder')"
-                    :hint="t('login.custom_backend.hint')"
-                    dense
-                  >
-                    <template #prepend>
-                      <RuiIcon name="server-line" :color="serverColor" />
-                    </template>
-                    <template #append>
-                      <RuiButton
-                        v-if="!customBackendSaved"
-                        :disabled="loading"
-                        variant="text"
-                        class="-mr-1 !p-2"
-                        type="button"
-                        icon
-                        @click="saveCustomBackend()"
-                      >
-                        <RuiIcon name="save-2-fill" color="primary" size="20" />
-                      </RuiButton>
-                      <RuiButton
-                        v-else
-                        variant="text"
-                        class="-mr-1 !p-2"
-                        type="button"
-                        icon
-                        @click="clearCustomBackend()"
-                      >
-                        <RuiIcon
-                          name="delete-bin-fill"
-                          color="primary"
-                          size="20"
-                        />
-                      </RuiButton>
-                    </template>
-                  </RuiTextField>
+              <div
+                v-if="customBackendDisplay"
+                class="flex flex-col justify-stretch space-y-4 mt-4"
+              >
+                <RuiTextField
+                  v-model="customBackendUrl"
+                  color="primary"
+                  variant="outlined"
+                  :error-messages="
+                    v$.customBackendUrl.$errors.map(e => e.$message)
+                  "
+                  :disabled="customBackendSaved"
+                  :label="t('login.custom_backend.label')"
+                  :placeholder="t('login.custom_backend.placeholder')"
+                  :hint="t('login.custom_backend.hint')"
+                  dense
+                >
+                  <template #prepend>
+                    <RuiIcon name="server-line" :color="serverColor" />
+                  </template>
+                  <template #append>
+                    <RuiButton
+                      v-if="!customBackendSaved"
+                      :disabled="loading"
+                      variant="text"
+                      class="-mr-1 !p-2"
+                      type="button"
+                      icon
+                      @click="saveCustomBackend()"
+                    >
+                      <RuiIcon name="save-2-fill" color="primary" size="20" />
+                    </RuiButton>
+                    <RuiButton
+                      v-else
+                      variant="text"
+                      class="-mr-1 !p-2"
+                      type="button"
+                      icon
+                      @click="clearCustomBackend()"
+                    >
+                      <RuiIcon
+                        name="delete-bin-fill"
+                        color="primary"
+                        size="20"
+                      />
+                    </RuiButton>
+                  </template>
+                </RuiTextField>
 
-                  <RuiCheckbox
-                    v-model="customBackendSessionOnly"
-                    :class="css.remember"
-                    color="primary"
-                    hide-details
-                    :disabled="customBackendSaved"
-                  >
-                    {{ t('login.custom_backend.session_only') }}
-                  </RuiCheckbox>
-                </div>
+                <RuiCheckbox
+                  v-model="customBackendSessionOnly"
+                  :class="css.remember"
+                  color="primary"
+                  hide-details
+                  :disabled="customBackendSaved"
+                >
+                  {{ t('login.custom_backend.session_only') }}
+                </RuiCheckbox>
               </div>
             </Transition>
 
@@ -509,7 +595,7 @@ const abortLogin = () => {
                   class="py-1"
                   @click="newAccount()"
                 >
-                  {{ t('login.button_signup') }}
+                  {{ t('login.button_create_account') }}
                 </RuiButton>
               </div>
             </div>

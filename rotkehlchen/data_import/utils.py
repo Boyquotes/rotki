@@ -2,9 +2,8 @@ import hashlib
 from abc import ABCMeta, abstractmethod
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from rotkehlchen.accounting.structures.base import HistoryBaseEntry
 from rotkehlchen.assets.asset import Asset, AssetWithOracles
 from rotkehlchen.assets.converters import LOCATION_TO_ASSET_MAPPING, asset_from_common_identifier
 from rotkehlchen.db.dbhandler import DBHandler
@@ -12,6 +11,7 @@ from rotkehlchen.db.drivers.gevent import DBCursor
 from rotkehlchen.db.history_events import DBHistoryEvents
 from rotkehlchen.errors.misc import InputError
 from rotkehlchen.exchanges.data_structures import AssetMovement, MarginPosition, Trade
+from rotkehlchen.history.events.structures.base import HistoryBaseEntry
 from rotkehlchen.serialization.deserialize import deserialize_asset_amount, deserialize_timestamp
 from rotkehlchen.types import Fee, Location, TimestampMS
 
@@ -82,7 +82,7 @@ class UnsupportedCSVEntry(Exception):
 def process_rotki_generic_import_csv_fields(
         csv_row: dict[str, Any],
         currency_colname: str,
-) -> tuple[AssetWithOracles, Optional[Fee], Optional[Asset], Location, TimestampMS]:
+) -> tuple[AssetWithOracles, Fee | None, Asset | None, Location, TimestampMS]:
     """
     Process the imported csv for generic rotki trades and events
     """

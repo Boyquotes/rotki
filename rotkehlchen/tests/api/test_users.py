@@ -4,7 +4,7 @@ import shutil
 from contextlib import ExitStack
 from http import HTTPStatus
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -12,6 +12,7 @@ import requests
 from pysqlcipher3 import dbapi2 as sqlcipher
 
 from rotkehlchen.api.server import APIServer
+from rotkehlchen.constants.misc import USERDB_NAME, USERSDIR_NAME
 from rotkehlchen.db.drivers.gevent import DBConnection, DBConnectionType
 from rotkehlchen.db.settings import ROTKEHLCHEN_DB_VERSION, DBSettings
 from rotkehlchen.premium.premium import PremiumCredentials
@@ -37,7 +38,7 @@ from rotkehlchen.utils.misc import ts_now
 
 def check_proper_unlock_result(
         response_data: dict[str, Any],
-        settings_to_check: Optional[dict[str, Any]] = None,
+        settings_to_check: dict[str, Any] | None = None,
 ) -> None:
 
     assert isinstance(response_data['exchanges'], list)
@@ -61,8 +62,10 @@ def check_user_status(api_server: APIServer) -> dict[str, str]:
 
 def test_loggedin_user_querying(rotkehlchen_api_server: APIServer, username: str, data_dir: Path):
     """Start with a logged in user and make sure we can query all users"""
-    Path(data_dir / 'another_user').mkdir()
-    Path(data_dir / 'another_user' / 'rotkehlchen.db').touch()
+    users_dir = data_dir / USERSDIR_NAME
+    user_dir = users_dir / 'another_user'
+    user_dir.mkdir(exist_ok=True)
+    (user_dir / USERDB_NAME).touch()
     response = requests.get(api_url_for(rotkehlchen_api_server, 'usersresource'))
     result = assert_proper_response_with_result(response)
     assert result[username] == 'loggedin'
@@ -77,10 +80,13 @@ def test_not_loggedin_user_querying(
         data_dir: Path,
 ):
     """Start without logged in user and make sure we can query all users"""
-    Path(data_dir / 'another_user').mkdir()
-    Path(data_dir / 'another_user' / 'rotkehlchen.db').touch()
-    Path(data_dir / username).mkdir(exist_ok=True)
-    Path(data_dir / username / 'rotkehlchen.db').touch()
+    users_dir = data_dir / USERSDIR_NAME
+    another_user_dir = users_dir / 'another_user'
+    another_user_dir.mkdir()
+    (another_user_dir / USERDB_NAME).touch()
+    user_dir = users_dir / username
+    user_dir.mkdir(exist_ok=True)
+    (user_dir / USERDB_NAME).touch()
 
     response = requests.get(api_url_for(rotkehlchen_api_server, 'usersresource'))
     result = assert_proper_response_with_result(response)
@@ -94,31 +100,41 @@ def test_user_creation(rotkehlchen_api_server, data_dir):
     """Test that PUT at user endpoint can create a new user"""
     # Create a user without any premium credentials
     async_query = random.choice([False, True])
-    username = 'hania'
-    data = {'name': username, 'password': '1234', 'async_query': async_query}
+    usernames = ('hania', 'john.doe')
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
 
-    with ExitStack() as stack:
-        patch_no_op_unlock(rotki, stack)
-        response = requests.put(api_url_for(rotkehlchen_api_server, 'usersresource'), json=data)
+    for idx, username in enumerate(usernames):
+        data = {'name': username, 'password': '1234', 'async_query': async_query}
+        with ExitStack() as stack:
+            patch_no_op_unlock(rotki, stack)
+            response = requests.put(api_url_for(rotkehlchen_api_server, 'usersresource'), json=data)  # noqa: E501
 
-        if async_query is True:
-            task_id = assert_ok_async_response(response)
-            outcome = wait_for_async_task(rotkehlchen_api_server, task_id)
-            result = outcome['result']
-        else:
-            result = assert_proper_response_with_result(response)
+            if async_query is True:
+                task_id = assert_ok_async_response(response)
+                outcome = wait_for_async_task(rotkehlchen_api_server, task_id)
+                result = outcome['result']
+            else:
+                result = assert_proper_response_with_result(response)
 
-    check_proper_unlock_result(result, {'submit_usage_analytics': True})
+        check_proper_unlock_result(result, {'submit_usage_analytics': True})
 
-    # Query users and make sure the new user is logged in
-    response = requests.get(api_url_for(rotkehlchen_api_server, 'usersresource'))
-    result = assert_proper_response_with_result(response)
-    assert result[username] == 'loggedin'
-    assert len(result) == 1
+        # Query users and make sure the new user is logged in
+        response = requests.get(api_url_for(rotkehlchen_api_server, 'usersresource'))
+        result = assert_proper_response_with_result(response)
+        assert result[username] == 'loggedin'
+        assert len(result) == idx + 1
 
-    # Check that the directory was created
-    assert Path(data_dir / username / 'rotkehlchen.db').exists()
+        # Check that the directory was created
+        assert (data_dir / USERSDIR_NAME / username / USERDB_NAME).exists()
+
+        # Logout
+        data = {'action': 'logout'}
+        response = requests.patch(
+            api_url_for(rotkehlchen_api_server, 'usersbynameresource', name=username),
+            json=data,
+        )
+        assert_simple_ok_response(response)
+        assert rotki.user_is_logged_in is False
 
 
 @pytest.mark.parametrize('start_with_logged_in_user', [False])
@@ -146,7 +162,7 @@ def test_user_creation_with_no_analytics(rotkehlchen_api_server, data_dir):
     assert len(result) == 1
 
     # Check that the directory was created
-    assert Path(data_dir / username / 'rotkehlchen.db').exists()
+    assert (data_dir / USERSDIR_NAME / username / USERDB_NAME).exists()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -212,7 +228,7 @@ def test_user_creation_with_premium_credentials(rotkehlchen_api_server, data_dir
     assert len(result) == 1
 
     # Check that the directory was created
-    assert Path(data_dir / username / 'rotkehlchen.db').exists()
+    assert (data_dir / USERSDIR_NAME / username / USERDB_NAME).exists()
 
     # Check that the user has premium
     assert rotki.premium is not None
@@ -229,6 +245,7 @@ def test_user_creation_with_invalid_premium_credentials(rotkehlchen_api_server, 
     """
     # Create a user with invalid credentials
     username = 'hania'
+    users_dir = data_dir / USERSDIR_NAME
     data = {
         'name': username,
         'password': '1234',
@@ -246,7 +263,7 @@ def test_user_creation_with_invalid_premium_credentials(rotkehlchen_api_server, 
         )
 
     # Check that the directory was NOT created
-    assert not Path(data_dir / username).exists(), 'The directory should not have been created'
+    assert not Path(users_dir / username).exists(), 'The directory should not have been created'
 
     # Create a new user with valid but not authenticable credentials
     username = 'Anja'
@@ -270,9 +287,9 @@ def test_user_creation_with_invalid_premium_credentials(rotkehlchen_api_server, 
     )
 
     # Check that the directory was NOT created
-    assert not Path(data_dir / username).exists(), 'The directory should not have been created'
+    assert not Path(users_dir / username).exists(), 'The directory should not have been created'
     # But check that a backup of the directory was made just in case
-    backups = list(Path(data_dir).glob('auto_backup_*'))
+    backups = list(Path(users_dir).glob('auto_backup_*'))
     assert len(backups) == 1
     assert 'auto_backup_Anja_' in str(backups[0]), 'An automatic backup should have been made'
 
@@ -295,7 +312,7 @@ def test_user_creation_with_invalid_premium_credentials(rotkehlchen_api_server, 
     assert len(result) == 2
 
     # Check that the directory was created
-    assert Path(data_dir / username / 'rotkehlchen.db').exists()
+    assert (users_dir / username / USERDB_NAME).exists()
 
 
 @pytest.mark.parametrize('start_with_logged_in_user', [False])
@@ -303,6 +320,7 @@ def test_user_creation_errors(rotkehlchen_api_server, data_dir):
     """Test errors and edge cases for user creation"""
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
 
+    users_dir = data_dir / USERSDIR_NAME
     with ExitStack() as stack:
         patch_no_op_unlock(rotki, stack)
 
@@ -393,11 +411,12 @@ def test_user_creation_errors(rotkehlchen_api_server, data_dir):
         )
 
         # Check that the directory was NOT created
-        assert not Path(data_dir / username / 'rotkehlchen.db').exists()
+        assert not (users_dir / username / USERDB_NAME).exists()
 
         # Let's pretend there is another user, and try to create them again
-        Path(data_dir / 'another_user').mkdir()
-        Path(data_dir / 'another_user' / 'rotkehlchen.db').touch()
+        another_user_dir = users_dir / 'another_user'
+        another_user_dir.mkdir()
+        (another_user_dir / USERDB_NAME).touch()
         data = {
             'name': 'another_user',
             'password': '1234',
@@ -575,9 +594,11 @@ def test_user_login(rotkehlchen_api_server, username, db_password, data_dir):
     """Test that user login works properly"""
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
 
+    users_dir = data_dir / USERSDIR_NAME
     # Let's pretend there is another user, and try to create them again
-    Path(data_dir / 'another_user').mkdir()
-    Path(data_dir / 'another_user' / 'rotkehlchen.db').touch()
+    another_user_dir = users_dir / 'another_user'
+    another_user_dir.mkdir()
+    (another_user_dir / USERDB_NAME).touch()
 
     # Check users status
     users_data = check_user_status(rotkehlchen_api_server)
@@ -692,8 +713,8 @@ def test_user_login(rotkehlchen_api_server, username, db_password, data_dir):
     ongoing_upgrade_from_version = 33  # pretend we are upgrading from v33
 
     # Add a backup
-    backup_path = data_dir / username / f'{ts_now()}_rotkehlchen_db_v{ongoing_upgrade_from_version}.backup'  # noqa: E501
-    shutil.copy(data_dir / username / 'rotkehlchen.db', backup_path)
+    backup_path = users_dir / username / f'{ts_now()}_rotkehlchen_db_v{ongoing_upgrade_from_version}.backup'  # noqa: E501
+    shutil.copy(users_dir / username / USERDB_NAME, backup_path)
     backup_connection = DBConnection(
         path=str(backup_path),
         connection_type=DBConnectionType.USER,
@@ -848,10 +869,11 @@ def test_user_login_user_dir_permission_error(
         mock_path_exists, rotkehlchen_api_server, data_dir,  # pylint: disable=unused-argument
 ):
     """Test that user login with userdir path permission errors is handled properly"""
+    users_dir = data_dir / USERSDIR_NAME
     username = 'a_user'
-    user_dir = Path(data_dir / username)
+    user_dir = users_dir / username
     user_dir.mkdir()
-    db_path = Path(data_dir / username / 'rotkehlchen.db')
+    db_path = user_dir / USERDB_NAME
     db_path.touch()
     data = {'password': '123', 'sync_approval': 'unknown', 'async_query': True}
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
@@ -882,9 +904,9 @@ def test_user_login_db_permission_error(
 ):
     """Test that user login with db path permission errors is handled properly"""
     username = 'a_user'
-    user_dir = Path(data_dir / username)
+    user_dir = data_dir / USERSDIR_NAME / username
     user_dir.mkdir()
-    db_path = Path(data_dir / username / 'rotkehlchen.db')
+    db_path = user_dir / USERDB_NAME
     db_path.touch()
     data = {'password': '123', 'sync_approval': 'unknown', 'async_query': True}
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen

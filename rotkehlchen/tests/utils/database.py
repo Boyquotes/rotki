@@ -3,7 +3,7 @@ import random
 from dataclasses import asdict
 from pathlib import Path
 from shutil import copyfile
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import _patch, patch
 
 from pysqlcipher3 import dbapi2 as sqlcipher
@@ -12,6 +12,7 @@ from rotkehlchen.assets.asset import Asset
 from rotkehlchen.balances.manual import ManuallyTrackedBalance
 from rotkehlchen.chain.accounts import BlockchainAccountData, BlockchainAccounts
 from rotkehlchen.chain.evm.nodes import populate_rpc_nodes_in_database
+from rotkehlchen.constants.misc import USERDB_NAME
 from rotkehlchen.db.dbhandler import DBHandler
 from rotkehlchen.db.settings import ModifiableDBSettings
 from rotkehlchen.errors.misc import InputError
@@ -97,9 +98,9 @@ def add_blockchain_accounts_to_db(db: DBHandler, blockchain_accounts: Blockchain
 
 def add_settings_to_test_db(
         db: DBHandler,
-        db_settings: Optional[dict[str, Any]],
-        ignored_assets: Optional[list[Asset]],
-        data_migration_version: Optional[int],
+        db_settings: dict[str, Any] | None,
+        ignored_assets: list[Asset] | None,
+        data_migration_version: int | None,
 ) -> None:
     settings = {
         # DO not submit usage analytics during tests
@@ -172,7 +173,7 @@ def _use_prepared_db(user_data_dir: Path, filename: str) -> None:
     dir_path = os.path.dirname(os.path.realpath(__file__))
     copyfile(
         os.path.join(os.path.dirname(dir_path), 'data', filename),
-        user_data_dir / 'rotkehlchen.db',
+        user_data_dir / USERDB_NAME,
     )
 
 

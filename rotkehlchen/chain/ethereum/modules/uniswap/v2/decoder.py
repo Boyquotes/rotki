@@ -1,4 +1,5 @@
-from typing import TYPE_CHECKING, Callable, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from rotkehlchen.assets.asset import EvmToken
 from rotkehlchen.chain.ethereum.modules.uniswap.constants import (
@@ -30,7 +31,7 @@ from rotkehlchen.types import UNISWAP_PROTOCOL, EvmTransaction
 from rotkehlchen.utils.misc import hex_or_bytes_to_int
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.evm_event import EvmEvent
+    from rotkehlchen.history.events.structures.evm_event import EvmEvent
 
 
 # https://www.4byte.directory/api/v1/event-signatures/?hex_signature=0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822  # noqa: E501
@@ -73,7 +74,7 @@ class Uniswapv2Decoder(DecoderInterface):
 
     def _maybe_decode_v2_swap(
             self,
-            token: Optional[EvmToken],  # pylint: disable=unused-argument
+            token: EvmToken | None,  # pylint: disable=unused-argument
             tx_log: EvmTxReceiptLog,
             transaction: EvmTransaction,
             decoded_events: list['EvmEvent'],
@@ -103,7 +104,7 @@ class Uniswapv2Decoder(DecoderInterface):
 
     def _maybe_decode_v2_liquidity_addition_and_removal(
             self,
-            token: Optional[EvmToken],  # pylint: disable=unused-argument
+            token: EvmToken | None,  # pylint: disable=unused-argument
             tx_log: EvmTxReceiptLog,
             transaction: EvmTransaction,  # pylint: disable=unused-argument
             decoded_events: list['EvmEvent'],

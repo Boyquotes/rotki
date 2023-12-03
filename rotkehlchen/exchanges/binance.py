@@ -5,7 +5,7 @@ import logging
 from collections import defaultdict
 from contextlib import suppress
 from json.decoder import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlencode
 from uuid import uuid4
 
@@ -13,8 +13,6 @@ import gevent
 import requests
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.base import HistoryEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import AssetWithOracles
 from rotkehlchen.assets.converters import asset_from_binance
 from rotkehlchen.constants import ZERO
@@ -46,6 +44,8 @@ from rotkehlchen.exchanges.utils import (
 )
 from rotkehlchen.fval import FVal
 from rotkehlchen.history.deserialization import deserialize_price
+from rotkehlchen.history.events.structures.base import HistoryEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.history.price import PriceHistorian
 from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.logging import RotkehlchenLogsAdapter
@@ -206,7 +206,7 @@ class Binance(ExchangeInterface, ExchangeWithExtras):
             database: 'DBHandler',
             msg_aggregator: MessagesAggregator,
             uri: str = BINANCE_BASE_URL,
-            binance_selected_trade_pairs: Optional[list[str]] = None,
+            binance_selected_trade_pairs: list[str] | None = None,
     ):
         exchange_location = Location.BINANCE
         if uri == BINANCEUS_BASE_URL:
@@ -295,8 +295,8 @@ class Binance(ExchangeInterface, ExchangeWithExtras):
             self,
             api_type: BINANCE_API_TYPE,
             method: str,
-            options: Optional[dict] = None,
-    ) -> Union[list, dict]:
+            options: dict | None = None,
+    ) -> list | dict:
         """Performs a binance api query
 
         May raise:
@@ -304,7 +304,7 @@ class Binance(ExchangeInterface, ExchangeWithExtras):
          - BinancePermissionError
         """
         call_options = options.copy() if options else {}
-
+        timeout = CachedSettings().get_timeout_tuple()
         while True:
             if 'signature' in call_options:
                 del call_options['signature']
@@ -342,7 +342,7 @@ class Binance(ExchangeInterface, ExchangeWithExtras):
             request_url += urlencode(call_options)
             log.debug(f'{self.name} API request', request_url=request_url)
             try:
-                response = self.session.get(request_url, timeout=CachedSettings().get_timeout_tuple())  # noqa: E501
+                response = self.session.get(request_url, timeout=timeout)
             except requests.exceptions.RequestException as e:
                 raise RemoteError(
                     f'{self.name} API request failed due to {e!s}',
@@ -366,7 +366,7 @@ class Binance(ExchangeInterface, ExchangeWithExtras):
                     log.debug(f'Couldnt query {self.name} trades for {symbol} since its delisted')
                     return []
 
-                exception_class: type[Union[RemoteError, BinancePermissionError]]
+                exception_class: type[RemoteError | BinancePermissionError]
                 if response.status_code == 401 and code == REJECTED_MBX_KEY:
                     # Either API key permission error or if futures/dapi then not enabled yet
                     exception_class = BinancePermissionError
@@ -422,7 +422,7 @@ class Binance(ExchangeInterface, ExchangeWithExtras):
             self,
             api_type: BINANCE_API_TYPE,
             method: str,
-            options: Optional[dict] = None,
+            options: dict | None = None,
     ) -> dict:
         """May raise RemoteError and BinancePermissionError due to api_query"""
         result = self.api_query(api_type, method, options)
@@ -437,7 +437,7 @@ class Binance(ExchangeInterface, ExchangeWithExtras):
             self,
             api_type: BINANCE_API_TYPE,
             method: str,
-            options: Optional[dict] = None,
+            options: dict | None = None,
     ) -> list:
         """May raise RemoteError and BinancePermissionError due to api_query"""
         result = self.api_query(api_type, method, options)
@@ -1108,7 +1108,7 @@ class Binance(ExchangeInterface, ExchangeWithExtras):
             self,
             raw_data: dict[str, Any],
             trade_type: TradeType,
-    ) -> Optional[Trade]:
+    ) -> Trade | None:
         """Processes a single deposit/withdrawal from binance and deserializes it
 
         Can log error/warning and return None if something went wrong at deserialization
@@ -1175,7 +1175,7 @@ class Binance(ExchangeInterface, ExchangeWithExtras):
             self,
             raw_data: dict[str, Any],
             category: AssetMovementCategory,
-    ) -> Optional[AssetMovement]:
+    ) -> AssetMovement | None:
         """Processes a single deposit/withdrawal from binance and deserializes it
 
         Can log error/warning and return None if something went wrong at deserialization
@@ -1233,7 +1233,7 @@ class Binance(ExchangeInterface, ExchangeWithExtras):
 
         return None
 
-    def _deserialize_asset_movement(self, raw_data: dict[str, Any]) -> Optional[AssetMovement]:
+    def _deserialize_asset_movement(self, raw_data: dict[str, Any]) -> AssetMovement | None:
         """Processes a single deposit/withdrawal from binance and deserializes it
 
         Can log error/warning and return None if something went wrong at deserialization
@@ -1311,7 +1311,7 @@ class Binance(ExchangeInterface, ExchangeWithExtras):
                 'fiat/payments',
                 'lending/union/interestHistory',
             ],
-            additional_options: Optional[dict] = None,
+            additional_options: dict | None = None,
     ) -> list[dict[str, Any]]:
         """Request via `api_query_dict()` from `start_ts` `end_ts` using a time
         delta (offset) less than `time_delta`.

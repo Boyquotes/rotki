@@ -1,8 +1,6 @@
 from typing import Literal
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.base import HistoryBaseEntry, HistoryEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import CryptoAsset, EvmToken
 from rotkehlchen.assets.converters import asset_from_binance
 from rotkehlchen.assets.utils import symbol_to_asset_or_token
@@ -40,6 +38,8 @@ from rotkehlchen.db.filtering import (
 from rotkehlchen.db.history_events import DBHistoryEvents
 from rotkehlchen.exchanges.data_structures import AssetMovement, MarginPosition, Trade
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.base import HistoryBaseEntry, HistoryEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.rotkehlchen import Rotkehlchen
 from rotkehlchen.tests.utils.constants import A_AXS, A_CRO, A_GBP, A_MCO, A_XMR
 from rotkehlchen.types import (
@@ -2071,7 +2071,7 @@ def assert_rotki_generic_events_import_results(rotki: Rotkehlchen):
     assert len(expected_history_events) == 5
     assert len(warnings) == 3
     assert warnings == expected_warnings
-    for actual, expected in zip(history_events, expected_history_events):
+    for actual, expected in zip(history_events, expected_history_events, strict=True):
         assert_is_equal_history_event(actual=actual, expected=expected)
 
 
@@ -2194,7 +2194,7 @@ def assert_bitcoin_tax_trades_import_results(
             )
         assert len(history_events) == 6
         assert len(expected_history_events) == 6
-        for actual, expected in zip(history_events, expected_history_events):
+        for actual, expected in zip(history_events, expected_history_events, strict=True):
             assert_is_equal_history_event(actual=actual, expected=expected)
 
     elif csv_file_name == 'bitcoin_tax_spending.csv':
@@ -2227,7 +2227,7 @@ def assert_bitcoin_tax_trades_import_results(
         assert len(history_events) == 7  # events from trades import + 1
         assert len(expected_history_events) == 1
         history_events = history_events[6:]  # only check the last event
-        for actual, expected in zip(history_events, expected_history_events):
+        for actual, expected in zip(history_events, expected_history_events, strict=True):
             assert_is_equal_history_event(actual=actual, expected=expected)
 
     else:
@@ -2328,5 +2328,5 @@ def assert_bitstamp_trades_import_results(rotki: Rotkehlchen):
         ),
     ]
 
-    for actual, expected in zip(history_events, expected_history_events):
+    for actual, expected in zip(history_events, expected_history_events, strict=True):
         assert_is_equal_history_event(actual=actual, expected=expected)

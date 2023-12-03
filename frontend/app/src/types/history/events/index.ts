@@ -145,12 +145,15 @@ export interface HistoryEventRequestPayload
   readonly entryTypes?: FilterObjectWithBehaviour<string | string[]>;
   readonly txHashes?: string | string[];
   readonly validatorIndices?: string | string[];
+  readonly customizedEventsOnly?: boolean;
 }
 
 export type EditEvmHistoryEventPayload = Omit<
   EvmHistoryEvent,
   'ignoredInAccounting' | 'customized' | 'eventIdentifier'
->;
+> & {
+  eventIdentifier: string | null;
+};
 
 export type NewEvmHistoryEventPayload = Omit<
   EditEvmHistoryEventPayload,
@@ -176,6 +179,7 @@ export type EditEthBlockEventPayload = {
   blockNumber: number;
   feeRecipient: string;
   isMevReward: boolean;
+  eventIdentifier: string | null;
 };
 
 export type NewEthBlockEventPayload = Omit<
@@ -209,6 +213,7 @@ export type EditEthWithdrawalEventPayload = {
   validatorIndex: number;
   withdrawalAddress: string;
   isExit: boolean;
+  eventIdentifier: string | null;
 };
 
 export type NewEthWithdrawalEventPayload = Omit<
@@ -235,7 +240,8 @@ export const HistoryEventMeta = EntryMeta.merge(
     customized: z.boolean().optional(),
     hasDetails: z.boolean().optional(),
     hidden: z.boolean().optional(),
-    groupedEventsNum: z.number().nullish()
+    groupedEventsNum: z.number().nullish(),
+    missingAccountingRule: z.boolean().optional()
   })
 );
 

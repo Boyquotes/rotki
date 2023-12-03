@@ -4,12 +4,13 @@ import shutil
 from http import HTTPStatus
 from json.decoder import JSONDecodeError
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 import maxminddb
 import miniupnpc
 import requests
 
+from rotkehlchen.constants.misc import APPDIR_NAME, MISCDIR_NAME
 from rotkehlchen.db.settings import CachedSettings
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.logging import RotkehlchenLogsAdapter
@@ -24,7 +25,7 @@ class GeolocationData(NamedTuple):
     country_code: str
 
 
-def retrieve_location_data(data_dir: Path) -> Optional[GeolocationData]:
+def retrieve_location_data(data_dir: Path) -> GeolocationData | None:
     """This functions tries to get the country of the user based on the ip.
     To do that it makes use of an open ip to country database and tries to obtain
     the ip ussing UPnP protocol.
@@ -33,7 +34,7 @@ def retrieve_location_data(data_dir: Path) -> Optional[GeolocationData]:
 
     **IMPORTANT:** The ip never leaves the user's machine. It's all calculated locally.
     """
-    geoip_dir = data_dir / 'misc'
+    geoip_dir = data_dir / APPDIR_NAME / MISCDIR_NAME
     geoip_dir.mkdir(parents=True, exist_ok=True)
     # get latest database version
     metadata_query_failed = False

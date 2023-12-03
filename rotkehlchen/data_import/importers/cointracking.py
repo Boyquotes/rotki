@@ -6,8 +6,6 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.base import HistoryEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.converters import LOCATION_TO_ASSET_MAPPING
 from rotkehlchen.assets.utils import symbol_to_asset_or_token
 from rotkehlchen.constants import ZERO
@@ -19,6 +17,8 @@ from rotkehlchen.errors.asset import UnknownAsset
 from rotkehlchen.errors.misc import InputError
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.exchanges.data_structures import AssetMovement, Trade
+from rotkehlchen.history.events.structures.base import HistoryEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.serialization.deserialize import (
     deserialize_asset_amount,
@@ -233,14 +233,14 @@ class CointrackingImporter(BaseExchangeImporter):
             header = remap_header(next(data))
             for row in data:
                 try:
-                    self._consume_cointracking_entry(write_cursor, dict(zip(header, row)), **kwargs)  # noqa: E501
+                    self._consume_cointracking_entry(write_cursor, dict(zip(header, row, strict=True)), **kwargs)  # noqa: E501
                 except UnknownAsset as e:
                     self.db.msg_aggregator.add_warning(
                         f'During cointracking CSV import found action with unknown '
                         f'asset {e.identifier}. Ignoring entry',
                     )
                     continue
-                except IndexError:
+                except (IndexError, ValueError):
                     self.db.msg_aggregator.add_warning(
                         'During cointracking CSV import found entry with '
                         'unexpected number of columns',

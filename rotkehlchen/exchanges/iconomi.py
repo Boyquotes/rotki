@@ -5,7 +5,7 @@ import json
 import logging
 import time
 from json.decoder import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlencode
 
 import requests
@@ -37,9 +37,9 @@ from rotkehlchen.types import ApiKey, ApiSecret, Timestamp
 from rotkehlchen.user_messages import MessagesAggregator
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.base import HistoryEvent
     from rotkehlchen.assets.asset import AssetWithOracles
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.history.events.structures.base import HistoryEvent
 
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,7 @@ class Iconomi(ExchangeInterface):
             self,
             verb: Literal['get', 'post'],
             path: str,
-            options: Optional[dict] = None,
+            options: dict | None = None,
             authenticated: bool = True,
     ) -> Any:
         """

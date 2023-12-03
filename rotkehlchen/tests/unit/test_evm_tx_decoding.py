@@ -4,12 +4,6 @@ from unittest.mock import patch
 import pytest
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.base import (
-    HistoryBaseEntry,
-    HistoryEventSubType,
-    HistoryEventType,
-)
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
 from rotkehlchen.chain.evm.constants import GENESIS_HASH
 from rotkehlchen.chain.evm.decoding.constants import CPT_GAS
 from rotkehlchen.chain.evm.types import EvmAccount, string_to_evm_address
@@ -20,6 +14,12 @@ from rotkehlchen.db.filtering import EvmEventFilterQuery, EvmTransactionsFilterQ
 from rotkehlchen.db.history_events import DBHistoryEvents
 from rotkehlchen.db.optimismtx import DBOptimismTx
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.base import (
+    HistoryBaseEntry,
+    HistoryEventSubType,
+    HistoryEventType,
+)
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
 from rotkehlchen.tests.utils.ethereum import INFURA_ETH_NODE
 from rotkehlchen.types import (
     ChainID,
@@ -199,9 +199,9 @@ def test_query_and_decode_transactions_works_with_different_chains(
     assert dbevmtx.get_transaction_hashes_no_receipt(tx_filter_query=None, limit=None) == [evmhash_eth_yabir]  # noqa: E501
 
     # check that the transactions have not been decoded
-    hashes = dboptimismtx.get_transaction_hashes_not_decoded(chain_id=ChainID.OPTIMISM, limit=None, addresses=None)  # noqa: E501
+    hashes = dboptimismtx.get_transaction_hashes_not_decoded(chain_id=ChainID.OPTIMISM, limit=None)
     assert len(hashes) == 1
-    hashes = dbevmtx.get_transaction_hashes_not_decoded(chain_id=ChainID.ETHEREUM, limit=None, addresses=None)  # noqa: E501
+    hashes = dbevmtx.get_transaction_hashes_not_decoded(chain_id=ChainID.ETHEREUM, limit=None)
     assert len(hashes) == 1
 
     # decode evm transactions using the optimism decoder and without providing any tx hash
@@ -209,9 +209,9 @@ def test_query_and_decode_transactions_works_with_different_chains(
 
     # verify that the optimism transactions got decoded but not the
     # ethereum one (would raise an error if tried)
-    hashes = dboptimismtx.get_transaction_hashes_not_decoded(chain_id=ChainID.OPTIMISM, limit=None, addresses=None)  # noqa: E501
+    hashes = dboptimismtx.get_transaction_hashes_not_decoded(chain_id=ChainID.OPTIMISM, limit=None)
     assert len(hashes) == 0
-    hashes = dbevmtx.get_transaction_hashes_not_decoded(chain_id=ChainID.ETHEREUM, limit=None, addresses=None)  # noqa: E501
+    hashes = dbevmtx.get_transaction_hashes_not_decoded(chain_id=ChainID.ETHEREUM, limit=None)
     assert len(hashes) == 1
 
 

@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from json.decoder import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Literal, Optional
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlencode
 
 import requests
@@ -36,8 +36,8 @@ from rotkehlchen.user_messages import MessagesAggregator
 from rotkehlchen.utils.misc import iso8601ts_to_timestamp
 
 if TYPE_CHECKING:
-    from rotkehlchen.accounting.structures.base import HistoryEvent
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.history.events.structures.base import HistoryEvent
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -174,7 +174,7 @@ class Bitcoinde(ExchangeInterface):
             self,
             verb: Literal['get', 'post'],
             path: str,
-            options: Optional[dict] = None,
+            options: dict | None = None,
     ) -> dict:
         """
         Queries Bitcoin.de with the given verb for the given path and options

@@ -1,21 +1,10 @@
 import copy
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union, overload
+from typing import TYPE_CHECKING, Any, Literal, Optional, overload
 
 from pysqlcipher3 import dbapi2 as sqlcipher
 
-from rotkehlchen.accounting.structures.base import (
-    HistoryBaseEntry,
-    HistoryBaseEntryType,
-    HistoryEvent,
-)
-from rotkehlchen.accounting.structures.eth2 import (
-    EthBlockEvent,
-    EthDepositEvent,
-    EthWithdrawalEvent,
-)
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.limits import FREE_HISTORY_EVENTS_LIMIT
@@ -27,6 +16,7 @@ from rotkehlchen.db.filtering import (
     DBIgnoredAssetsFilter,
     DBIgnoreValuesFilter,
     EthDepositEventFilterQuery,
+    EthWithdrawalFilterQuery,
     EvmEventFilterQuery,
     HistoryBaseEntryFilterQuery,
     HistoryEventFilterQuery,
@@ -34,6 +24,17 @@ from rotkehlchen.db.filtering import (
 from rotkehlchen.errors.asset import UnknownAsset
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.base import (
+    HistoryBaseEntry,
+    HistoryBaseEntryType,
+    HistoryEvent,
+)
+from rotkehlchen.history.events.structures.eth2 import (
+    EthBlockEvent,
+    EthDepositEvent,
+    EthWithdrawalEvent,
+)
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.serialization.deserialize import deserialize_fval
 from rotkehlchen.types import (
@@ -72,8 +73,8 @@ class DBHistoryEvents:
             self,
             write_cursor: 'DBCursor',
             event: HistoryBaseEntry,
-            mapping_values: Optional[dict[str, int]] = None,
-    ) -> Optional[int]:
+            mapping_values: dict[str, int] | None = None,
+    ) -> int | None:
         """Insert a single history entry to the DB. Returns its identifier or
         None if it already exists. This function serializes the event depending
         on type to the appropriate DB tables.
@@ -155,7 +156,7 @@ class DBHistoryEvents:
             self,
             identifiers: list[int],
             force_delete: bool = False,
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Delete the history events with the given identifiers. If deleting an event
         makes it the last event of a transaction hash then do not allow deletion
@@ -222,7 +223,7 @@ class DBHistoryEvents:
     def get_customized_event_identifiers(
             self,
             cursor: 'DBCursor',
-            chain_id: Optional[EVM_CHAIN_IDS_WITH_TRANSACTIONS_TYPE],
+            chain_id: EVM_CHAIN_IDS_WITH_TRANSACTIONS_TYPE | None,
     ) -> list[int]:
         """Returns the identifiers of all the events in the database that have been customized
 
@@ -273,7 +274,7 @@ class DBHistoryEvents:
             filter_query: HistoryEventFilterQuery,
             has_premium: bool,
             group_by_event_ids: Literal[True],
-    ) -> list[tuple[int, HistoryEvent]]:
+    ) -> list[tuple[int, HistoryBaseEntry]]:
         ...
 
     @overload
@@ -283,7 +284,7 @@ class DBHistoryEvents:
             filter_query: HistoryEventFilterQuery,
             has_premium: bool,
             group_by_event_ids: Literal[False] = ...,
-    ) -> list[HistoryEvent]:
+    ) -> list[HistoryBaseEntry]:
         ...
 
     @overload
@@ -310,6 +311,16 @@ class DBHistoryEvents:
     def get_history_events(
             self,
             cursor: 'DBCursor',
+            filter_query: EthWithdrawalFilterQuery,
+            has_premium: bool,
+            group_by_event_ids: Literal[False] = ...,
+    ) -> list[EthWithdrawalEvent]:
+        ...
+
+    @overload
+    def get_history_events(
+            self,
+            cursor: 'DBCursor',
             filter_query: EvmEventFilterQuery,
             has_premium: bool,
             group_by_event_ids: Literal[True],
@@ -326,34 +337,18 @@ class DBHistoryEvents:
     ) -> list[EvmEvent]:
         ...
 
-    @overload
     def get_history_events(
             self,
             cursor: 'DBCursor',
-            filter_query: Union[HistoryEventFilterQuery, EvmEventFilterQuery, EthDepositEventFilterQuery],  # noqa: E501
+            filter_query: HistoryEventFilterQuery | EvmEventFilterQuery | EthDepositEventFilterQuery | EthWithdrawalFilterQuery,  # noqa: E501
             has_premium: bool,
             group_by_event_ids: bool = False,
-    ) -> Union[
-        list[tuple[int, HistoryEvent]], list[HistoryEvent],
-        list[tuple[int, EvmEvent]], list[EvmEvent],
-        list[tuple[int, EthDepositEvent]], list[EthDepositEvent],
-    ]:
-        """
-        This fallback is needed due to
-        https://github.com/python/mypy/issues/6113#issuecomment-869828434
-        """
-
-    def get_history_events(
-            self,
-            cursor: 'DBCursor',
-            filter_query: Union[HistoryEventFilterQuery, EvmEventFilterQuery, EthDepositEventFilterQuery],  # noqa: E501
-            has_premium: bool,
-            group_by_event_ids: bool = False,
-    ) -> Union[
-        list[tuple[int, HistoryEvent]], list[HistoryEvent],
-        list[tuple[int, EvmEvent]], list[EvmEvent],
-        list[tuple[int, EthDepositEvent]], list[EthDepositEvent],
-    ]:
+    ) -> (
+        list[tuple[int, HistoryBaseEntry]] | list[HistoryBaseEntry] |
+        list[tuple[int, EvmEvent]] | list[EvmEvent] |
+        list[tuple[int, EthDepositEvent]] | list[EthDepositEvent] |
+        list[tuple[int, EthWithdrawalEvent]] | list[EthWithdrawalEvent]
+    ):
         """Get all events from the DB, deserialized depending on the event type
 
         TODO: To not query all columns with all joins for all cases, we perhaps can
@@ -391,12 +386,12 @@ class DBHistoryEvents:
             bindings.insert(0, FREE_HISTORY_EVENTS_LIMIT)
 
         cursor.execute(base_query + prepared_query, bindings)
-        output: Union[list[HistoryBaseEntry], list[tuple[int, HistoryBaseEntry]]] = []  # type: ignore
+        output: list[HistoryBaseEntry] | list[tuple[int, HistoryBaseEntry]] = []
         data_start_idx = type_idx + 1
         for entry in cursor:
             entry_type = HistoryBaseEntryType(entry[type_idx])
             try:
-                deserialized_event: Union[HistoryEvent, EvmEvent, EthWithdrawalEvent, EthBlockEvent]  # noqa: E501
+                deserialized_event: HistoryEvent | (EvmEvent | (EthWithdrawalEvent | EthBlockEvent))  # noqa: E501
                 # Deserialize event depending on its type
                 if entry_type == HistoryBaseEntryType.EVM_EVENT:
                     data = (
@@ -442,7 +437,7 @@ class DBHistoryEvents:
             else:
                 output.append(deserialized_event)  # type: ignore
 
-        return output  # type: ignore # This is due to needing a generic HistoryBaseEntry return in this function, but the overloads would not work since HistoryEvent` is the same. Essentially the non-abstract version of HistoryBaseEntry
+        return output
 
     @overload
     def get_history_events_and_limit_info(
@@ -451,7 +446,7 @@ class DBHistoryEvents:
             filter_query: HistoryBaseEntryFilterQuery,
             has_premium: bool,
             group_by_event_ids: Literal[True],
-            entries_limit: Optional[int] = None,
+            entries_limit: int | None = None,
     ) -> tuple[list[tuple[int, HistoryBaseEntry]], int, int]:
         ...
 
@@ -462,7 +457,7 @@ class DBHistoryEvents:
             filter_query: HistoryBaseEntryFilterQuery,
             has_premium: bool,
             group_by_event_ids: Literal[False] = ...,
-            entries_limit: Optional[int] = None,
+            entries_limit: int | None = None,
     ) -> tuple[list[HistoryBaseEntry], int, int]:
         ...
 
@@ -473,8 +468,8 @@ class DBHistoryEvents:
             filter_query: HistoryBaseEntryFilterQuery,
             has_premium: bool,
             group_by_event_ids: bool = False,
-            entries_limit: Optional[int] = None,
-    ) -> tuple[Union[list[tuple[int, HistoryBaseEntry]], list[HistoryBaseEntry]], int, int]:
+            entries_limit: int | None = None,
+    ) -> tuple[list[tuple[int, HistoryBaseEntry]] | list[HistoryBaseEntry], int, int]:
         """
         This fallback is needed due to
         https://github.com/python/mypy/issues/6113#issuecomment-869828434
@@ -486,8 +481,8 @@ class DBHistoryEvents:
             filter_query: 'HistoryBaseEntryFilterQuery',
             has_premium: bool,
             group_by_event_ids: bool = False,
-            entries_limit: Optional[int] = None,
-    ) -> tuple[Union[list[tuple[int, HistoryBaseEntry]], list[HistoryBaseEntry]], int, int]:
+            entries_limit: int | None = None,
+    ) -> tuple[list[tuple[int, HistoryBaseEntry]] | list[HistoryBaseEntry], int, int]:
         """Gets all history events for all types, based on the filter query.
 
         Also returns how many are the total found for the filter and the total found applying
@@ -510,7 +505,7 @@ class DBHistoryEvents:
     def get_base_entries_missing_prices(
             self,
             query_filter: HistoryBaseEntryFilterQuery,
-            ignored_assets: Optional[list[str]] = None,
+            ignored_assets: list[str] | None = None,
     ) -> list[tuple[str, FVal, Asset, Timestamp]]:
         """
         Searches base entries missing usd prices that have not previously been checked in
@@ -595,7 +590,7 @@ class DBHistoryEvents:
             cursor: 'DBCursor',
             query_filter: HistoryBaseEntryFilterQuery,
             group_by_event_ids: bool = False,
-            entries_limit: Optional[int] = None,
+            entries_limit: int | None = None,
     ) -> tuple[int, int]:
         """
         Returns how many events matching the filter but ignoring pagination are in the DB.

@@ -60,7 +60,7 @@
       "addresses": "Direcciones",
       "addresses_entries": "no entries | {count} unique entry | {count} unique entries",
       "addresses_hint": "Insert multiple comma separated addresses",
-      "blockchain": "Choose blockchain",
+      "blockchain": "Elija cadena de bloques | Elija cadenas de bloques",
       "btc": {
         "derivation_path": "Derivation Path",
         "derivation_path_hint": "Opcional",
@@ -133,6 +133,7 @@
   },
   "account_settings_display": {
     "account_asset_movement": "Account asset movement fees were taken into account:",
+    "cost_basis_fees": "Cost basis fees were taken into account:",
     "cost_basis_method": "Cost basis method:",
     "crypto2crypto": "Crypto to crypto trades were taken into account:",
     "days": "{days} days",
@@ -152,6 +153,7 @@
         "cost_basis_method": "Cost basis method",
         "eth_staking_taxable_after_withdrawal_enabled": "Should omit ETH staking events from accounting until withdrawals are enabled",
         "include_crypto2crypto": "Take into account crypto to crypto trades",
+        "include_fees_in_cost_basis": "Take into account cost basis fees",
         "include_gas_costs": "Take into account Ethereum gas costs",
         "tax_free": "Is there a tax free period?",
         "taxfree_after_period": "Tax free after how many days"
@@ -567,6 +569,13 @@
       "error": {
         "description": "Failed to query history events: {error}",
         "title": "History Events Query"
+      },
+      "missing_rule": {
+        "title": "Evento al que le falta una regla contable",
+        "message": "Este evento no será procesado en el reporte de ganancias y perdidas. Para corregirlo, debes elegir una de estas opciones:",
+        "re_decode": "Recodificar evento",
+        "edit": "Editar evento",
+        "add_rule": "Agregar regla contable faltante"
       }
     },
     "history_events_export": {
@@ -934,7 +943,7 @@
     "name": "rotki"
   },
   "asset_balances": {
-    "loading": "Please wait while rotki queries the blockchain..."
+    "loading": "Espere mientras rotki consulta los saldos..."
   },
   "asset_form": {
     "fetch_latest_icon": {
@@ -1408,7 +1417,6 @@
     "select_directory": "Seleccionar un directorio",
     "status": "Estado",
     "total": "Total",
-    "tx": "Tx",
     "tx_hash": "Tx Hash",
     "type": "Type",
     "unclaimed": "No reclamado",
@@ -1454,16 +1462,16 @@
     "message": "Connecting to rotki backend"
   },
   "cost_basis_table": {
-    "complete": "(Complete)",
+    "complete": "Complete",
     "cost_basis": "Cost Basis",
     "headers": {
       "amount": "Amount Sold",
       "full_amount": "Total acquired by event",
       "rate": "{currency} Rate",
       "remaining_amount": "Remaining after selling",
-      "taxable": "Taxable ?"
+      "taxable": "Taxable"
     },
-    "incomplete": "(Incomplete)"
+    "incomplete": "Incomplete"
   },
   "create_account": {
     "credentials": {
@@ -1472,20 +1480,20 @@
       "label_password": "Contraseña",
       "label_password_backup_reminder": "rotki guarda todos los datos del usuario localmente. Entiendo que si pierdo mi contraseña, perderé acceso a mis datos. He creado una copia de seguridad de la contraseña.",
       "label_password_repeat": "Repetir contraseña",
-      "label_username": "Nombre de usuario",
+      "label_username": "Nombre de perfil",
       "password_sync_requirement": "Asegúrate de que la cuenta utilice la misma contraseña que la base de datos respaldada originalmente. No podrás acceder a la base de datos si ingresas una contraseña diferente.",
       "validation": {
         "check_prompt": "Confirma que has leído y creado una copia de seguridad",
         "non_empty_password": "Por favor, proporciona una contraseña",
         "non_empty_password_confirmation": "Por favor, proporciona una confirmación de contraseña",
-        "non_empty_username": "Por favor, proporciona un nombre de usuario",
+        "non_empty_username": "Por favor proporcione un nombre de perfil",
         "password_confirmation_mismatch": "La confirmación de contraseña no coincide con la contraseña proporcionada",
-        "valid_username": "Un nombre de usuario debe contener solo caracteres alfanuméricos y no tener espacios"
+        "valid_username": "Un nombre de perfil debe contener solo caracteres alfanuméricos y no tener espacios"
       }
     },
     "have_account": {
       "description": "¿Ya tienes una cuenta?",
-      "log_in": "Iniciar sesión"
+      "log_in": "Desbloquea tu cuenta"
     },
     "introduction": {
       "description": "rotki es una aplicación local que respeta tu privacidad.\n\nLas cuentas de rotki están encriptadas usando tu contraseña y {highlight}.\n\nLa cuenta que creas aquí solo es útil para la aplicación; en la web utilizamos una base de datos diferente.",
@@ -1603,7 +1611,7 @@
               "location": "This is optional. If specified, the location balance data will be adjusted automatically. If not, you have to update location balance data manually."
             },
             "nft": "NFT",
-            "nft_hint": "Accepted format: \"_nft_{ETH address}_{collection number}\"",
+            "nft_hint": "Accepted format: \"_nft_{'ETH address'}_{'collection number'}\"",
             "optional": "Opcional",
             "preview": {
               "from": "De",
@@ -1872,7 +1880,11 @@
     }
   },
   "error": {
-    "process_running": "A rotki backend process is already running. This is known to cause problems with the operation of the application. Please kill these processes pids: [{pids}] and restart the application."
+    "process_running": "A rotki backend process is already running. This is known to cause problems with the operation of the application. Please kill these processes pids: [{pids}] and restart the application.",
+    "generic": {
+      "title": "Algo salió mal",
+      "message": "Encontramos un error interno al procesar su solicitud. Si este problema persiste, comuníquese con nuestro equipo de soporte con los detalles a continuación: \nCódigo de error: {code} \nMensaje de error: {message} \nRuta: {path}"
+    }
   },
   "error_screen": {
     "backend_error": "There is a problem with the backend.",
@@ -2021,12 +2033,18 @@
     "tx_url": "Transactions will open at {txUrl}"
   },
   "external_services": {
+    "api_key": "Clave de la API",
     "beaconchain": {
       "delete_tooltip": "Deletes the Beaconcha.in API key",
       "description": "rotki uses Beaconcha.in to obtain information about ETH staking in your portfolio. An API key is only needed if you are being rate-limited.",
       "hint": "Enter your Beaconcha.in API key",
-      "label": "API key",
       "title": "Beaconcha.in"
+    },
+    "blockscout": {
+      "delete_tooltip": "Elimina la clave API de Blockscout",
+      "description": "rotki usa Blockscout para obtener información sobre consultas de retiro de ETH y más. Solo es necesaria una clave API si las peticiones están siendo limitadas por el servidor de Blockscout.",
+      "hint": "Ingrese su clave para la API de Blockscout",
+      "title": "Blockscout"
     },
     "confirmation": {
       "message": "Are you sure you want to delete this API Key?",
@@ -2036,14 +2054,12 @@
       "delete_tooltip": "Deletes the Covalent API key",
       "description": "rotki can use Covalent to get historical data for various chains",
       "hint": "Enter your Covalent API key",
-      "label": "API key",
       "title": "Covalent"
     },
     "cryptocompare": {
       "delete_tooltip": "Deletes the CryptoCompare API key",
       "description": "rotki uses cryptocompare to obtain price information about assets in your portfolio. An API key is only needed if you have a lot of assets and are being rate-limited.",
       "hint": "Enter your CryptoCompare API key",
-      "label": "API key",
       "title": "CryptoCompare"
     },
     "delete_error": {
@@ -2053,14 +2069,12 @@
       "delete_tooltip": "Deletes the Etherscan API key",
       "description": "Recommended for any EVM blockchain balances or transactions if you are not using your own node.",
       "hint": "Enter your Etherscan API key",
-      "label": "API key",
       "title": "Etherscan"
     },
     "loopring": {
       "delete_tooltip": "Delete your Loopring API key",
       "description": "Used to query balances in Loopring. This API key will only be able to query the account that generated this key.",
       "hint": "Enter your Loopring API key",
-      "label": "API key",
       "not_enabled": "The Loopring module is not enabled. Your balances won't be retrieved unless you enable the loopring module",
       "settings": "Ajustes",
       "title": "Loopring"
@@ -2069,7 +2083,6 @@
       "delete_tooltip": "Delete your OpenSea API key",
       "description": "Used to query NFT information and balances from OpenSea.",
       "hint": "Enter your OpenSea API key",
-      "label": "API Key",
       "link": "You can apply for an API key {link}",
       "title": "Opensea"
     },
@@ -2286,7 +2299,8 @@
       "language": "Idioma seleccionado",
       "treat_eth2_as_eth": "Should treat ETH2 (Staked ETH) as ETH",
       "version_update_check": "Set the version update check period while in app",
-      "version_update_check_enabled": "Enabled"
+      "version_update_check_enabled": "Enabled",
+      "chains_to_skip_detection": "Cadenas EVM para las que omitir la detección automática"
     },
     "nft_setting": {
       "label": {
@@ -2375,6 +2389,10 @@
         "error": "Error setting version update check frequency",
         "invalid_frequency": "Period must be between {start} and {end} hours",
         "non_empty": "Please enter the number of hours"
+      },
+      "chains_to_skip_detection": {
+        "error": "Error al configurar cadenas EVM para las que omitir la detección automática de fichas",
+        "success": "Cadenas EVM para las que omitir la detección automática de fichas guardadas correctamente"
       }
     },
     "version_update_check_hint": "How often (in hours) your app version will be checked for update"
@@ -2714,7 +2732,7 @@
   },
   "login": {
     "button_no_account": "¿No tienes una cuenta?",
-    "button_signup": "Registrarse",
+    "button_create_account": "Crear una cuenta",
     "credential_error": {
       "description": "Si aún no ha creado una cuenta de aplicación, deberá hacerlo para poder iniciar sesión.",
       "support": "Si necesita ayuda, contáctenos en nuestro canal de soporte en discord.",
@@ -2732,18 +2750,18 @@
       }
     },
     "label_password": "Contraseña",
-    "label_username": "Usuario",
+    "label_username": "Nombre de perfil",
     "logout": "Cerrar sesión",
     "remember_password": "Recordar contraseña",
     "remember_password_tooltip": "The password will be saved on password management tool on your local machine (e.g. Keychain in MacOS)",
-    "remember_username": "Recordar usuario",
+    "remember_username": "Recordar nombre de perfil",
     "sync_error": {
       "local_modified": "Local last modified: {0}",
       "question": "Do you want to replace your local database?",
       "remote_modified": "Remote last modified: {0}",
       "title": "User action required for DB sync"
     },
-    "title": "Iniciar sesión",
+    "title": "Desbloquear cuenta",
     "upgrading_db": {
       "current": "Aplicando paso {currentStep} de {totalSteps} para la actualización de la base de datos v{currentVersion}.",
       "title": "Actualización de base de datos",
@@ -2751,9 +2769,12 @@
     },
     "validation": {
       "non_empty_password": "Por favor introduzca una contraseña",
-      "non_empty_username": "Por favor introduzca un nombre de usuario",
-      "valid_username": "A username must contain only alphanumeric characters and have no spaces"
-    }
+      "non_empty_username": "Por favor proporcione un nombre de perfil",
+      "valid_username": "Un nombre de perfil debe contener solo caracteres alfanuméricos y no tener espacios"
+    },
+    "welcome_description": "Bienvenido al administrador de cartera de código abierto que protege su privacidad.",
+    "welcome_title": "Bienvenido a rotki",
+    "welcome_update_message": "Desbloquee su cuenta para explorar los cambios que hemos realizado."
   },
   "macos_unsupported": {
     "header": "Unsupported macOS Version",
@@ -3041,7 +3062,7 @@
     },
     "missing_api_key": {
       "action": "Introducir clave",
-      "message": "No tiene configurada una clave API de {location} {service}. Las consultas de {service} de rotki seguirán funcionando, pero serán muy lentas. Si no está utilizando su propio nodo {location}, se recomienda ir a {url}, crear una clave API y luego ingresarla en la configuración de credenciales de servicio externo de rotki",
+      "message": "No tiene configurada una clave API de {location} {service}. Las consultas de {location} {service} de rotki seguirán funcionando, pero serán muy lentas. Si no está utilizando su propio nodo {location}, se recomienda ir a {url}, crear una clave API y luego ingresarla en la configuración de credenciales de servicio externo de rotki",
       "title": "{location} {service} clave API"
     },
     "new_detected_token": {
@@ -3332,11 +3353,13 @@
     "to_asset": "To Asset"
   },
   "price_oracle_selection": {
-    "hint": "* Disabling all the oracles will make it impossible to query prices for assets."
+    "hint": "* Al desactivar todos los oráculos será imposible consultar los precios de los activos. Es posible que tengas que hacer clic en 'Actualizar precios' para aplicar los cambios."
   },
   "price_oracle_settings": {
+    "data_name": "oráculo de precios",
     "historic_prices": "Historic Prices",
     "latest_prices": "Latest Prices",
+    "latest_prices_update": "Últimos precios de pedidos actualizados. Es posible que tengas que hacer clic en el botón 'Actualizar precios' para aplicar los cambios.",
     "subtitle": "Manage which price oracles are used, in which order.",
     "title": "Price oracle settings"
   },
@@ -3847,9 +3870,6 @@
       },
       "title": "Ethereum Transaction Query Status"
     },
-    "redecode_events": {
-      "title": "Redecode EVM Events"
-    },
     "refresh_tooltip": "Fetch latest events",
     "title": "History Events",
     "unignore": "Unignore Tx in Accounting"
@@ -3875,7 +3895,7 @@
     }
   },
   "uniswap": {
-    "assets_non_premium": "Upgrade to {0} to see assets information",
+    "assets_non_premium": "Upgrade to @:uniswap.premium to see assets information",
     "loading": "Please wait while your liquidity pools are getting loaded...",
     "loading_non_premium": "Loading the liquidity pool balances might take a while... Consider upgrading to {0} for faster load times.",
     "premium": "premium",
@@ -3898,7 +3918,6 @@
       "message": "An error occurred while installing the application update: {message}"
     },
     "messages": "A new version of rotki is available. See {releaseNotes}.",
-    "progress": "{percentage} %",
     "release_notes": "release notes",
     "restart": "rotki will restart in a moment to apply the update."
   },

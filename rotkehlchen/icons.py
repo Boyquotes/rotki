@@ -5,7 +5,7 @@ import shutil
 import urllib.parse
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import gevent
 import requests
@@ -13,6 +13,12 @@ from flask import Response, make_response
 
 from rotkehlchen.assets.asset import Asset, AssetWithNameAndType
 from rotkehlchen.assets.types import AssetType
+from rotkehlchen.constants.misc import (
+    ALLASSETIMAGESDIR_NAME,
+    ASSETIMAGESDIR_NAME,
+    CUSTOMASSETIMAGESDIR_NAME,
+    IMAGESDIR_NAME,
+)
 from rotkehlchen.db.settings import CachedSettings
 from rotkehlchen.errors.asset import UnknownAsset, UnsupportedAsset, WrongAssetType
 from rotkehlchen.errors.misc import RemoteError
@@ -44,7 +50,7 @@ def _build_http_header_for_images(image_path: Path) -> dict[str, str]:
     return {'mimetype': f'image/{http_type}', 'Content-Type': f'image/{http_type}'}
 
 
-def check_if_image_is_cached(image_path: Path, match_header: Optional[str]) -> Optional[Response]:
+def check_if_image_is_cached(image_path: Path, match_header: str | None) -> Response | None:
     """Checks whether the file at `image_path` is an already cached image.
 
     Returns a response indicating the image has not been modified if that's the case,
@@ -84,7 +90,7 @@ def create_image_response(image_path: Path) -> Response:
     return response
 
 
-def maybe_create_image_response(image_path: Optional[Path]) -> Response:
+def maybe_create_image_response(image_path: Path | None) -> Response:
     """Checks whether the file at `image_path` exists.
 
     Returns a response with the image if it exists, otherwise a NOT FOUND response.
@@ -116,8 +122,9 @@ class IconManager:
             coingecko: Coingecko,
             greenlet_manager: 'GreenletManager',
     ) -> None:
-        self.icons_dir = data_dir / 'icons'
-        self.custom_icons_dir = self.icons_dir / 'custom'
+        asset_images_dir = data_dir / IMAGESDIR_NAME / ASSETIMAGESDIR_NAME
+        self.icons_dir = asset_images_dir / ALLASSETIMAGESDIR_NAME
+        self.custom_icons_dir = asset_images_dir / CUSTOMASSETIMAGESDIR_NAME
         self.coingecko = coingecko
         self.icons_dir.mkdir(parents=True, exist_ok=True)
         self.custom_icons_dir.mkdir(parents=True, exist_ok=True)
@@ -127,7 +134,7 @@ class IconManager:
     def iconfile_path(self, asset: AssetWithNameAndType) -> Path:
         return self.icons_dir / f'{urllib.parse.quote_plus(asset.identifier)}_small.png'
 
-    def custom_iconfile_path(self, asset: Asset) -> Optional[Path]:
+    def custom_iconfile_path(self, asset: Asset) -> Path | None:
         asset_id_quoted = urllib.parse.quote_plus(asset.identifier)
         for suffix in ALLOWED_ICON_EXTENSIONS:
             icon_path = self.custom_icons_dir / f'{asset_id_quoted}{suffix}'
@@ -139,7 +146,7 @@ class IconManager:
     def asset_icon_path(
             self,
             asset: AssetWithNameAndType,
-    ) -> Optional[Path]:
+    ) -> Path | None:
         # First try with the custom icon path
         custom_icon_path = self.custom_iconfile_path(asset)
         if custom_icon_path is not None:
@@ -190,7 +197,7 @@ class IconManager:
     def get_icon(
             self,
             asset: AssetWithNameAndType,
-    ) -> tuple[Optional[Path], bool]:
+    ) -> tuple[Path | None, bool]:
         """
         Returns the file path of the requested icon and whether it has been scheduled to be
         queried if the file is not in the system and is possible to obtain it from coingecko.

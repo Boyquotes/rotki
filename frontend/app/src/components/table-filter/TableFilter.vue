@@ -48,8 +48,15 @@ const selectedMatcher = computed(() => {
 
 const usedKeys = computed(() => get(selection).map(entry => entry.key));
 
-const removeSelection = (suggestion: Suggestion) => {
-  updateMatches(get(selection).filter(sel => sel !== suggestion));
+const removeSelection = (item: Suggestion) => {
+  updateMatches(get(selection).filter(sel => sel !== item));
+};
+
+const clickItem = (item: Suggestion) => {
+  if (typeof item.value !== 'boolean') {
+    removeSelection(item);
+    selectItem(item);
+  }
 };
 
 const matcherForKey = (searchKey: string | undefined) =>
@@ -59,6 +66,17 @@ const matcherForKeyValue = (searchKey: string | undefined) =>
   get(matchers).find(({ keyValue }) => keyValue === searchKey);
 
 const setSearchToMatcherKey = (matcher: SearchMatcher<any>) => {
+  const boolean = 'boolean' in matcher;
+  if (boolean) {
+    applyFilter({
+      key: matcher.key,
+      asset: false,
+      value: true,
+      index: 0,
+      total: 1
+    });
+    return;
+  }
   const allowExclusion = 'string' in matcher && matcher.allowExclusion;
   const filter = `${matcher.key}${allowExclusion ? '' : '='}`;
   set(search, filter);
@@ -77,7 +95,8 @@ function updateMatches(pairs: Suggestion[]) {
     }
 
     const valueKey = (matcher.keyValue || matcher.key) as string;
-    let transformedKeyword = '';
+    let transformedKeyword: string | boolean = '';
+
     if ('string' in matcher) {
       if (typeof entry.value !== 'string') {
         continue;
@@ -91,9 +110,11 @@ function updateMatches(pairs: Suggestion[]) {
       } else {
         continue;
       }
-    } else if (matcher.asset) {
+    } else if ('asset' in matcher) {
       transformedKeyword =
         typeof entry.value !== 'string' ? entry.value.identifier : entry.value;
+    } else {
+      transformedKeyword = true;
     }
 
     if (!transformedKeyword) {
@@ -106,7 +127,7 @@ function updateMatches(pairs: Suggestion[]) {
       if (!matched[valueKey]) {
         matched[valueKey] = [];
       }
-      (matched[valueKey] as string[]).push(transformedKeyword);
+      (matched[valueKey] as (string | boolean)[]).push(transformedKeyword);
     } else {
       matched[valueKey] = transformedKeyword;
     }
@@ -140,7 +161,7 @@ const filteredMatchers: ComputedRef<SearchMatcher<any>[]> = computed(() =>
   get(matchers).filter(
     ({ key, multiple }) =>
       (!get(usedKeys).includes(key) || multiple) &&
-      key.startsWith(get(search) || '')
+      getTextToken(key).includes(getTextToken(get(search)) || '')
   )
 );
 
@@ -169,8 +190,11 @@ const applySuggestion = async () => {
       } else if ('asset' in matcher) {
         suggestedItems = await matcher.suggestions(keyword);
         asset = true;
-      } else {
-        logger.debug('Matcher missing asset=true or string=true', matcher);
+      } else if (!('boolean' in matcher)) {
+        logger.debug(
+          "Matcher doesn't have asset=true, string=true, or boolean=true.",
+          selectedMatcher
+        );
       }
 
       if (
@@ -264,8 +288,9 @@ const restoreSelection = (matches: MatchedKeyword<any>): void => {
       return;
     }
 
-    const values = typeof value === 'string' ? [value] : value;
+    const values = Array.isArray(value) ? value : [value];
     const asset = 'asset' in foundMatchers;
+    const boolean = 'boolean' in foundMatchers;
 
     values.forEach(value => {
       let deserializedValue = null;
@@ -280,13 +305,17 @@ const restoreSelection = (matches: MatchedKeyword<any>): void => {
 
       let exclude = false;
       if (!deserializedValue) {
-        let normalizedValue = value;
-        if (!asset && value.startsWith('!')) {
-          normalizedValue = value.substring(1);
-          exclude = true;
+        if (!boolean && typeof value !== 'boolean') {
+          let normalizedValue = value;
+          if (!asset && value.startsWith('!')) {
+            normalizedValue = value.substring(1);
+            exclude = true;
+          }
+          deserializedValue =
+            foundMatchers.deserializer?.(normalizedValue) || normalizedValue;
+        } else {
+          deserializedValue = true;
         }
-        deserializedValue =
-          foundMatchers.deserializer?.(normalizedValue) || normalizedValue;
       }
 
       newSelection.push({
@@ -311,100 +340,85 @@ watch(matches, matches => {
   restoreSelection(matches);
 });
 
-const css = useCssModule();
 const slots = useSlots();
 const { t } = useI18n();
 </script>
 
 <template>
-  <VTooltip
+  <RuiTooltip
+    :popper="{ placement: 'top' }"
     :disabled="!disabled || !slots.tooltip"
     open-delay="400"
-    close-delay="2500"
-    top
+    close-delay="1000"
+    class="block"
+    tooltip-class="max-w-[12rem]"
   >
-    <template #activator="{ on }">
-      <div v-on="on">
-        <VSheet
-          class="flex items-center gap-2"
-          data-cy="table-filter"
+    <template #activator>
+      <div class="flex items-center gap-2" data-cy="table-filter">
+        <VCombobox
+          ref="input"
+          :value="selection"
+          outlined
+          dense
+          chips
           :disabled="disabled"
+          small-chips
+          deletable-chips
+          :label="t('table_filter.label')"
+          solo
+          flat
+          multiple
+          clearable
+          hide-details
+          :menu-props="{ maxHeight: '390px' }"
+          prepend-inner-icon="mdi-filter-variant"
+          :search-input.sync="search"
+          @input="updateMatches($event)"
+          @keydown.enter="applySuggestion()"
+          @keydown.up.prevent
+          @keydown.up="moveSuggestion(true)"
+          @keydown.down.prevent
+          @keydown.down="moveSuggestion(false)"
         >
-          <VCombobox
-            ref="input"
-            :value="selection"
-            outlined
-            dense
-            chips
-            small-chips
-            deletable-chips
-            :label="t('table_filter.label')"
-            solo
-            flat
-            multiple
-            clearable
-            hide-details
-            :menu-props="{ maxHeight: '390px' }"
-            prepend-inner-icon="mdi-filter-variant"
-            :search-input.sync="search"
-            @input="updateMatches($event)"
-            @keydown.enter="applySuggestion()"
-            @keydown.up.prevent
-            @keydown.up="moveSuggestion(true)"
-            @keydown.down.prevent
-            @keydown.down="moveSuggestion(false)"
-          >
-            <template #selection="{ item, selected }">
-              <VChip
-                label
-                small
-                class="font-medium px-2"
-                :input-value="selected"
-                close
-                @click:close="removeSelection(item)"
-                @click="
-                  removeSelection(item);
-                  selectItem(item);
-                "
-              >
-                <SuggestedItem chip :suggestion="item" />
-              </VChip>
-            </template>
-            <template #no-data>
-              <FilterDropdown
-                :matchers="filteredMatchers"
-                :used="usedKeys"
-                :keyword="search"
-                :selected-matcher="selectedMatcher"
-                :selection="selection"
-                :selected-suggestion="selectedSuggestion"
-                :location="location"
-                @apply:filter="applyFilter($event)"
-                @suggest="suggestedFilter = $event"
-                @click="setSearchToMatcherKey($event)"
-              />
-            </template>
-          </VCombobox>
-
-          <div v-if="location">
-            <SavedFilterManagement
+          <template #selection="{ item, selected }">
+            <VChip
+              label
+              small
+              class="font-medium px-2"
+              :input-value="selected"
+              close
+              @click:close="removeSelection(item)"
+              @click="clickItem(item)"
+            >
+              <SuggestedItem chip :suggestion="item" />
+            </VChip>
+          </template>
+          <template #no-data>
+            <FilterDropdown
+              :matchers="filteredMatchers"
+              :used="usedKeys"
+              :keyword="search"
+              :selected-matcher="selectedMatcher"
               :selection="selection"
+              :selected-suggestion="selectedSuggestion"
               :location="location"
-              :matchers="matchers"
-              @update:matches="updateMatches($event)"
+              @apply:filter="applyFilter($event)"
+              @suggest="suggestedFilter = $event"
+              @click="setSearchToMatcherKey($event)"
             />
-          </div>
-        </VSheet>
+          </template>
+        </VCombobox>
+
+        <SavedFilterManagement
+          v-if="location"
+          :disabled="disabled"
+          :selection="selection"
+          :location="location"
+          :matchers="matchers"
+          @update:matches="updateMatches($event)"
+        />
       </div>
     </template>
-    <span :class="css.tooltip">
-      <slot name="tooltip" />
-    </span>
-  </VTooltip>
+    <slot name="tooltip" />
+  </RuiTooltip>
 </template>
-
-<style module lang="css">
-.tooltip {
-  pointer-events: initial !important;
-}
-</style>

@@ -1,18 +1,19 @@
 from typing import TYPE_CHECKING
 
 import pytest
+from more_itertools import peekable
 
 from rotkehlchen.accounting.mixins.event import AccountingEventType
 from rotkehlchen.accounting.pnl import PNL
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.accounting.structures.evm_event import EvmEvent
 from rotkehlchen.accounting.structures.processed_event import ProcessedAccountingEvent
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.chain.ethereum.modules.curve.constants import CPT_CURVE
 from rotkehlchen.constants import ONE, ZERO
 from rotkehlchen.constants.assets import A_DAI, A_USDC, A_USDT
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.factories import make_evm_address, make_evm_tx_hash
 from rotkehlchen.types import Location, Price, Timestamp
 from rotkehlchen.utils.misc import ts_sec_to_ms
@@ -130,9 +131,9 @@ DEPOSIT_ENTRIES = [
 def test_curve_multiple_deposit(accountant: 'Accountant'):
     """Test that the default accounting settings for receiving are correct"""
     pot = accountant.pots[0]
-    events_iterator = iter(DEPOSIT_ENTRIES)
+    events_iterator = peekable(DEPOSIT_ENTRIES)
     for event in events_iterator:
-        pot.events_accountant.process(event=event, events_iterator=events_iterator)
+        pot.events_accountant.process(event=event, events_iterator=events_iterator)  # type: ignore
 
     expected_events = [
         ProcessedAccountingEvent(

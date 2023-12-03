@@ -8,7 +8,7 @@ from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import Any, Literal, Optional, Union, cast, overload
+from typing import Any, Literal, Optional, cast, get_args, overload
 
 from gevent.lock import Semaphore
 from pysqlcipher3 import dbapi2 as sqlcipher
@@ -42,7 +42,7 @@ from rotkehlchen.constants.limits import (
     FREE_TRADES_LIMIT,
     FREE_USER_NOTES_LIMIT,
 )
-from rotkehlchen.constants.misc import NFT_DIRECTIVE
+from rotkehlchen.constants.misc import NFT_DIRECTIVE, USERDB_NAME
 from rotkehlchen.constants.timing import HOUR_IN_SECONDS
 from rotkehlchen.db.constants import (
     BINANCE_MARKETS_KEY,
@@ -140,7 +140,6 @@ log = RotkehlchenLogsAdapter(logger)
 
 KDF_ITER = 64000
 DBINFO_FILENAME = 'dbinfo.json'
-MAIN_DB_NAME = 'rotkehlchen.db'
 TRANSIENT_DB_NAME = 'rotkehlchen_transient.db'
 
 
@@ -169,7 +168,7 @@ class DBHandler:
             user_data_dir: Path,
             password: str,
             msg_aggregator: MessagesAggregator,
-            initial_settings: Optional[ModifiableDBSettings],
+            initial_settings: ModifiableDBSettings | None,
             sql_vm_instructions_cb: int,
             resume_from_backup: bool,
     ):
@@ -252,7 +251,7 @@ class DBHandler:
         backup_to_use = sorted(found_backups)[-1]  # Use latest backup
         shutil.copyfile(
             self.user_data_dir / backup_to_use,
-            self.user_data_dir / 'rotkehlchen.db',
+            self.user_data_dir / USERDB_NAME,
         )
         self.msg_aggregator.add_warning(
             f'Your encrypted database was in a half-upgraded state. '
@@ -333,7 +332,7 @@ class DBHandler:
         assert self.conn is None, 'md5hash should be taken only with a closed DB'
         if transient:  # type: ignore
             return file_md5(self.user_data_dir / TRANSIENT_DB_NAME)
-        return file_md5(self.user_data_dir / MAIN_DB_NAME)
+        return file_md5(self.user_data_dir / USERDB_NAME)
 
     @overload
     def get_setting(self, cursor: 'DBCursor', name: Literal['version']) -> int:
@@ -352,7 +351,7 @@ class DBHandler:
         ...
 
     @overload
-    def get_setting(self, cursor: 'DBCursor', name: Literal['ongoing_upgrade_from_version']) -> Optional[int]:  # noqa: E501
+    def get_setting(self, cursor: 'DBCursor', name: Literal['ongoing_upgrade_from_version']) -> int | None:  # noqa: E501
         ...
 
     def get_setting(
@@ -366,7 +365,7 @@ class DBHandler:
                 'main_currency',
                 'ongoing_upgrade_from_version',
             ],
-    ) -> Union[Optional[int], Timestamp, bool, AssetWithOracles]:
+    ) -> int | None | (Timestamp | (bool | AssetWithOracles)):
         deserializer, default_value = self.setting_to_default_type[name]
         cursor.execute(
             'SELECT value FROM settings WHERE name=?;', (name,),
@@ -388,7 +387,7 @@ class DBHandler:
                 'ongoing_upgrade_from_version',
                 'main_currency',
             ],
-            value: Union[int, Timestamp, Asset],
+            value: int | (Timestamp | Asset),
     ) -> None:
         write_cursor.execute(
             'INSERT OR REPLACE INTO settings(name, value) VALUES(?, ?)',
@@ -405,7 +404,7 @@ class DBHandler:
         - AuthenticationError if the given password is not the right one for the DB
         """
         if conn_attribute == 'conn':
-            fullpath = self.user_data_dir / MAIN_DB_NAME
+            fullpath = self.user_data_dir / USERDB_NAME
             connection_type = DBConnectionType.USER
         else:
             fullpath = self.user_data_dir / TRANSIENT_DB_NAME
@@ -509,7 +508,7 @@ class DBHandler:
         - AuthenticationError if the wrong password is given
         """
         self.disconnect()
-        rdbpath = self.user_data_dir / MAIN_DB_NAME
+        rdbpath = self.user_data_dir / USERDB_NAME
         # Make copy of existing encrypted DB before removing it
         shutil.copy2(
             rdbpath,
@@ -623,7 +622,7 @@ class DBHandler:
     def get_external_service_credentials(
             self,
             service_name: ExternalService,
-    ) -> Optional[ExternalServiceApiCredentials]:
+    ) -> ExternalServiceApiCredentials | None:
         """If existing it returns the external service credentials for the given service"""
         with self.conn.read_ctx() as cursor:
             cursor.execute(
@@ -716,7 +715,7 @@ class DBHandler:
     def get_ignored_action_ids(
             self,
             cursor: 'DBCursor',
-            action_type: Optional[ActionType],
+            action_type: ActionType | None,
     ) -> dict[ActionType, set[str]]:
         query = 'SELECT type, identifier from ignored_actions'
         tuples: tuple
@@ -761,7 +760,7 @@ class DBHandler:
         """Delete all historical ETH2 eth2_daily_staking_details data"""
         write_cursor.execute('DELETE FROM eth2_daily_staking_details;')
 
-    def purge_module_data(self, module_name: Optional[ModuleName]) -> None:
+    def purge_module_data(self, module_name: ModuleName | None) -> None:
         with self.user_write() as cursor:
             if module_name is None:
                 self.delete_balancer_events_data(cursor)
@@ -803,7 +802,7 @@ class DBHandler:
         """Delete all loopring related data"""
         write_cursor.execute('DELETE FROM multisettings WHERE name LIKE "loopring_%";')
 
-    def get_used_query_range(self, cursor: 'DBCursor', name: str) -> Optional[tuple[Timestamp, Timestamp]]:  # noqa: E501
+    def get_used_query_range(self, cursor: 'DBCursor', name: str) -> tuple[Timestamp, Timestamp] | None:  # noqa: E501
         """Get the last start/end timestamp range that has been queried for name
 
         Currently possible names are:
@@ -816,7 +815,7 @@ class DBHandler:
         - yearn_vaults_v2_events_{address}
         - gnosisbridge_{address}
         """
-        cursor.execute('SELECT start_ts, end_ts from used_query_ranges WHERE name=?', (name,))
+        cursor.execute('SELECT start_ts, end_ts FROM used_query_ranges WHERE name=?', (name,))
         result = cursor.fetchone()
         if result is None:
             return None
@@ -827,7 +826,7 @@ class DBHandler:
             self,
             write_cursor: 'DBCursor',
             location: Location,
-            exchange_name: Optional[str] = None,
+            exchange_name: str | None = None,
     ) -> None:
         """Delete the query ranges for the given exchange name"""
         names_to_delete = f'{location!s}\\_%'
@@ -987,7 +986,7 @@ class DBHandler:
             cursor: 'DBCursor',
             address: ChecksumEvmAddress,
             blockchain: SupportedBlockchain,
-    ) -> tuple[Optional[list[EvmToken]], Optional[Timestamp]]:
+    ) -> tuple[list[EvmToken] | None, Timestamp | None]:
         """Gets the detected tokens for the given address if the given current time
         is recent enough.
 
@@ -1040,7 +1039,7 @@ class DBHandler:
         """Saves detected tokens for an address"""
         now = ts_now()
         chain_id = blockchain.to_chain_id().serialize_for_db()
-        insert_rows: list[tuple[ChecksumEvmAddress, int, str, Union[str, Timestamp]]] = [
+        insert_rows: list[tuple[ChecksumEvmAddress, int, str, str | Timestamp]] = [
             (
                 address,
                 chain_id,
@@ -1127,7 +1126,7 @@ class DBHandler:
     def get_manually_tracked_balances(
             self,
             cursor: 'DBCursor',
-            balance_type: Optional[BalanceType] = BalanceType.ASSET,
+            balance_type: BalanceType | None = BalanceType.ASSET,
     ) -> list[ManuallyTrackedBalance]:
         """Returns the manually tracked balances from the DB"""
         query_balance_type = ''
@@ -1295,9 +1294,9 @@ class DBHandler:
             location: Location,
             api_key: ApiKey,
             api_secret: ApiSecret,
-            passphrase: Optional[str] = None,
-            kraken_account_type: Optional[KrakenAccountType] = None,
-            binance_selected_trade_pairs: Optional[list[str]] = None,
+            passphrase: str | None = None,
+            kraken_account_type: KrakenAccountType | None = None,
+            binance_selected_trade_pairs: list[str] | None = None,
     ) -> None:
         if location not in SUPPORTED_EXCHANGES:
             raise InputError(f'Unsupported exchange {location!s}')
@@ -1325,12 +1324,12 @@ class DBHandler:
             write_cursor: 'DBCursor',
             name: str,
             location: Location,
-            new_name: Optional[str],
-            api_key: Optional[ApiKey],
-            api_secret: Optional[ApiSecret],
-            passphrase: Optional[str],
+            new_name: str | None,
+            api_key: ApiKey | None,
+            api_secret: ApiSecret | None,
+            passphrase: str | None,
             kraken_account_type: Optional['KrakenAccountType'],
-            binance_selected_trade_pairs: Optional[list[str]],
+            binance_selected_trade_pairs: list[str] | None,
     ) -> None:
         """May raise InputError if something is wrong with editing the DB"""
         if location not in SUPPORTED_EXCHANGES:
@@ -1429,8 +1428,8 @@ class DBHandler:
     def get_exchange_credentials(
             self,
             cursor: 'DBCursor',
-            location: Optional[Location] = None,
-            name: Optional[str] = None,
+            location: Location | None = None,
+            name: str | None = None,
     ) -> dict[Location, list[ExchangeApiCredentials]]:
         """Gets all exchange credentials
 
@@ -1530,7 +1529,7 @@ class DBHandler:
             tuple_type: DBTupleType,
             query: str,
             tuples: Sequence[tuple[Any, ...]],
-            **kwargs: Optional[ChecksumEvmAddress],
+            **kwargs: ChecksumEvmAddress | None,
     ) -> None:
         """
         Helper function to help write multiple tuples of some kind of entry and
@@ -1625,9 +1624,9 @@ class DBHandler:
     def get_margin_positions(
             self,
             cursor: 'DBCursor',
-            from_ts: Optional[Timestamp] = None,
-            to_ts: Optional[Timestamp] = None,
-            location: Optional[Location] = None,
+            from_ts: Timestamp | None = None,
+            to_ts: Timestamp | None = None,
+            location: Location | None = None,
     ) -> list[MarginPosition]:
         """Returns a list of margin positions optionally filtered by time and location
 
@@ -1759,9 +1758,10 @@ class DBHandler:
                 'assets',
                 'history_events',
                 'accounting_rules',
+                'unresolved_remote_conflicts',
             ],
             op: Literal['OR', 'AND'] = 'OR',
-            group_by: Optional[str] = None,
+            group_by: str | None = None,
             **kwargs: Any,
     ) -> int:
         """Returns how many of a certain type of entry are saved in the DB"""
@@ -1970,7 +1970,7 @@ class DBHandler:
                 return False
         return True
 
-    def get_rotkehlchen_premium(self, cursor: 'DBCursor') -> Optional[PremiumCredentials]:
+    def get_rotkehlchen_premium(self, cursor: 'DBCursor') -> PremiumCredentials | None:
         cursor.execute(
             'SELECT api_key, api_secret FROM user_credentials where name="rotkehlchen";',
         )
@@ -2028,8 +2028,8 @@ class DBHandler:
     def _infer_zero_timed_balances(
             cursor: 'DBCursor',
             balances: list[SingleDBAssetBalance],
-            from_ts: Optional[Timestamp] = None,
-            to_ts: Optional[Timestamp] = None,
+            from_ts: Timestamp | None = None,
+            to_ts: Timestamp | None = None,
     ) -> list[SingleDBAssetBalance]:
         """
         Given a list of asset specific timed balances, infers the missing zero timed balances
@@ -2070,7 +2070,7 @@ class DBHandler:
             'ORDER BY timestamp ASC',
             (from_ts, to_ts),
         )
-        all_timestamps, all_categories = zip(*cursor)
+        all_timestamps, all_categories = zip(*cursor, strict=True)
         # dicts maintain insertion order in python 3.7+
         timestamps_have_asset_balance = dict.fromkeys(all_timestamps, False)
         timestamps_with_asset_balance = dict.fromkeys(asset_timestamps, True)
@@ -2124,8 +2124,8 @@ class DBHandler:
             cursor: 'DBCursor',
             asset: Asset,
             balance_type: BalanceType,
-            from_ts: Optional[Timestamp] = None,
-            to_ts: Optional[Timestamp] = None,
+            from_ts: Timestamp | None = None,
+            to_ts: Timestamp | None = None,
     ) -> list[SingleDBAssetBalance]:
         """Query all balance entries for an asset and balance type within a range of timestamps
         """
@@ -2198,8 +2198,8 @@ class DBHandler:
             self,
             cursor: 'DBCursor',
             collection_id: int,
-            from_ts: Optional[Timestamp] = None,
-            to_ts: Optional[Timestamp] = None,
+            from_ts: Timestamp | None = None,
+            to_ts: Timestamp | None = None,
     ) -> list[SingleDBAssetBalance]:
         """Query all balance entries for all assets of a collection within a range of timestamps
         """
@@ -2236,7 +2236,7 @@ class DBHandler:
             table_name = table_entry[0]
             columns = table_entry[1:]
             columns_str = ', '.join(columns)
-            bindings: Union[tuple, tuple[str]] = ()
+            bindings: tuple | tuple[str] = ()
             condition = ''
             if table_name in {'manually_tracked_balances', 'timed_balances'}:
                 bindings = (BalanceType.LIABILITY.serialize_for_db(),)
@@ -2484,7 +2484,7 @@ class DBHandler:
             self,
             write_cursor: 'DBCursor',
             name: str,
-            description: Optional[str],
+            description: str | None,
             background_color: HexColorCode,
             foreground_color: HexColorCode,
     ) -> None:
@@ -2514,9 +2514,9 @@ class DBHandler:
             self,
             write_cursor: 'DBCursor',
             name: str,
-            description: Optional[str],
-            background_color: Optional[HexColorCode],
-            foreground_color: Optional[HexColorCode],
+            description: str | None,
+            background_color: HexColorCode | None,
+            foreground_color: HexColorCode | None,
     ) -> None:
         """Edits a tag already existing in the DB
 
@@ -2567,12 +2567,12 @@ class DBHandler:
     def ensure_tags_exist(
             self,
             cursor: 'DBCursor',
-            given_data: Union[
-                list[SingleBlockchainAccountData],
-                list[BlockchainAccountData],
-                list[ManuallyTrackedBalance],
-                list[XpubData],
-            ],
+            given_data: (
+                list[SingleBlockchainAccountData] |
+                list[BlockchainAccountData] |
+                list[ManuallyTrackedBalance] |
+                list[XpubData]
+            ),
             action: Literal['adding', 'editing'],
             data_type: Literal['blockchain accounts', 'manually tracked balances', 'bitcoin xpub', 'bitcoin cash xpub'],  # noqa: E501
     ) -> None:
@@ -2859,7 +2859,7 @@ class DBHandler:
             self,
             cursor: 'DBCursor',
             table_name: str,
-            klass: type[Union[Trade, AssetMovement, MarginPosition]],
+            klass: type[Trade | (AssetMovement | MarginPosition)],
     ) -> None:
         updates: list[tuple[str, str]] = []
         log.debug(f'db integrity: start {table_name}')
@@ -2901,8 +2901,8 @@ class DBHandler:
         log.debug(f'DB data integrity check finished after {ts_now() - start_time} seconds')
 
     def get_db_info(self, cursor: 'DBCursor') -> dict[str, Any]:
-        filepath = self.user_data_dir / 'rotkehlchen.db'
-        size = Path(self.user_data_dir / 'rotkehlchen.db').stat().st_size
+        filepath = self.user_data_dir / USERDB_NAME
+        size = Path(self.user_data_dir / USERDB_NAME).stat().st_size
         version = self.get_setting(cursor, 'version')
         return {
             'filepath': str(filepath),
@@ -2920,7 +2920,7 @@ class DBHandler:
                     timestamp = match.group(1)
                     version = match.group(2)
                     try:
-                        size: Optional[int] = Path(Path(root) / filename).stat().st_size
+                        size: int | None = Path(Path(root) / filename).stat().st_size
                     except OSError:
                         size = None
                     backups.append({
@@ -2940,7 +2940,7 @@ class DBHandler:
         new_db_filename = f'{ts_now()}_rotkehlchen_db_v{version}.backup'
         new_db_path = self.user_data_dir / new_db_filename
         shutil.copyfile(
-            self.user_data_dir / 'rotkehlchen.db',
+            self.user_data_dir / USERDB_NAME,
             new_db_path,
         )
         return new_db_path
@@ -3007,7 +3007,7 @@ class DBHandler:
             self,
             write_cursor: 'DBCursor',
             proportion_to_share: FVal,
-            exclude_identifier: Optional[int],
+            exclude_identifier: int | None,
             blockchain: SupportedBlockchain,
     ) -> None:
         """
@@ -3237,7 +3237,7 @@ class DBHandler:
 
         return result
 
-    def get_blockchain_account_label(self, chain_address: ChainAddress) -> Optional[str]:
+    def get_blockchain_account_label(self, chain_address: ChainAddress) -> str | None:
         """Returns the label for a specific blockchain account.
         Returns None if either there is no label set or the account doesn't exist in database.
         """
@@ -3255,8 +3255,9 @@ class DBHandler:
             write_cursor: 'DBCursor',
             location: Location,
             data: dict[str, Any],
-            extra_data: Optional[dict[str, Any]],
+            extra_data: dict[str, Any] | None,
     ) -> None:
+        """Add a skipped external event to the DB. Duplicates are ignored."""
         serialized_extra_data = None
         if extra_data is not None:
             serialized_extra_data = json.dumps(extra_data, separators=(',', ':'))
@@ -3264,3 +3265,11 @@ class DBHandler:
             'INSERT OR IGNORE INTO skipped_external_events(data, location, extra_data) VALUES(?, ?, ?)',  # noqa: E501
             (json.dumps(data, separators=(',', ':')), location.serialize_for_db(), serialized_extra_data),  # noqa: E501
         )
+
+    def get_chains_to_detect_evm_accounts(self) -> list[SUPPORTED_EVM_CHAINS]:
+        """Reads the DB for the excluding chains and calculate which chains to
+        perform EVM accound detection on"""
+        all_chains = get_args(SUPPORTED_EVM_CHAINS)
+        with self.conn.read_ctx() as cursor:
+            excluded_chain_ids = self.get_settings(cursor).evmchains_to_skip_detection
+        return list(set(all_chains) - {x.to_blockchain() for x in excluded_chain_ids})

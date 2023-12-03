@@ -7,6 +7,7 @@ from distutils.spawn import find_executable
 
 from PyInstaller.utils.hooks import collect_submodules
 
+from rotkehlchen.constants.misc import GLOBALDB_NAME
 from rotkehlchen.exchanges.constants import SUPPORTED_EXCHANGES
 from rotkehlchen.types import Location
 from rotkehlchen.utils.misc import get_system_spec
@@ -88,7 +89,9 @@ ethereum_modules = collect_submodules('rotkehlchen.chain.ethereum.modules')
 optimism_modules = collect_submodules('rotkehlchen.chain.optimism.modules')
 polygon_pos_modules = collect_submodules('rotkehlchen.chain.polygon_pos.modules')
 arbitrum_one_modules = collect_submodules('rotkehlchen.chain.arbitrum_one.modules')
-dynamic_modules = ethereum_modules + optimism_modules + polygon_pos_modules + arbitrum_one_modules
+gnosis_modules = collect_submodules('rotkehlchen.chain.gnosis.modules')
+base_modules = collect_submodules('rotkehlchen.chain.base.modules')
+dynamic_modules = ethereum_modules + optimism_modules + polygon_pos_modules + arbitrum_one_modules + gnosis_modules + base_modules
 hiddenimports.extend(dynamic_modules)
 
 a = Entrypoint(
@@ -101,7 +104,7 @@ a = Entrypoint(
         # This list should be kept in sync with setup.py (package_data)
         ('rotkehlchen/data/eth_abi.json', 'rotkehlchen/data'),
         ('rotkehlchen/data/eth_contracts.json', 'rotkehlchen/data'),
-        ('rotkehlchen/data/global.db', 'rotkehlchen/data'),
+        (f'rotkehlchen/data/{GLOBALDB_NAME}', 'rotkehlchen/data'),
         ('rotkehlchen/data/globaldb_v2_v3_assets.sql', 'rotkehlchen/data'),
         ('rotkehlchen/data/nodes.json', 'rotkehlchen/data'),
         ('rotkehlchen/data/nodes_as_of_1-26-1.json', 'rotkehlchen/data'),

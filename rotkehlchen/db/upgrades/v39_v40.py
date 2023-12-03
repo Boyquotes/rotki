@@ -6,7 +6,12 @@ from uuid import uuid4
 from pysqlcipher3 import dbapi2 as sqlcipher
 
 from rotkehlchen.constants import ZERO
-from rotkehlchen.db.constants import NO_ACCOUNTING_COUNTERPARTY
+from rotkehlchen.db.constants import (
+    HISTORY_MAPPING_KEY_STATE,
+    HISTORY_MAPPING_STATE_CUSTOMIZED,
+    HISTORY_MAPPING_STATE_DECODED,
+    NO_ACCOUNTING_COUNTERPARTY,
+)
 from rotkehlchen.db.utils import update_table_schema
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.logging import RotkehlchenLogsAdapter
@@ -18,7 +23,7 @@ if TYPE_CHECKING:
     from rotkehlchen.db.drivers.gevent import DBCursor, DBConnection
     from rotkehlchen.db.upgrade_manager import DBUpgradeProgressHandler
 
-from rotkehlchen.accounting.structures.types import HistoryEventSubType, HistoryEventType
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -41,22 +46,6 @@ TYPES_REMAPPED: list[tuple[HistoryEventType, HistoryEventSubType, HistoryEventTy
     (HistoryEventType.WITHDRAWAL, HistoryEventSubType.REMOVE_ASSET, HistoryEventType.WITHDRAWAL, HistoryEventSubType.RECEIVE),  # noqa: E501
     (HistoryEventType.DEPOSIT, HistoryEventSubType.DEPOSIT_ASSET, HistoryEventType.DEPOSIT, HistoryEventSubType.NONE),  # noqa: E501
     (HistoryEventType.WITHDRAWAL, HistoryEventSubType.REMOVE_ASSET, HistoryEventType.WITHDRAWAL, HistoryEventSubType.NONE),  # noqa: E501
-]
-
-DEFAULT_BASE_NODES_AT_V40 = [
-    ('base etherscan', '', 0, 1, '0.28', 'BASE'),
-    ('base ankr', 'https://rpc.ankr.com/base', 0, 1, '0.18', 'BASE'),
-    ('base BlockPi', 'https://base.blockpi.network/v1/rpc/public', 0, 1, '0.18', 'BASE'),
-    ('base PublicNode', 'https://base.publicnode.com', 0, 1, '0.18', 'BASE'),
-    ('base 1rpc', 'https://1rpc.io/base', 0, 1, '0.18', 'BASE'),
-]
-
-DEFAULT_GNOSIS_NODES_AT_V40 = [
-    ('gnosis etherscan', '', 0, 1, '0.28', 'GNOSIS'),
-    ('gnosis ankr', 'https://rpc.ankr.com/gnosis', 0, 1, '0.18', 'GNOSIS'),
-    ('gnosis BlockPi', 'https://gnosis.blockpi.network/v1/rpc/public', 0, 1, '0.18', 'GNOSIS'),
-    ('gnosis PublicNode', 'https://gnosis.publicnode.com', 0, 1, '0.18', 'GNOSIS'),
-    ('gnosis 1rpc', 'https://1rpc.io/gnosis', 0, 1, '0.18', 'GNOSIS'),
 ]
 
 LEDGER_ACTION_TYPE_TO_NAME = {
@@ -92,6 +81,7 @@ def _migrate_rotki_events(write_cursor: 'DBCursor') -> None:
             from_type.serialize(), from_subtype.serialize(),
         ) for to_type, to_subtype, from_type, from_subtype in TYPES_REMAPPED],
     )
+    write_cursor.execute('DELETE from used_query_ranges WHERE name=?', ('last_withdrawals_query_ts',))  # noqa: E501
     log.debug('Exit _migrate_rotki_events')
 
 
@@ -308,7 +298,8 @@ def _add_new_tables(write_cursor: 'DBCursor') -> None:
     identifier INTEGER NOT NULL PRIMARY KEY,
     data TEXT NOT NULL,
     location CHAR(1) NOT NULL DEFAULT('A') REFERENCES location(location),
-    extra_data TEXT
+    extra_data TEXT,
+    UNIQUE(data, location)
     );""")
     write_cursor.execute("""
     CREATE TABLE IF NOT EXISTS accounting_rules(
@@ -331,7 +322,73 @@ def _add_new_tables(write_cursor: 'DBCursor') -> None:
         setting_name TEXT NOT NULL references settings(name)
     );
     """)
+    write_cursor.execute("""
+    CREATE TABLE IF NOT EXISTS unresolved_remote_conflicts(
+        identifier INTEGER PRIMARY KEY NOT NULL,
+        local_id INTEGER NOT NULL,
+        remote_data TEXT NOT NULL,
+        type INTEGER NOT NULL
+    );
+    """)
     log.debug('Exit _add_new_tables')
+
+
+def _reset_decoded_events(write_cursor: 'DBCursor') -> None:
+    """
+    Reset all decoded evm events except the customized ones for ethereum mainnet,
+    arbitrum, optimism and polygon.
+    """
+    log.debug('Enter _reset_decoded_events')
+    if write_cursor.execute('SELECT COUNT(*) FROM evm_transactions').fetchone()[0] == 0:
+        return
+
+    customized_events = write_cursor.execute(
+        'SELECT COUNT(*) FROM history_events_mappings WHERE name=? AND value=?',
+        (HISTORY_MAPPING_KEY_STATE, HISTORY_MAPPING_STATE_CUSTOMIZED),
+    ).fetchone()[0]
+    querystr = (
+        'DELETE FROM history_events WHERE identifier IN ('
+        'SELECT H.identifier from history_events H INNER JOIN evm_events_info E '
+        'ON H.identifier=E.identifier AND E.tx_hash IN '
+        '(SELECT tx_hash from_evm_transactions))'
+    )
+    bindings: tuple = ()
+    if customized_events != 0:
+        querystr += ' AND identifier NOT IN (SELECT parent_identifier FROM history_events_mappings WHERE name=? AND value=?)'  # noqa: E501
+        bindings = (HISTORY_MAPPING_KEY_STATE, HISTORY_MAPPING_STATE_CUSTOMIZED)
+
+    write_cursor.execute(querystr, bindings)
+    write_cursor.execute(
+        'DELETE from evm_tx_mappings WHERE tx_id IN (SELECT identifier FROM evm_transactions) AND value=?',  # noqa: E501
+        (HISTORY_MAPPING_STATE_DECODED,),
+    )
+    log.debug('Exit _reset_decoded_events')
+
+
+def _replace_velo_identifier(write_cursor: 'DBCursor') -> None:
+    """
+    Replace VELO with the binance version of the token. This is done as part of a consolidation
+    process where we added VELO V1 and VELO V2 from Velodrome but our database also contained a
+    VELO asset and a BNB version of it both not related to velodrome. As part of upgrade to V6
+    of the global DB we are replacing this VELO asset (not token) with its BNB version.
+
+    Code taken from replace_asset_identifier
+    """
+    log.debug('Enter _replace_velo_identifier')
+    target_asset_identifier = 'eip155:56/erc20:0xf486ad071f3bEE968384D2E39e2D8aF0fCf6fd46'
+    source_identifier = 'VELO'
+
+    write_cursor.executescript('PRAGMA foreign_keys = OFF;')
+    write_cursor.execute(
+        'DELETE from assets WHERE identifier=?;',
+        (target_asset_identifier,),
+    )
+    write_cursor.executescript('PRAGMA foreign_keys = ON;')
+    write_cursor.execute(
+        'UPDATE assets SET identifier=? WHERE identifier=?;',
+        (target_asset_identifier, source_identifier),
+    )
+    log.debug('Exit _replace_velo_identifier')
 
 
 def upgrade_v39_to_v40(db: 'DBHandler', progress_handler: 'DBUpgradeProgressHandler') -> None:
@@ -340,9 +397,10 @@ def upgrade_v39_to_v40(db: 'DBHandler', progress_handler: 'DBUpgradeProgressHand
         - Migrate rotki events that were broken due to https://github.com/rotki/rotki/issues/6550
         - Purge kraken events
         - Create new tables
+        - Replace VELO asset in favor of the binance chain version
     """
     log.debug('Entered userdb v39->v40 upgrade')
-    progress_handler.set_total_steps(8)
+    progress_handler.set_total_steps(10)
     with db.user_write() as write_cursor:
         _add_new_tables(write_cursor)
         progress_handler.new_step()
@@ -357,6 +415,10 @@ def upgrade_v39_to_v40(db: 'DBHandler', progress_handler: 'DBUpgradeProgressHand
         _migrate_ledger_airdrop_accounting_setting(write_cursor)
         progress_handler.new_step()
         _migrate_ledger_actions(write_cursor, db.conn)
+        progress_handler.new_step()
+        _reset_decoded_events(write_cursor)
+        progress_handler.new_step()
+        _replace_velo_identifier(write_cursor)
         progress_handler.new_step()
 
     db.conn.execute('VACUUM;')

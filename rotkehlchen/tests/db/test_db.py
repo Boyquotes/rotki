@@ -1,6 +1,5 @@
 import dataclasses
 import logging
-import os
 import time
 from contextlib import suppress
 from copy import deepcopy
@@ -25,6 +24,7 @@ from rotkehlchen.constants.assets import (
     A_USD,
     A_USDC,
 )
+from rotkehlchen.constants.misc import USERSDIR_NAME
 from rotkehlchen.data_handler import DataHandler
 from rotkehlchen.db.dbhandler import DBHandler
 from rotkehlchen.db.filtering import AssetMovementsFilterQuery, TradesFilterQuery
@@ -148,6 +148,7 @@ TABLES_AT_INIT = [
     'skipped_external_events',
     'accounting_rules',
     'linked_rules_properties',
+    'unresolved_remote_conflicts',
 ]
 
 
@@ -155,9 +156,10 @@ def test_data_init_and_password(data_dir, username, sql_vm_instructions_cb):
     """DB Creation logic and tables at start testing"""
     msg_aggregator = MessagesAggregator()
     # Creating a new data dir should work
+    users_dir = data_dir / USERSDIR_NAME
     data = DataHandler(data_dir, msg_aggregator, sql_vm_instructions_cb)
     data.unlock(username, '123', create_new=True, resume_from_backup=False)
-    assert os.path.exists(os.path.join(data_dir, username))
+    assert (users_dir / username).exists()
 
     # Trying to re-create it should throw
     with pytest.raises(AuthenticationError):
@@ -451,6 +453,7 @@ def test_writing_fetching_data(data_dir, username, sql_vm_instructions_cb):
         'ssf_graph_multiplier': DEFAULT_SSF_GRAPH_MULTIPLIER,
         'last_data_migration': DEFAULT_LAST_DATA_MIGRATION,
         'non_syncing_exchanges': [],
+        'evmchains_to_skip_detection': [],
         'cost_basis_method': CostBasisMethod.FIFO,
         'treat_eth2_as_eth': DEFAULT_TREAT_ETH2_AS_ETH,
         'eth_staking_taxable_after_withdrawal_enabled': DEFAULT_ETH_STAKING_TAXABLE_AFTER_WITHDRAWAL_ENABLED,  # noqa: E501
@@ -1841,3 +1844,17 @@ def test_db_schema_sanity_check(database: 'DBHandler', caplog) -> None:
         with pytest.raises(DBSchemaError) as exception_info:
             connection.schema_sanity_check()
     assert "Tables {'user_notes'} are missing" in str(exception_info.value)
+
+
+def test_db_add_skipped_external_event_twice(database: 'DBHandler') -> None:
+    """Test that adding same skipped event twice in the DB does not duplicate it"""
+    data = {'event': 'someid', 'time': 'atime'}
+    with database.user_write() as write_cursor:
+        for _ in range(2):
+            database.add_skipped_external_event(
+                write_cursor=write_cursor,
+                location=Location.KRAKEN,
+                data=data,
+                extra_data=None,
+            )
+            assert write_cursor.execute('SELECT COUNT(*) FROM skipped_external_events').fetchone()[0] == 1  # noqa: E501

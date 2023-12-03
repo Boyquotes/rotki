@@ -11,8 +11,10 @@ import {
 } from '@/types/settings/accounting';
 
 const { t } = useI18n();
+const router = useRouter();
 
-const { getAccountingRules } = useAccountingSettings();
+const { getAccountingRule, getAccountingRules, getAccountingRulesConflicts } =
+  useAccountingSettings();
 
 const {
   state,
@@ -34,9 +36,25 @@ const {
   Matcher
 >(null, true, useAccountingRuleFilter, getAccountingRules);
 
-onMounted(async () => {
-  await fetchData();
-});
+const conflictsNumber: Ref<number> = ref(0);
+
+const checkConflicts = async () => {
+  const { total } = await getAccountingRulesConflicts({ limit: 1, offset: 0 });
+  set(conflictsNumber, total);
+
+  const {
+    currentRoute: {
+      query: { resolveConflicts }
+    }
+  } = router;
+
+  if (resolveConflicts) {
+    if (total > 0) {
+      set(conflictsDialogOpen, true);
+    }
+    await router.replace({ query: {} });
+  }
+};
 
 const tableHeaders = computed<DataTableHeader[]>(() => [
   {
@@ -143,6 +161,11 @@ const deleteAccountingRule = async (item: AccountingRuleEntry) => {
   }
 };
 
+const refresh = async () => {
+  await fetchData();
+  await checkConflicts();
+};
+
 const showDeleteConfirmation = (item: AccountingRuleEntry) => {
   show(
     {
@@ -158,6 +181,49 @@ const getType = (eventType: string, eventSubtype: string) =>
     eventType,
     eventSubtype
   });
+
+onMounted(async () => {
+  const {
+    currentRoute: {
+      query: {
+        'add-rule': addRule,
+        'edit-rule': editRule,
+        eventSubtype,
+        eventType,
+        counterparty
+      }
+    }
+  } = router;
+
+  const ruleData = {
+    eventSubtype: eventSubtype?.toString() ?? '',
+    eventType: eventType?.toString() ?? '',
+    counterparty: counterparty?.toString() ?? null
+  };
+
+  if (addRule) {
+    set(editableItem, {
+      ...getPlaceholderRule(),
+      ...ruleData
+    });
+    setOpenDialog(true);
+    await router.replace({ query: {} });
+  } else if (editRule) {
+    const rule = await getAccountingRule({
+      eventTypes: [ruleData.eventType],
+      eventSubtypes: [ruleData.eventSubtype],
+      counterparties: counterparty ? [ruleData.counterparty] : undefined,
+      limit: 1,
+      offset: 0
+    });
+    set(editableItem, rule);
+    setOpenDialog(!!rule);
+    await router.replace({ query: {} });
+  }
+  await refresh();
+});
+
+const conflictsDialogOpen: Ref<boolean> = ref(false);
 </script>
 
 <template>
@@ -170,7 +236,7 @@ const getType = (eventType: string, eventSubtype: string) =>
               variant="outlined"
               color="primary"
               :loading="isLoading"
-              @click="fetchData()"
+              @click="refresh()"
             >
               <template #prepend>
                 <RuiIcon name="refresh-line" />
@@ -191,8 +257,32 @@ const getType = (eventType: string, eventSubtype: string) =>
 
     <RuiCard>
       <template #custom-header>
-        <div class="flex items-center justify-end p-4 pb-0">
-          <div class="w-full md:w-[25rem]">
+        <div class="flex items-center justify-between p-4 pb-0 gap-4">
+          <template v-if="conflictsNumber > 0">
+            <RuiButton color="warning" @click="conflictsDialogOpen = true">
+              <template #prepend>
+                <RuiIcon name="error-warning-line" />
+              </template>
+              {{ t('accounting_settings.rule.conflicts.title') }}
+              <template #append>
+                <RuiChip
+                  size="sm"
+                  class="!p-0 !bg-rui-warning-darker"
+                  color="warning"
+                >
+                  {{ conflictsNumber }}
+                </RuiChip>
+              </template>
+            </RuiButton>
+            <AccountingRuleConflictsDialog
+              v-if="conflictsDialogOpen"
+              :table-headers="tableHeaders"
+              @close="conflictsDialogOpen = false"
+              @refresh="refresh()"
+            />
+          </template>
+
+          <div class="w-full md:w-[25rem] ml-auto">
             <TableFilter
               :matches="filters"
               :matchers="matchers"
@@ -201,6 +291,7 @@ const getType = (eventType: string, eventSubtype: string) =>
           </div>
         </div>
       </template>
+
       <CollectionHandler :collection="state" @set-page="setPage($event)">
         <template #default="{ data, itemLength }">
           <DataTable

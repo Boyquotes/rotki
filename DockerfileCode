@@ -48,7 +48,7 @@ ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 RUN node -v
 RUN npm -v
 
-COPY rotkiboy /app
+COPY . /app
 
 WORKDIR /app/
 RUN npm install -g pnpm@8 && pnpm install -C frontend/ --no-optional

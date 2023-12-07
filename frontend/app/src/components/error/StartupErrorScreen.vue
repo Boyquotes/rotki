@@ -16,19 +16,14 @@ const { closeApp } = useInterop();
     :subtitle="t('error_screen.message')"
     :message="message"
   >
-    <VBtn depressed color="primary" @click="closeApp()">
+    <RuiButton color="primary" @click="closeApp()">
       {{ t('common.actions.terminate') }}
-    </VBtn>
+    </RuiButton>
   </ErrorScreen>
 </template>
 
 <style module lang="scss">
 .overlay {
-  background-color: #fafafa;
-  height: 100vh !important;
-  width: 100vw !important;
-  position: fixed;
-  top: 0;
-  left: 0;
+  @apply fixed top-0 left-0;
 }
 </style>

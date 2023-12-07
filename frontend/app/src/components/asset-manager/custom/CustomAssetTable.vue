@@ -124,7 +124,6 @@ const getAsset = (item: CustomAsset) => ({
           @delete-click="deleteAsset(item)"
         >
           <CopyButton
-            class="mx-1"
             :tooltip="t('asset_table.copy_identifier.tooltip')"
             :value="item.identifier"
           />
@@ -132,7 +131,7 @@ const getAsset = (item: CustomAsset) => ({
       </template>
       <template #expanded-item="{ item }">
         <TableExpandContainer visible :colspan="tableHeaders.length">
-          <div class="font-bold">{{ t('asset_table.notes') }}:</div>
+          <div class="font-bold">{{ t('common.notes') }}:</div>
           <div class="pt-2">
             {{ item.notes }}
           </div>

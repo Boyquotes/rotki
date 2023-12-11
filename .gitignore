@@ -1,3 +1,4 @@
+dataDB/
 node_modules/
 *.pyc
 .mypy_cache/

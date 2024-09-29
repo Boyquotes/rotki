@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { type SearchMatcher } from '@/types/filtering';
+import type { SearchMatcher } from '@/types/filtering';
 
 defineProps<{
   matcher: SearchMatcher<any>;
@@ -10,11 +10,9 @@ const emit = defineEmits<{
   (e: 'click', matcher: SearchMatcher<any>): void;
 }>();
 
-const click = (matcher: SearchMatcher<any>) => {
+function click(matcher: SearchMatcher<any>) {
   emit('click', matcher);
-};
-
-const css = useCssModule();
+}
 </script>
 
 <template>
@@ -22,7 +20,7 @@ const css = useCssModule();
     variant="text"
     class="text-body-1 tracking-wide w-full justify-start text-left text-rui-text-secondary"
     :class="{
-      [css.selected]: active
+      [$style.selected]: active,
     }"
     @click="click(matcher)"
   >

@@ -24,6 +24,10 @@ from rotkehlchen.db.upgrades.v36_v37 import upgrade_v36_to_v37
 from rotkehlchen.db.upgrades.v37_v38 import upgrade_v37_to_v38
 from rotkehlchen.db.upgrades.v38_v39 import upgrade_v38_to_v39
 from rotkehlchen.db.upgrades.v39_v40 import upgrade_v39_to_v40
+from rotkehlchen.db.upgrades.v40_v41 import upgrade_v40_to_v41
+from rotkehlchen.db.upgrades.v41_v42 import upgrade_v41_to_v42
+from rotkehlchen.db.upgrades.v42_v43 import upgrade_v42_to_v43
+from rotkehlchen.db.upgrades.v43_v44 import upgrade_v43_to_v44
 from rotkehlchen.errors.misc import DBUpgradeError
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.utils.interfaces import ProgressUpdater
@@ -96,6 +100,22 @@ UPGRADES_LIST = [
         from_version=39,
         function=upgrade_v39_to_v40,
     ),
+    UpgradeRecord(
+        from_version=40,
+        function=upgrade_v40_to_v41,
+    ),
+    UpgradeRecord(
+        from_version=41,
+        function=upgrade_v41_to_v42,
+    ),
+    UpgradeRecord(
+        from_version=42,
+        function=upgrade_v42_to_v43,
+    ),
+    UpgradeRecord(
+        from_version=43,
+        function=upgrade_v43_to_v44,
+    ),
 ]
 
 
@@ -146,7 +166,7 @@ class DBUpgradeManager:
                     f'version is {our_version}. To be able to use it you will need to '
                     f'first use a previous version of rotki and then use this one. '
                     f'Refer to the documentation for more information. '
-                    f'https://rotki.readthedocs.io/en/latest/usage_guide.html#upgrading-rotki-after-a-very-long-time',
+                    f'https://docs.rotki.com/usage-guides#upgrading-rotki-after-a-long-time',
                 )
 
             if our_version > ROTKEHLCHEN_DB_VERSION:

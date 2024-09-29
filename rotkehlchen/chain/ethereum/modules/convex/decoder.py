@@ -9,6 +9,7 @@ from rotkehlchen.chain.ethereum.modules.convex.constants import (
     CONVEX_CPT_DETAILS,
     CONVEX_VIRTUAL_REWARDS,
     CPT_CONVEX,
+    CVX_LOCK_WITHDRAWN,
     CVX_LOCKER,
     CVX_LOCKER_V2,
     CVX_REWARDS,
@@ -19,11 +20,10 @@ from rotkehlchen.chain.ethereum.modules.convex.constants import (
 from rotkehlchen.chain.ethereum.modules.convex.convex_cache import (
     query_convex_data,
     read_convex_data_from_cache,
-    save_convex_data_to_cache,
 )
 from rotkehlchen.chain.ethereum.utils import asset_normalized_value
 from rotkehlchen.chain.evm.constants import ZERO_ADDRESS
-from rotkehlchen.chain.evm.decoding.constants import ERC20_OR_ERC721_TRANSFER
+from rotkehlchen.chain.evm.decoding.constants import ERC20_OR_ERC721_TRANSFER, STAKED
 from rotkehlchen.chain.evm.decoding.interfaces import DecoderInterface, ReloadableCacheDecoderMixin
 from rotkehlchen.chain.evm.decoding.structures import (
     DEFAULT_DECODING_OUTPUT,
@@ -37,20 +37,20 @@ from rotkehlchen.chain.evm.decoding.types import CounterpartyDetails
 from rotkehlchen.constants.assets import A_CRV, A_CVX
 from rotkehlchen.errors.asset import UnknownAsset, WrongAssetType
 from rotkehlchen.history.events.structures.base import HistoryEventSubType, HistoryEventType
-from rotkehlchen.history.events.structures.evm_event import EvmProduct
+from rotkehlchen.history.events.structures.evm_event import EvmEvent, EvmProduct
 from rotkehlchen.logging import RotkehlchenLogsAdapter
-from rotkehlchen.types import CURVE_POOL_PROTOCOL, CacheType, ChecksumEvmAddress
+from rotkehlchen.types import CURVE_POOL_PROTOCOL, CacheType, ChecksumEvmAddress, EvmTransaction
 from rotkehlchen.utils.misc import hex_or_bytes_to_address, hex_or_bytes_to_int
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
     from rotkehlchen.chain.evm.decoding.base import BaseDecoderTools
+    from rotkehlchen.chain.evm.structures import EvmTxReceiptLog
     from rotkehlchen.user_messages import MessagesAggregator
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
-DEPOSIT_EVENT = b'\x9eq\xbc\x8e\xea\x02\xa69i\xf5\t\x81\x8f-\xaf\xb9%E2\x90C\x19\xf9\xdb\xday\xb6{\xd3J_='  # noqa: E501
 REWARD_ADDED = b'\xde\x88\xa9"\xe0\xd3\xb8\x8b$\xe9b>\xfe\xb4d\x91\x9ck\xf9\xf6hW\xa6^+\xfc\xf2\xce\x87\xa9C='  # noqa: E501
 
 
@@ -71,9 +71,9 @@ class ConvexDecoder(DecoderInterface, ReloadableCacheDecoderMixin):
             evm_inquirer=ethereum_inquirer,
             cache_type_to_check_for_freshness=CacheType.CONVEX_POOL_ADDRESS,
             query_data_method=query_convex_data,
-            save_data_to_cache_method=save_convex_data_to_cache,
             read_data_from_cache_method=read_convex_data_from_cache,
         )
+        self.cvx = A_CVX.resolve_to_evm_token()
 
     @property
     def pools(self) -> dict[ChecksumEvmAddress, str]:
@@ -112,6 +112,11 @@ class ConvexDecoder(DecoderInterface, ReloadableCacheDecoderMixin):
         amount_raw = hex_or_bytes_to_int(context.tx_log.data[0:32])
         interacted_address = hex_or_bytes_to_address(context.tx_log.topics[1])
         found_event_modifying_balances = False
+        # in the case of withdrawing CVX from an expired lock the withdrawn event
+        # is emitted before the transfer events and when iterating over the decoded events
+        # we haven't processed the transfer yet so it can't be decoded. To cover that case
+        # we use a post processing event only for that topic
+        matched_counterparty = CPT_CONVEX if context.tx_log.topics[0] == CVX_LOCK_WITHDRAWN else None  # noqa: E501
 
         for event in context.decoded_events:
             try:
@@ -158,7 +163,7 @@ class ConvexDecoder(DecoderInterface, ReloadableCacheDecoderMixin):
                     # in this case store information about the gauge in the extra details to use
                     # it during balances queries
                     for log_event in context.all_logs:
-                        if log_event.topics[0] == DEPOSIT_EVENT:
+                        if log_event.topics[0] == STAKED:
                             deposit_amount_raw = hex_or_bytes_to_int(context.tx_log.data[0:32])
                             staking_address = hex_or_bytes_to_address(log_event.topics[1])
                             if deposit_amount_raw == amount_raw and staking_address == event.location_label:  # noqa: E501
@@ -192,7 +197,51 @@ class ConvexDecoder(DecoderInterface, ReloadableCacheDecoderMixin):
                         event.notes = f'Claim {event.balance.amount} {crypto_asset.symbol} reward from convex {self.pools[context.tx_log.address]} pool'  # noqa: E501
                     else:
                         event.notes = f'Claim {event.balance.amount} {crypto_asset.symbol} reward from convex'  # noqa: E501
-        return DecodingOutput(refresh_balances=found_event_modifying_balances)
+        return DecodingOutput(
+            refresh_balances=found_event_modifying_balances,
+            matched_counterparty=matched_counterparty,
+        )
+
+    def _check_lock_withdrawal_funds(
+            self,
+            transaction: 'EvmTransaction',  # pylint: disable=unused-argument
+            decoded_events: list['EvmEvent'],
+            all_logs: list['EvmTxReceiptLog'],
+    ) -> list['EvmEvent']:
+        """
+        Process unlocked CVX withdrawals.
+
+        The withdrawal event needs to be handled after all the events get decoded since it is
+        emitted before the transfer events get processed. We gather all the withdraw amounts
+        that don't relock from the log event data and then match them against
+        the receive events of CVX.
+        """
+        withdrawals_log_entries = filter(lambda x: x.topics[0] == CVX_LOCK_WITHDRAWN, all_logs)
+        amounts_withdrawn = [
+            asset_normalized_value(hex_or_bytes_to_int(tx_log.data[0:32]), self.cvx)
+            for tx_log in withdrawals_log_entries
+            if bool(hex_or_bytes_to_int(tx_log.data[32:64])) is False  # false means not relocked
+        ]
+
+        for event in decoded_events:
+            if (
+                event.event_type == HistoryEventType.RECEIVE and
+                event.event_subtype == HistoryEventSubType.NONE and
+                event.asset == A_CVX and
+                event.balance.amount in amounts_withdrawn
+            ):
+                event.event_type = HistoryEventType.WITHDRAWAL
+                event.event_subtype = HistoryEventSubType.REMOVE_ASSET
+                event.counterparty = CPT_CONVEX
+                event.notes = f'Unlock {event.balance.amount} {self.cvx.symbol} from convex'
+
+                amounts_withdrawn.remove(event.balance.amount)
+                if len(amounts_withdrawn) == 0:
+                    break  # stop as soon as we have processed all the unlock events
+        else:
+            log.error(f'Did not process all the expected CVX unlock withdrawals for {transaction.tx_hash.hex()}')  # noqa: E501
+
+        return decoded_events
 
     def _maybe_enrich_convex_transfers(self, context: EnricherContext) -> TransferEnrichmentOutput:
         """
@@ -228,16 +277,14 @@ class ConvexDecoder(DecoderInterface, ReloadableCacheDecoderMixin):
         }
 
     def addresses_to_decoders(self) -> dict[ChecksumEvmAddress, tuple[Any, ...]]:
-        decoder_mappings: dict[ChecksumEvmAddress, tuple[Callable, ...]] = {
+        decoder_mappings = {
             BOOSTER: (self._decode_pool_events,),
             CVX_LOCKER: (self._decode_pool_events,),
             CVX_LOCKER_V2: (self._decode_pool_events,),
             CVX_REWARDS: (self._decode_pool_events,),
             CVXCRV_REWARDS: (self._decode_pool_events,),
         }
-        pools = {pool: (self._decode_pool_events,) for pool in self.pools}
-        virtual_rewards = {addr: (self._decode_pool_events,) for addr in CONVEX_VIRTUAL_REWARDS}
-        decoder_mappings.update(pools)
+        virtual_rewards = dict.fromkeys(CONVEX_VIRTUAL_REWARDS, (self._decode_pool_events,))
         decoder_mappings.update(virtual_rewards)
         return decoder_mappings
 
@@ -247,3 +294,6 @@ class ConvexDecoder(DecoderInterface, ReloadableCacheDecoderMixin):
 
     def enricher_rules(self) -> list[Callable]:
         return [self._maybe_enrich_convex_transfers]
+
+    def post_decoding_rules(self) -> dict[str, list[tuple[int, Callable]]]:
+        return {CPT_CONVEX: [(0, self._check_lock_withdrawal_funds)]}

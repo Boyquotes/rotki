@@ -1,20 +1,14 @@
-import { type Blockchain, type DefiProtocol } from '../blockchain';
-
-export interface AccountData {
-  readonly address: string;
-  readonly label: string;
-  readonly tags: string[];
-}
-
-export interface Account<T = Blockchain> {
-  readonly chain: T;
+export interface Account {
+  readonly chain: string;
   readonly address: string;
 }
 
-export interface DefiAccount<T = Blockchain> extends Account<T> {
-  readonly protocols: DefiProtocol[];
+export interface GeneralAccount {
+  readonly account: { address: string };
+  readonly tags?: string[];
+  readonly label?: string;
+  readonly chain: string;
+  readonly nativeAsset: string;
+  readonly groupId?: string;
+  readonly groupHeader?: boolean;
 }
-
-export interface GeneralAccount<T = Blockchain>
-  extends AccountData,
-    Account<T> {}

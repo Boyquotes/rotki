@@ -1,41 +1,46 @@
+import { Blockchain } from '@rotki/common';
 import { Section, Status } from '@/types/status';
 
-export const useDataLoader = () => {
+interface UseDataLoaderReturn { load: () => void }
+
+export function useDataLoader(): UseDataLoaderReturn {
   const { shouldFetchData } = storeToRefs(useSessionAuthStore());
   const { fetchWatchers } = useWatchersStore();
   const { fetchTags } = useTagStore();
   const { fetchIgnoredAssets } = useIgnoredAssetsStore();
+  const { fetchWhitelistedAssets } = useWhitelistedAssetsStore();
   const { fetchNetValue } = useStatisticsStore();
   const { fetchAllTradeLocations } = useLocationStore();
   const { fetch, refreshPrices } = useBalances();
+  const { setStatus } = useStatusUpdater(Section.BLOCKCHAIN);
 
   const refreshData = async (): Promise<void> => {
     logger.info('Refreshing data');
 
     await Promise.allSettled([
       fetchIgnoredAssets(),
+      fetchWhitelistedAssets(),
       fetchWatchers(),
       fetch(),
-      fetchNetValue()
+      fetchNetValue(),
     ]);
     await refreshPrices();
   };
 
-  const load = async (): Promise<void> => {
+  const load = (): void => {
     startPromise(fetchTags());
     startPromise(fetchAllTradeLocations());
 
     if (get(shouldFetchData)) {
       startPromise(refreshData());
-    } else {
-      const ethUpdater = useStatusUpdater(Section.BLOCKCHAIN_ETH);
-      const btcUpdater = useStatusUpdater(Section.BLOCKCHAIN_BTC);
-      ethUpdater.setStatus(Status.LOADED);
-      btcUpdater.setStatus(Status.LOADED);
+    }
+    else {
+      setStatus(Status.LOADED, { subsection: Blockchain.ETH });
+      setStatus(Status.LOADED, { subsection: Blockchain.BTC });
     }
   };
 
   return {
-    load
+    load,
   };
-};
+}

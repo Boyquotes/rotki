@@ -1,10 +1,9 @@
-import { rest } from 'msw';
+import process from 'node:process';
+import { HttpResponse, http } from 'msw';
 import trades from '../../fixtures/trades.json';
 
 const backendUrl = process.env.VITE_BACKEND_URL;
 
-export default [
-  rest.get(`${backendUrl}/api/1/trades`, (req, res, ctx) =>
-    res(ctx.status(200), ctx.json(trades))
-  )
+export const tradesHandlers = [
+  http.get(`${backendUrl}/api/1/trades`, () => HttpResponse.json(trades, { status: 200 })),
 ];

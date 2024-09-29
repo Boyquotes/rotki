@@ -1,26 +1,29 @@
 <script setup lang="ts">
-import {
-  TimeFramePersist,
-  type TimeFrameSetting
-} from '@rotki/common/lib/settings/graphs';
+import { TimeFramePeriod, TimeFramePersist, type TimeFrameSetting } from '@rotki/common';
 
 const props = defineProps<{
-  value: TimeFrameSetting;
+  modelValue: TimeFrameSetting;
   visibleTimeframes: TimeFrameSetting[];
   disabled?: boolean;
 }>();
 
-const emit = defineEmits<{ (e: 'input', value: TimeFrameSetting): void }>();
-
-const { value } = toRefs(props);
-const input = (_value: TimeFrameSetting) => {
-  emit('input', _value);
-};
+const emit = defineEmits<{ (e: 'update:model-value', value: TimeFrameSetting): void }>();
 
 const premium = usePremium();
 
-const worksWithoutPremium = (period: TimeFrameSetting): boolean =>
-  isPeriodAllowed(period) || period === TimeFramePersist.REMEMBER;
+const internalValue = computed({
+  get() {
+    return props.modelValue;
+  },
+  set(value: string) {
+    assert(isOfEnum(TimeFramePersist)(value) || isOfEnum(TimeFramePeriod)(value));
+    emit('update:model-value', value);
+  },
+});
+
+function worksWithoutPremium(period: TimeFrameSetting): boolean {
+  return isPeriodAllowed(period) || period === TimeFramePersist.REMEMBER;
+}
 
 const { t } = useI18n();
 </script>
@@ -32,25 +35,22 @@ const { t } = useI18n();
       :tooltip="t('overall_balances.premium_hint')"
     />
     <RuiButtonGroup
+      v-model="internalValue"
       :disabled="disabled"
-      :value="value"
       gap="md"
       class="flex-wrap justify-center"
       active-color="primary"
       required
-      @input="input($event)"
     >
-      <template #default>
-        <RuiButton
-          v-for="(timeframe, i) in visibleTimeframes"
-          :key="i"
-          class="px-4"
-          :disabled="!premium && !worksWithoutPremium(timeframe)"
-          :value="timeframe"
-        >
-          {{ timeframe }}
-        </RuiButton>
-      </template>
+      <RuiButton
+        v-for="(timeframe, i) in visibleTimeframes"
+        :key="i"
+        class="px-4"
+        :disabled="!premium && !worksWithoutPremium(timeframe)"
+        :model-value="timeframe"
+      >
+        {{ timeframe }}
+      </RuiButton>
     </RuiButtonGroup>
   </div>
 </template>

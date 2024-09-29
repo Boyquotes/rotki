@@ -12,24 +12,23 @@ const props = withDefaults(
     height: 'auto',
     width: 'auto',
     circle: false,
-    padding: '2px'
-  }
+    padding: '2px',
+  },
 );
 
-const { dark } = useTheme();
+const { isDark } = useRotkiTheme();
 
 const { circle, padding } = toRefs(props);
 
 const radius = computed(() => (get(circle) ? '50%' : '4px'));
-const attrs = useAttrs();
 </script>
 
 <template>
   <Component
     :is="tag"
     class="wrapper flex"
-    :class="{ 'wrapper--inverted': dark }"
-    v-bind="attrs"
+    :class="{ 'wrapper--inverted': isDark }"
+    v-bind="$attrs"
     :style="{ width, height }"
   >
     <slot />

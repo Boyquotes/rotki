@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { type ComputedRef, type Ref } from 'vue';
 import { PurgeableImageCache } from '@/types/session/purge';
 
 const { t } = useI18n();
@@ -7,88 +6,86 @@ const { t } = useI18n();
 const purgable = [
   {
     id: PurgeableImageCache.ASSET_ICONS,
-    text: t('data_management.purge_images_cache.label.asset_icons')
+    text: t('data_management.purge_images_cache.label.asset_icons'),
   },
   {
     id: PurgeableImageCache.ENS_AVATARS,
-    text: t('data_management.purge_images_cache.label.ens_avatars')
-  }
+    text: t('data_management.purge_images_cache.label.ens_avatars'),
+  },
 ];
 
-const source: Ref<PurgeableImageCache> = ref(PurgeableImageCache.ASSET_ICONS);
+const source = ref<PurgeableImageCache>(PurgeableImageCache.ASSET_ICONS);
 
-const assetToClear: Ref<string> = ref('');
-const ensToClear: Ref<string[]> = ref([]);
+const assetToClear = ref<string>('');
+const ensToClear = ref<string[]>([]);
 
 const { ensNames } = storeToRefs(useAddressesNamesStore());
 
-const ensNamesList: ComputedRef<string[]> = computed(
-  () => Object.values(get(ensNames)).filter(value => !!value) as string[]
+const ensNamesList = computed<string[]>(
+  () => Object.values(get(ensNames)).filter(value => !!value) as string[],
 );
 
 const { clearIconCache } = useAssetIconApi();
-const { setLastRefreshedAssetIcon } = useAssetIcon();
+const { setLastRefreshedAssetIcon } = useAssetIconStore();
 const { clearEnsAvatarCache } = useAddressesNamesApi();
 const { setLastRefreshedAvatar } = useAddressesNamesStore();
 
-const purgeSource = async (source: PurgeableImageCache) => {
+async function purgeSource(source: PurgeableImageCache) {
   if (source === PurgeableImageCache.ASSET_ICONS) {
     const asset = get(assetToClear);
     await clearIconCache(asset ? [asset] : null);
     setLastRefreshedAssetIcon();
     set(assetToClear, '');
-  } else {
+  }
+  else {
     const ens = get(ensToClear);
     await clearEnsAvatarCache(ens.length > 0 ? ens : null);
     setLastRefreshedAvatar();
     set(ensToClear, []);
   }
-};
+}
 
-const { status, pending, showConfirmation } =
-  useCacheClear<PurgeableImageCache>(
-    purgable,
-    purgeSource,
-    (source: string) => ({
-      success: t('data_management.purge_images_cache.success', {
-        source
-      }),
-      error: t('data_management.purge_images_cache.error', {
-        source
-      })
+const { status, pending, showConfirmation } = useCacheClear<PurgeableImageCache>(
+  purgable,
+  purgeSource,
+  (source: string) => ({
+    success: t('data_management.purge_images_cache.success', {
+      source,
     }),
-    (source: string) => ({
-      title: t('data_management.purge_images_cache.confirm.title'),
-      message: t('data_management.purge_images_cache.confirm.message', {
-        source
-      })
-    })
-  );
-
-const css = useCssModule();
+    error: t('data_management.purge_images_cache.error', {
+      source,
+    }),
+  }),
+  (source: string) => ({
+    title: t('data_management.purge_images_cache.confirm.title'),
+    message: t('data_management.purge_images_cache.confirm.message', {
+      source,
+    }),
+  }),
+);
 </script>
 
 <template>
   <div>
-    <div class="mb-6">
-      <div class="text-h6">
+    <RuiCardHeader class="p-0 mb-4">
+      <template #header>
         {{ t('data_management.purge_images_cache.title') }}
-      </div>
-      <div>
+      </template>
+      <template #subheader>
         {{ t('data_management.purge_images_cache.subtitle') }}
-      </div>
-    </div>
+      </template>
+    </RuiCardHeader>
 
     <div class="flex items-center gap-4">
       <div class="flex flex-col md:flex-row md:gap-4 flex-1">
-        <VAutocomplete
+        <RuiAutoComplete
           v-model="source"
           class="flex-1"
-          outlined
+          variant="outlined"
           :label="t('data_management.purge_images_cache.select_image_source')"
-          :items="purgable"
-          item-text="text"
-          item-value="id"
+          :options="purgable"
+          text-attr="text"
+          key-attr="id"
           :disabled="pending"
         />
         <AssetSelect
@@ -96,36 +93,34 @@ const css = useCssModule();
           v-model="assetToClear"
           class="flex-1"
           outlined
-          persistent-hint
           :label="t('data_management.purge_images_cache.label.asset_to_clear')"
           :hint="t('data_management.purge_images_cache.hint')"
         />
-        <VCombobox
+        <RuiAutoComplete
           v-else
           v-model="ensToClear"
           class="flex-1"
-          :items="ensNamesList"
-          outlined
-          :class="css['ens-input']"
+          :options="ensNamesList"
+          variant="outlined"
           chips
-          deletable-chips
           clearable
+          custom-value
           :label="t('data_management.purge_images_cache.label.ens_to_clear')"
           :hint="t('data_management.purge_images_cache.hint')"
-          multiple
-          persistent-hint
         />
       </div>
 
-      <RuiTooltip :popper="{ placement: 'top' }" open-delay="400" class="-mt-8">
-        <template #activator="{ on, attrs }">
+      <RuiTooltip
+        :popper="{ placement: 'top' }"
+        :open-delay="400"
+        class="-mt-6"
+      >
+        <template #activator>
           <RuiButton
             variant="text"
-            v-bind="attrs"
             icon
             :disabled="!source || pending"
             :loading="pending"
-            v-on="on"
             @click="showConfirmation(source)"
           >
             <RuiIcon name="delete-bin-line" />
@@ -135,18 +130,10 @@ const css = useCssModule();
       </RuiTooltip>
     </div>
 
-    <ActionStatusIndicator v-if="status" :status="status" />
+    <ActionStatusIndicator
+      v-if="status"
+      class="mt-4"
+      :status="status"
+    />
   </div>
 </template>
-
-<style module lang="scss">
-.ens-input {
-  :global {
-    .v-select {
-      &__selections {
-        min-height: auto !important;
-      }
-    }
-  }
-}
-</style>

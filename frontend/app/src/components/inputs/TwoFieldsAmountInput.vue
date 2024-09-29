@@ -1,23 +1,28 @@
 <script lang="ts" setup>
-import { type Ref } from 'vue';
 import AmountInput from '@/components/inputs/AmountInput.vue';
 
-withDefaults(
+defineOptions({
+  inheritAttrs: false,
+});
+
+const props = withDefaults(
   defineProps<{
     primaryValue: string;
     secondaryValue: string;
     label: { primary?: string; secondary?: string };
     errorMessages?: {
-      primary?: Record<string, string | string[]>;
-      secondary?: Record<string, string | string[]>;
+      primary?: string | string[];
+      secondary?: string | string[];
     };
     loading?: boolean;
+    disabled?: boolean;
   }>(),
   {
     label: () => ({}),
     errorMessages: () => ({}),
-    loading: false
-  }
+    loading: false,
+    disabled: false,
+  },
 );
 
 const emit = defineEmits<{
@@ -26,74 +31,92 @@ const emit = defineEmits<{
   (e: 'update:reversed', reversed: boolean): void;
 }>();
 
-const reversed: Ref<boolean> = ref(false);
+const { errorMessages } = toRefs(props);
 
-const rootAttrs = useAttrs();
+const primaryInput = ref<InstanceType<typeof AmountInput> | null>(null);
+const secondaryInput = ref<InstanceType<typeof AmountInput> | null>(null);
 
-const reverse = () => {
+const reversed = ref<boolean>(false);
+
+function reverse() {
   const newReversed = !get(reversed);
   set(reversed, newReversed);
   emit('update:reversed', newReversed);
 
   nextTick(() => {
-    if (!newReversed) {
+    if (!newReversed)
       get(primaryInput)?.focus();
-    } else {
-      get(secondaryInput)?.focus();
-    }
+    else get(secondaryInput)?.focus();
   });
-};
+}
 
-const primaryInput: Ref<InstanceType<typeof AmountInput> | null> = ref(null);
-const secondaryInput: Ref<InstanceType<typeof AmountInput> | null> = ref(null);
-
-const updatePrimaryValue = (value: string) => {
+function updatePrimaryValue(value: string) {
   emit('update:primary-value', value);
-};
+}
 
-const updateSecondaryValue = (value: string) => {
+function updateSecondaryValue(value: string) {
   emit('update:secondary-value', value);
-};
+}
+
+const aggregatedErrorMessages = computed(() => {
+  const val = get(errorMessages);
+  const primary = val?.primary || [];
+  const secondary = val?.secondary || [];
+
+  return [...arrayify(primary), ...arrayify(secondary)];
+});
+
+const focused = ref<boolean>(false);
 </script>
 
 <template>
   <div
     class="wrapper flex"
     :class="{
-      'flex-column': !reversed,
-      'flex-column-reverse': reversed
+      'flex-col': !reversed,
+      'flex-col-reverse': reversed,
+      'focused': focused,
     }"
+    v-bind="$attrs"
   >
     <AmountInput
       ref="primaryInput"
-      :value="primaryValue"
-      :disabled="reversed || rootAttrs.disabled"
-      :hide-details="reversed"
-      filled
+      :model-value="primaryValue"
+      :disabled="reversed || disabled"
+      :hide-details="!reversed"
+      variant="filled"
       persistent-hint
       data-cy="primary"
-      :class="`${!reversed ? 'v-input--is-enabled' : ''}`"
-      v-bind="rootAttrs"
+      :class="`${!reversed ? 'input__enabled' : ''}`"
       :label="label.primary"
-      :error-messages="errorMessages.primary"
-      :loading="!reversed && loading"
-      @input="updatePrimaryValue($event)"
+      :error-messages="aggregatedErrorMessages"
+      @update:model-value="updatePrimaryValue($event)"
+      @focus="focused = true"
+      @blur="focused = false"
+    />
+
+    <RuiProgress
+      class="relative z-[1]"
+      :class="{ 'opacity-0': !loading }"
+      variant="indeterminate"
+      thickness="4"
+      color="primary"
     />
 
     <AmountInput
       ref="secondaryInput"
-      :value="secondaryValue"
-      :disabled="!reversed || rootAttrs.disabled"
-      :hide-details="!reversed"
-      filled
+      :model-value="secondaryValue"
+      :disabled="!reversed || disabled"
+      :hide-details="reversed"
+      variant="filled"
       persistent-hint
       data-cy="secondary"
-      :class="`${reversed ? 'v-input--is-enabled' : ''}`"
-      v-bind="rootAttrs"
+      :class="`${reversed ? 'input__enabled' : ''}`"
       :label="label.secondary"
-      :error-messages="errorMessages.secondary"
-      :loading="reversed && loading"
-      @input="updateSecondaryValue($event)"
+      :error-messages="aggregatedErrorMessages"
+      @update:model-value="updateSecondaryValue($event)"
+      @focus="focused = true"
+      @blur="focused = false"
     />
 
     <RuiButton
@@ -103,100 +126,85 @@ const updateSecondaryValue = (value: string) => {
       data-cy="grouped-amount-input__swap-button"
       @click="reverse()"
     >
-      <RuiIcon size="16" name="arrow-up-down-line" />
+      <RuiIcon
+        size="16"
+        name="arrow-up-down-line"
+      />
     </RuiButton>
   </div>
 </template>
 
 <style scoped lang="scss">
 .wrapper {
-  position: relative;
+  @apply relative;
 
-  :deep(.v-input) {
-    position: static;
+  > * {
+    margin: -1px 0;
+  }
 
-    .v-input {
-      &__slot {
-        margin-bottom: 0;
-        background: transparent !important;
-      }
+  :deep(label) {
+    @apply border-t-0 border border-[#0000006b];
+    @apply rounded-b rounded-t-none #{!important};
+    @apply bg-rui-grey-300 bg-opacity-40 #{!important};
+  }
+
+  /* stylelint-disable selector-class-pattern,selector-nested-pattern */
+
+  :deep(.input__enabled) {
+    label {
+      @apply border-t;
+      @apply border-b #{!important};
+      @apply rounded-t rounded-b-none #{!important};
+      @apply bg-transparent #{!important};
     }
+  }
+  /* stylelint-enable selector-class-pattern,selector-nested-pattern */
 
-    &.v-input {
-      &--is-disabled {
-        .v-input {
-          &__control {
-            .v-input {
-              &__slot {
-                &::before {
-                  content: none;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      &--is-enabled {
-        &::before {
-          content: '';
-          width: 100%;
-          height: 100%;
-          position: absolute;
-          top: 0;
-          left: 0;
-          border: 1px solid rgba(0, 0, 0, 0.42);
-          border-radius: 4px;
-        }
-
-        &.v-input {
-          &--is-focused {
-            &::before {
-              border: 2px solid var(--v-primary-base) !important;
-            }
-          }
-        }
-
-        &.error {
-          &--text {
-            &::before {
-              border: 2px solid var(--v-error-base) !important;
-            }
-          }
-        }
-      }
+  &.focused {
+    :deep(label) {
+      @apply border-rui-primary #{!important};
+      @apply border-2;
     }
+  }
 
-    .v-text-field {
-      &__details {
-        position: absolute;
-        bottom: -30px;
-        width: 100%;
+  :deep([class*='with-error']) {
+    label {
+      @apply border-rui-error #{!important};
+      @apply border-2;
+    }
+  }
+
+  :deep(input) {
+    @apply pt-6 pb-2 #{!important};
+
+    &:not(:placeholder-shown),
+    &:focus {
+      + label {
+        @apply leading-7 #{!important};
       }
     }
   }
 }
 
 .swap-button {
-  position: absolute;
-  right: 20px;
-  top: 50%;
-  transform: translateY(-50%);
+  @apply absolute right-5 top-14 transform -translate-y-1/2 z-[1];
 }
 
-.theme {
-  &--dark {
-    .wrapper {
-      /* stylelint-disable selector-class-pattern,selector-nested-pattern */
-
-      :deep(.v-input--is-enabled),
-      :deep(.v-input__slot) {
-        &::before {
-          border-color: hsla(0, 0%, 100%, 0.24);
-        }
-      }
-      /* stylelint-enable selector-class-pattern,selector-nested-pattern */
+.dark {
+  .wrapper {
+    :deep(label) {
+      @apply border-white/[0.42];
+      @apply bg-rui-grey-800 bg-opacity-40 #{!important};
     }
+
+    /* stylelint-disable selector-class-pattern,selector-nested-pattern */
+
+    :deep(.input__enabled) {
+      label {
+        @apply bg-transparent #{!important};
+      }
+    }
+    /* stylelint-enable selector-class-pattern,selector-nested-pattern */
   }
 }
 </style>

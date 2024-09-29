@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { type BigNumber } from '@rotki/common';
+import type { BigNumber } from '@rotki/common';
 
 defineProps<{
   loading: boolean;
@@ -35,7 +35,10 @@ const { t } = useI18n();
         </RuiTooltip>
       </template>
 
-      <PercentageDisplay justify="start" :value="effectiveInterestRate" />
+      <PercentageDisplay
+        justify="start"
+        :value="effectiveInterestRate.isNaN() ? undefined : effectiveInterestRate.toString()"
+      />
     </StatCardColumn>
     <StatCardColumn premium-only>
       <template #title>

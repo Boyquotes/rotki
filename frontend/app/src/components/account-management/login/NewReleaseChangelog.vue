@@ -2,14 +2,18 @@
 const { t } = useI18n();
 
 const { version, link } = useUpdateMessage();
-const { href, onLinkClick, linkTarget } = useLinks(link);
-const css = useCssModule();
 </script>
 
 <template>
-  <div class="flex flex-col align-start gap-4 w-full p-6" :class="css.card">
+  <div
+    class="flex flex-col items-start gap-4 w-full p-6"
+    :class="$style.card"
+  >
     <div class="bg-white rounded-[0.625rem] p-3">
-      <RuiIcon color="primary" name="checkbox-circle-line" />
+      <RuiIcon
+        color="primary"
+        name="checkbox-circle-line"
+      />
     </div>
     <div class="text-h6 text-rui-text">
       {{ t('welcome.update.title') }}
@@ -18,15 +22,14 @@ const css = useCssModule();
       {{ t('welcome.update.text', { version }) }}
     </div>
 
-    <RuiButton
-      tag="a"
-      color="primary"
-      :target="linkTarget"
-      :href="href"
-      @click="onLinkClick()"
+    <ExternalLink
+      :url="link"
+      custom
     >
-      {{ t('welcome.update.learn_more') }}
-    </RuiButton>
+      <RuiButton color="primary">
+        {{ t('welcome.update.learn_more') }}
+      </RuiButton>
+    </ExternalLink>
   </div>
 </template>
 

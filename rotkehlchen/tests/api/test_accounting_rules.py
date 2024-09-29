@@ -1,12 +1,15 @@
 import json
+import random
 from http import HTTPStatus
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Literal, get_args
 
 import pytest
 import requests
 
 from rotkehlchen.accounting.structures.balance import Balance
+from rotkehlchen.accounting.types import EventAccountingRuleStatus
 from rotkehlchen.api.server import APIServer
 from rotkehlchen.chain.ethereum.modules.compound.constants import CPT_COMPOUND
 from rotkehlchen.chain.evm.accounting.structures import TxAccountingTreatment
@@ -21,6 +24,7 @@ from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     assert_simple_ok_response,
 )
 from rotkehlchen.tests.utils.factories import make_evm_tx_hash
@@ -31,11 +35,10 @@ from rotkehlchen.types import Location, TimestampMS
 def _update_rules(rotki: Rotkehlchen, latest_accounting_rules: Path) -> None:
     """Pull remote accounting rules and save them"""
     data_updater = RotkiDataUpdater(msg_aggregator=rotki.msg_aggregator, user_db=rotki.data.db)
-    with open(latest_accounting_rules, encoding='utf-8') as f:
-        data_updater.update_accounting_rules(
-            data=json.loads(f.read())['accounting_rules'],
-            version=999999,
-        )
+    data_updater.update_accounting_rules(
+        data=json.loads(latest_accounting_rules.read_text(encoding='utf-8'))['accounting_rules'],
+        version=999999,
+    )
 
 
 def _setup_conflict_tests(
@@ -53,6 +56,7 @@ def _setup_conflict_tests(
         'event_type': HistoryEventType.SPEND.serialize(),
         'event_subtype': HistoryEventSubType.RETURN_WRAPPED.serialize(),
         'counterparty': 'compound',
+        'accounting_treatment': TxAccountingTreatment.SWAP.serialize(),
     }
     rule_2 = {
         'taxable': {'value': True, 'linked_setting': 'include_crypto2crypto'},
@@ -78,6 +82,25 @@ def _setup_conflict_tests(
     with rotki.data.db.conn.read_ctx() as cursor:
         cursor.execute('SELECT local_id FROM unresolved_remote_conflicts')
         assert cursor.fetchall() == [(1,), (2,)]
+
+
+@pytest.mark.parametrize('initialize_accounting_rules', [True])
+def test_query_rules(rotkehlchen_api_server):
+    """Test that querying accounting rules works fine"""
+    response = requests.post(
+        api_url_for(  # test matching counterparty None
+            rotkehlchen_api_server,
+            'accountingrulesresource',
+        ), json={
+            'event_types': ['deposit'],
+            'event_subtypes': ['deposit_asset'],
+            'counterparties': [None],
+        },
+    )
+    result = assert_proper_sync_response_with_result(response)
+    assert len(result['entries']) == 1
+    assert result['entries_found'] == 1
+    assert result['entries_total'] != 0
 
 
 @pytest.mark.parametrize('db_settings', [{'include_crypto2crypto': False}])
@@ -110,14 +133,14 @@ def test_manage_rules(rotkehlchen_api_server, db_settings):
             'accountingrulesresource',
         ), json=rule_1,
     )
-    assert_proper_response_with_result(response)
+    assert_proper_sync_response_with_result(response)
     response = requests.put(
         api_url_for(
             rotkehlchen_api_server,
             'accountingrulesresource',
         ), json=rule_2,
     )
-    assert_proper_response_with_result(response)
+    assert_proper_sync_response_with_result(response)
 
     # now try to query them
     rule_1_copy = rule_1.copy()
@@ -128,7 +151,7 @@ def test_manage_rules(rotkehlchen_api_server, db_settings):
             'accountingrulesresource',
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries'] == [
         {'identifier': 2, **rule_2},
         {'identifier': 1, **rule_1_copy, 'accounting_treatment': None},
@@ -145,7 +168,7 @@ def test_manage_rules(rotkehlchen_api_server, db_settings):
             'event_types': ['deposit', 'withdrawal'],
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries'] == [
         {'identifier': 1, **rule_1, 'accounting_treatment': None},
     ]
@@ -161,7 +184,7 @@ def test_manage_rules(rotkehlchen_api_server, db_settings):
             'event_types': ['adjustment'],
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries'] == []
     assert result['entries_found'] == 0
     assert result['entries_total'] == 2
@@ -188,7 +211,7 @@ def test_manage_rules(rotkehlchen_api_server, db_settings):
             'accountingrulesresource',
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries'] == [
         {'identifier': 2, **rule_2},
         {'identifier': 1, **rule_1, 'accounting_treatment': None},
@@ -230,7 +253,7 @@ def test_manage_rules(rotkehlchen_api_server, db_settings):
             'accountingrulesresource',
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries_found'] == 1
     assert len(result['entries']) == 1
     assert result['entries_total'] == 1
@@ -243,7 +266,7 @@ def test_rules_info(rotkehlchen_api_server):
             'accountinglinkablepropertiesresource',
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert set(result.keys()) == set(get_args(LINKABLE_ACCOUNTING_PROPERTIES))
 
 
@@ -326,7 +349,7 @@ def test_listing_conflicts(
             'accountingrulesconflictsresource',
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries'] == [
         {
             'local_id': 2,
@@ -357,7 +380,7 @@ def test_listing_conflicts(
                     'value': False,
                     'linked_setting': 'include_crypto2crypto',
                 },
-                'accounting_treatment': None,
+                'accounting_treatment': 'swap',
                 'event_type': 'spend',
                 'event_subtype': 'return wrapped',
                 'counterparty': 'compound',
@@ -418,9 +441,12 @@ def test_cache_invalidation(rotkehlchen_api_server: APIServer):
             'historyeventresource',
         ), json={'event_identifiers': [events[0].event_identifier]},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 2
-    assert all(entry['missing_accounting_rule'] for entry in result['entries'])
+    assert all(
+        entry['event_accounting_rule_status'] == EventAccountingRuleStatus.NOT_PROCESSED.serialize()  # noqa: E501
+        for entry in result['entries']
+    )
 
     # add a rule for the return event and check that the cache was updated
     response = requests.put(
@@ -445,10 +471,10 @@ def test_cache_invalidation(rotkehlchen_api_server: APIServer):
             'historyeventresource',
         ), json={'event_identifiers': [events[0].event_identifier]},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 2
-    assert 'missing_accounting_rule' not in result['entries'][0]
-    assert result['entries'][1]['missing_accounting_rule'] is True
+    assert result['entries'][0]['event_accounting_rule_status'] == EventAccountingRuleStatus.HAS_RULE.serialize()  # noqa: E501
+    assert result['entries'][1]['event_accounting_rule_status'] == EventAccountingRuleStatus.NOT_PROCESSED.serialize()  # noqa: E501
 
     # update a rule to check that it removes the cache from the second event too
     response = requests.patch(
@@ -474,10 +500,10 @@ def test_cache_invalidation(rotkehlchen_api_server: APIServer):
             'historyeventresource',
         ), json={'event_identifiers': [events[0].event_identifier]},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 2
-    for entry in result['entries']:
-        assert 'missing_accounting_rule' not in entry
+    assert result['entries'][0]['event_accounting_rule_status'] == EventAccountingRuleStatus.HAS_RULE.serialize()  # noqa: E501
+    assert result['entries'][1]['event_accounting_rule_status'] == EventAccountingRuleStatus.PROCESSED.serialize()  # noqa: E501
 
     # delete accounting rule and check that both events will not be processed now
     # update a rule to check that it removes the cache from the second event too
@@ -495,6 +521,146 @@ def test_cache_invalidation(rotkehlchen_api_server: APIServer):
             'historyeventresource',
         ), json={'event_identifiers': [events[0].event_identifier]},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 2
-    all(entry['missing_accounting_rule'] for entry in result['entries'])
+    all(
+        entry['event_accounting_rule_status'] == EventAccountingRuleStatus.NOT_PROCESSED.serialize()  # noqa: E501
+        for entry in result['entries']
+    )
+
+
+@pytest.mark.parametrize('initialize_accounting_rules', [True])
+def test_import_export_accounting_rules(rotkehlchen_api_server: 'APIServer'):
+    """Test that exporting and importing accounting rules works fine."""
+    async_query = random.choice([True, False])
+    with rotkehlchen_api_server.rest_api.rotkehlchen.data.db.conn.read_ctx() as cursor:
+        initial_rules = cursor.execute(
+            'SELECT * FROM accounting_rules WHERE identifier IN (1, 82);',
+        ).fetchall()
+        initial_properties = cursor.execute('SELECT * FROM linked_rules_properties').fetchall()
+
+    with TemporaryDirectory() as temp_directory:
+        response = requests.post(
+            api_url_for(  # export the accounting rules as a response json
+                rotkehlchen_api_server,
+                'accountingrulesexportresource',
+            ), json={'async_query': async_query},
+        )
+        response_result = assert_proper_response_with_result(
+            response=response,
+            rotkehlchen_api_server=rotkehlchen_api_server,
+            async_query=async_query,
+        )
+
+        response = requests.post(
+            api_url_for(  # export the accounting rules into a json file
+                rotkehlchen_api_server,
+                'accountingrulesexportresource',
+            ), json={'async_query': async_query, 'directory_path': temp_directory},
+        )
+        assert_proper_response_with_result(
+            response=response,
+            rotkehlchen_api_server=rotkehlchen_api_server,
+            async_query=async_query,
+        )
+
+        rules_file_path = Path(temp_directory) / 'accounting_rules.json'
+        with open(rules_file_path, encoding='utf-8') as file:
+            rules_data = json.load(file)
+
+        assert rules_data == response_result
+        assert len(rules_data['accounting_rules']) == 82
+        assert rules_data['accounting_rules']['1'] == {
+            'event_type': 'deposit',
+            'event_subtype': 'deposit asset',
+            'counterparty': 'aave-v1',
+            'rule': {
+                'taxable': {'value': False},
+                'count_entire_amount_spend': {'value': False},
+                'count_cost_basis_pnl': {'value': True},
+                'accounting_treatment': 'swap',
+            },
+        }
+        assert rules_data['accounting_rules']['82'] == {
+            'event_type': 'deposit',
+            'event_subtype': 'fee',
+            'counterparty': None,
+            'rule': {
+                'taxable': {'value': True},
+                'count_entire_amount_spend': {'value': False},
+                'count_cost_basis_pnl': {'value': True},
+                'accounting_treatment': None,
+            },
+        }
+        assert rules_data['linked_properties'] == {
+            '1': {
+                'accounting_rule': 46,
+                'property_name': 'count_cost_basis_pnl',
+                'setting_name': 'include_crypto2crypto',
+            },
+            '2': {
+                'accounting_rule': 65,
+                'property_name': 'taxable',
+                'setting_name': 'include_gas_costs',
+            },
+            '3': {
+                'accounting_rule': 65,
+                'property_name': 'count_entire_amount_spend',
+                'setting_name': 'include_gas_costs',
+            },
+            '4': {
+                'accounting_rule': 65,
+                'property_name': 'count_cost_basis_pnl',
+                'setting_name': 'include_crypto2crypto',
+            },
+        }
+
+        # edit the rules and setting properties
+        with rotkehlchen_api_server.rest_api.rotkehlchen.data.db.conn.write_ctx() as write_cursor:
+            write_cursor.execute(
+                'UPDATE accounting_rules SET identifier = 83 WHERE identifier = 82;',
+            )
+            write_cursor.execute(
+                'UPDATE linked_rules_properties SET setting_name = "include_gas_costs" WHERE identifier = 2;',  # noqa: E501
+            )
+
+        response = requests.put(
+            api_url_for(  # import the accounting rules from this json file
+                rotkehlchen_api_server,
+                'accountingrulesimportresource',
+            ), json={'async_query': async_query, 'filepath': rules_file_path.as_posix()},
+        )
+        response_result = assert_proper_response_with_result(
+            response=response,
+            rotkehlchen_api_server=rotkehlchen_api_server,
+            async_query=async_query,
+        )
+
+        with open(rules_file_path, encoding='utf-8') as file:
+            response = requests.patch(
+                api_url_for(  # also as multipart/form-data
+                    rotkehlchen_api_server,
+                    'accountingrulesimportresource',
+                ), data={'async_query': async_query}, files={'filepath': file},
+            )
+        response_result = assert_proper_response_with_result(
+            response=response,
+            rotkehlchen_api_server=rotkehlchen_api_server,
+            async_query=async_query,
+        )
+
+    # Check that the imported rules are in the DB
+    with rotkehlchen_api_server.rest_api.rotkehlchen.data.db.conn.read_ctx() as cursor:
+        assert cursor.execute(
+            'SELECT * FROM accounting_rules WHERE identifier IN (1, 82);',
+        ).fetchall() == [
+            (1, 'deposit', 'deposit asset', 'aave-v1', 0, 0, 1, 'A'),
+            (82, 'deposit', 'fee', 'NONE', 1, 0, 1, None),
+        ] == initial_rules
+
+        assert cursor.execute('SELECT * FROM linked_rules_properties').fetchall() == [
+            (1, 46, 'count_cost_basis_pnl', 'include_crypto2crypto'),
+            (2, 65, 'taxable', 'include_gas_costs'),
+            (3, 65, 'count_entire_amount_spend', 'include_gas_costs'),
+            (4, 65, 'count_cost_basis_pnl', 'include_crypto2crypto'),
+        ] == initial_properties

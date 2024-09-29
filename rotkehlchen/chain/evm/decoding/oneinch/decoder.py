@@ -1,4 +1,4 @@
-from abc import ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 from rotkehlchen.chain.ethereum.utils import asset_normalized_value
@@ -14,14 +14,14 @@ from rotkehlchen.history.events.structures.types import HistoryEventSubType, His
 from rotkehlchen.types import ChecksumEvmAddress
 
 if TYPE_CHECKING:
+    from rotkehlchen.chain.evm.decoding.base import BaseDecoderTools
     from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
     from rotkehlchen.user_messages import MessagesAggregator
-    from rotkehlchen.chain.evm.decoding.base import BaseDecoderTools
 
-from .constants import CPT_ONEINCH, ONEINCH_ICON, ONEINCH_LABEL
+from .constants import CPT_ONEINCH, ONEINCH_ICON
 
 
-class OneinchCommonDecoder(DecoderInterface, metaclass=ABCMeta):
+class OneinchCommonDecoder(DecoderInterface, ABC):
 
     def __init__(
             self,
@@ -87,7 +87,7 @@ class OneinchCommonDecoder(DecoderInterface, metaclass=ABCMeta):
     def generate_counterparty_details(counterparty: str) -> tuple[CounterpartyDetails, ...]:
         return (CounterpartyDetails(
             identifier=counterparty,
-            label=ONEINCH_LABEL,
+            label=counterparty.replace('-v', ' V'),
             image=ONEINCH_ICON,
         ),)
 

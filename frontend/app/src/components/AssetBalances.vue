@@ -1,136 +1,167 @@
 <script setup lang="ts">
-import { type AssetBalanceWithPrice } from '@rotki/common';
-import { type Ref } from 'vue';
 import { some } from 'lodash-es';
-import { type DataTableHeader } from '@/types/vuetify';
 import { isEvmNativeToken } from '@/types/asset';
+import type { AssetBalance, AssetBalanceWithPrice } from '@rotki/common';
+import type { DataTableColumn, DataTableSortData } from '@rotki/ui-library';
+
+defineOptions({
+  name: 'AssetBalances',
+});
 
 const props = withDefaults(
   defineProps<{
     balances: AssetBalanceWithPrice[];
+    details?: {
+      groupId: string;
+      chains: string[];
+    };
     loading?: boolean;
     hideTotal?: boolean;
     hideBreakdown?: boolean;
+    stickyHeader?: boolean;
+    isLiability?: boolean;
+    allBreakdown?: boolean;
   }>(),
   {
     loading: false,
     hideTotal: false,
-    hideBreakdown: false
-  }
+    hideBreakdown: false,
+    stickyHeader: false,
+    details: undefined,
+    isLiability: false,
+    allBreakdown: false,
+  },
 );
 
 const { t } = useI18n();
 
 const { balances } = toRefs(props);
-const expanded: Ref<AssetBalanceWithPrice[]> = ref([]);
+const expanded = ref<AssetBalanceWithPrice[]>([]);
 
-const total = computed(() =>
-  bigNumberSum(balances.value.map(({ usdValue }) => usdValue))
-);
+const total = computed(() => bigNumberSum(balances.value.map(({ usdValue }) => usdValue)));
 
 const { currencySymbol } = storeToRefs(useGeneralSettingsStore());
 const { assetInfo } = useAssetInfoRetrieval();
 
-const tableHeaders = computed<DataTableHeader[]>(() => [
+const sort = ref<DataTableSortData<AssetBalanceWithPrice>>({
+  column: 'usdValue',
+  direction: 'desc' as const,
+});
+
+const tableHeaders = computed<DataTableColumn<AssetBalanceWithPrice>[]>(() => [
   {
-    text: t('common.asset').toString(),
-    value: 'asset',
-    class: 'text-no-wrap'
+    label: t('common.asset'),
+    key: 'asset',
+    class: 'text-no-wrap w-full',
+    cellClass: 'py-0',
+    sortable: true,
   },
   {
-    text: t('common.price_in_symbol', {
-      symbol: get(currencySymbol)
-    }).toString(),
-    value: 'usdPrice',
+    label: t('common.price_in_symbol', {
+      symbol: get(currencySymbol),
+    }),
+    key: 'usdPrice',
     align: 'end',
-    class: 'text-no-wrap'
+    cellClass: 'py-0',
+    sortable: true,
   },
   {
-    text: t('common.amount').toString(),
-    value: 'amount',
+    label: t('common.amount'),
+    key: 'amount',
     align: 'end',
-    width: '50%'
+    cellClass: 'py-0',
+    sortable: true,
   },
   {
-    text: t('common.value_in_symbol', {
-      symbol: get(currencySymbol)
-    }).toString(),
-    value: 'usdValue',
+    label: t('common.value_in_symbol', {
+      symbol: get(currencySymbol),
+    }),
+    key: 'usdValue',
     align: 'end',
-    class: 'text-no-wrap'
+    class: 'text-no-wrap',
+    cellClass: 'py-0',
+    sortable: true,
   },
-  {
-    text: '',
-    width: '48px',
-    value: 'expand',
-    sortable: false
-  }
 ]);
 
-const sortItems = getSortItems(asset => get(assetInfo(asset)));
+const sortItems = getSortItems<AssetBalanceWithPrice>(asset => get(assetInfo(asset)));
+
+const sorted = computed<AssetBalanceWithPrice[]>(() => {
+  const sortBy = get(sort);
+  const data = [...get(balances)];
+  if (!Array.isArray(sortBy) && sortBy?.column)
+    return sortItems(data, [sortBy.column as keyof AssetBalance], [sortBy.direction === 'desc']);
+
+  return data;
+});
 
 const isExpanded = (asset: string) => some(get(expanded), { asset });
 
-const expand = (item: AssetBalanceWithPrice) => {
+function expand(item: AssetBalanceWithPrice) {
   set(expanded, isExpanded(item.asset) ? [] : [item]);
-};
+}
+
+function getAssets(item: AssetBalanceWithPrice): string[] {
+  return item.breakdown?.map(entry => entry.asset) ?? [];
+}
 </script>
 
 <template>
-  <DataTable
-    :headers="tableHeaders"
-    :items="balances"
+  <RuiDataTable
+    v-model:sort.external="sort"
+    :cols="tableHeaders"
+    :rows="sorted"
     :loading="loading"
-    single-expand
     :expanded="expanded"
     :loading-text="t('asset_balances.loading')"
-    :custom-sort="sortItems"
-    sort-by="usdValue"
-    item-key="asset"
+    :empty="{ description: t('data_table.no_data') }"
+    :sticky-header="stickyHeader"
+    row-attr="asset"
+    single-expand
+    outlined
+    dense
   >
-    <template #item.asset="{ item }">
+    <template #item.asset="{ row }">
       <AssetDetails
         opens-details
-        :asset="item.asset"
-        :is-collection-parent="!!item.breakdown"
+        :asset="row.asset"
+        :is-collection-parent="!!row.breakdown"
       />
     </template>
-    <template #item.usdPrice="{ item }">
+    <template #item.usdPrice="{ row }">
       <AmountDisplay
-        v-if="item.usdPrice && item.usdPrice.gte(0)"
+        :loading="!row.usdPrice || row.usdPrice.lt(0)"
         no-scramble
         show-currency="symbol"
-        :price-asset="item.asset"
-        :price-of-asset="item.usdPrice"
+        :price-asset="row.asset"
+        :price-of-asset="row.usdPrice"
         fiat-currency="USD"
-        :value="item.usdPrice"
+        :value="row.usdPrice"
       />
-      <div v-else class="flex justify-end">
-        <VSkeletonLoader width="70" type="text" />
-      </div>
     </template>
-    <template #item.amount="{ item }">
-      <AmountDisplay :value="item.amount" />
+    <template #item.amount="{ row }">
+      <AmountDisplay :value="row.amount" />
     </template>
-    <template #item.usdValue="{ item }">
+    <template #item.usdValue="{ row }">
       <AmountDisplay
         show-currency="symbol"
-        :amount="item.amount"
-        :price-asset="item.asset"
-        :price-of-asset="item.usdPrice"
+        :amount="row.amount"
+        :price-asset="row.asset"
+        :price-of-asset="row.usdPrice"
         fiat-currency="USD"
-        :value="item.usdValue"
+        :value="row.usdValue"
       />
     </template>
     <template
       v-if="balances.length > 0 && !hideTotal"
-      #body.append="{ isMobile }"
+      #body.append
     >
       <RowAppend
         label-colspan="3"
         :label="t('common.total')"
-        :is-mobile="isMobile"
+        :is-mobile="false"
         :right-patch-colspan="2"
+        class-name="[&>td]:p-4 text-sm"
       >
         <AmountDisplay
           fiat-currency="USD"
@@ -139,29 +170,33 @@ const expand = (item: AssetBalanceWithPrice) => {
         />
       </RowAppend>
     </template>
-    <template #expanded-item="{ item }">
-      <TableExpandContainer visible :colspan="tableHeaders.length">
-        <EvmNativeTokenBreakdown
-          v-if="!hideBreakdown && isEvmNativeToken(item.asset)"
-          blockchain-only
-          :identifier="item.asset"
-        />
-        <AssetBalances
-          v-else
-          v-bind="props"
-          hide-total
-          :balances="item.breakdown ?? []"
-        />
-      </TableExpandContainer>
-    </template>
-    <template #item.expand="{ item }">
-      <RowExpander
-        v-if="
-          item.breakdown || (!hideBreakdown && isEvmNativeToken(item.asset))
-        "
-        :expanded="isExpanded(item.asset)"
-        @click="expand(item)"
+    <template #expanded-item="{ row }">
+      <EvmNativeTokenBreakdown
+        v-if="!hideBreakdown && isEvmNativeToken(row.asset)"
+        :blockchain-only="!allBreakdown"
+        :assets="getAssets(row)"
+        :details="details"
+        :identifier="row.asset"
+        :is-liability="isLiability"
+        class="bg-white dark:bg-[#1E1E1E] my-2"
+      />
+      <AssetBalances
+        v-else
+        v-bind="props"
+        hide-total
+        :balances="row.breakdown ?? []"
+        :sticky-header="false"
+        :is-liability="isLiability"
+        :all-breakdown="allBreakdown"
+        class="bg-white dark:bg-[#1E1E1E] my-2"
       />
     </template>
-  </DataTable>
+    <template #item.expand="{ row }">
+      <RuiTableRowExpander
+        v-if="row.breakdown || (!hideBreakdown && isEvmNativeToken(row.asset))"
+        :expanded="isExpanded(row.asset)"
+        @click="expand(row)"
+      />
+    </template>
+  </RuiDataTable>
 </template>

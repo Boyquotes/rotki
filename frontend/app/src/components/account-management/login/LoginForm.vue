@@ -2,7 +2,7 @@
 import useVuelidate from '@vuelidate/core';
 import { helpers, required, requiredIf } from '@vuelidate/validators';
 import { toMessages } from '@/utils/validation';
-import { type LoginCredentials, type SyncApproval } from '@/types/login';
+import type { LoginCredentials, SyncApproval } from '@/types/login';
 
 const props = withDefaults(
   defineProps<{
@@ -11,8 +11,8 @@ const props = withDefaults(
     errors?: string[];
   }>(),
   {
-    errors: () => []
-  }
+    errors: () => [],
+  },
 );
 
 const emit = defineEmits<{
@@ -37,18 +37,17 @@ const newAccount = () => emit('new-account');
 const backendChanged = (url: string | null) => emit('backend-changed', url);
 
 const { logoutRemoteSession } = useSessionStore();
-const { usageGuideUrl } = useInterop();
-const css = useCssModule();
 
-const username: Ref<string> = ref('');
-const usernameSearch: Ref<string> = ref('');
-const password: Ref<string> = ref('');
-const rememberUsername: Ref<boolean> = ref(false);
-const rememberPassword: Ref<boolean> = ref(false);
-const customBackendDisplay: Ref<boolean> = ref(false);
-const customBackendUrl: Ref<string> = ref('');
-const customBackendSessionOnly: Ref<boolean> = ref(false);
-const customBackendSaved: Ref<boolean> = ref(false);
+const username = ref<string>('');
+const usernameSearch = ref<string>('');
+const password = ref<string>('');
+const rememberUsername = ref<boolean>(false);
+const rememberPassword = ref<boolean>(false);
+const customBackendDisplay = ref<boolean>(false);
+const customBackendUrl = ref<string>('');
+const customBackendSessionOnly = ref<boolean>(false);
+const customBackendSaved = ref<boolean>(false);
+const dynamicMessageDialog = ref<boolean>(false);
 
 const usernameRef: Ref = ref();
 const passwordRef: Ref = ref();
@@ -56,39 +55,26 @@ const passwordRef: Ref = ref();
 const savedRememberUsername = useLocalStorage('rotki.remember_username', null);
 const savedRememberPassword = useLocalStorage('rotki.remember_password', null);
 const savedUsername = useLocalStorage('rotki.username', '');
+const { welcomeMessage, activeWelcomeMessages } = useDynamicMessages();
 
 const rules = {
   username: {
-    required: helpers.withMessage(
-      t('login.validation.non_empty_username'),
-      required
-    ),
+    required: helpers.withMessage(t('login.validation.non_empty_username'), required),
     isValidUsername: helpers.withMessage(
       t('login.validation.valid_username'),
-      (v: string): boolean => !!(v && /^[\w.-]+$/.test(v))
-    )
+      (v: string): boolean => !!(v && /^[\w.-]+$/.test(v)),
+    ),
   },
   password: {
-    required: helpers.withMessage(
-      t('login.validation.non_empty_password'),
-      required
-    )
+    required: helpers.withMessage(t('login.validation.non_empty_password'), required),
   },
   customBackendUrl: {
-    required: helpers.withMessage(
-      t('login.custom_backend.validation.non_empty'),
-      requiredIf(customBackendDisplay)
-    ),
+    required: helpers.withMessage(t('login.custom_backend.validation.non_empty'), requiredIf(customBackendDisplay)),
     isValidUrl: helpers.withMessage(
       t('login.custom_backend.validation.url'),
-      (v: string): boolean =>
-        !get(customBackendDisplay) ||
-        (v.length < 300 &&
-          /^https?:\/\/(www\.)?[\w#%+.:=@~-]{1,256}(\.[\d()A-Za-z]{1,6})?\b([\w#%&()+./:=?@~-]*)$/.test(
-            v
-          ))
-    )
-  }
+      (v: string): boolean => !get(customBackendDisplay) || (v.length < 300 && isValidUrl(v)),
+    ),
+  },
 };
 
 const v$ = useVuelidate(
@@ -96,59 +82,48 @@ const v$ = useVuelidate(
   {
     username,
     password,
-    customBackendUrl
+    customBackendUrl,
   },
   {
-    $autoDirty: true
-  }
+    $autoDirty: true,
+  },
 );
 
 const { clearPassword, getPassword, isPackaged, storePassword } = useInterop();
 
-watch(
-  [username, password],
-  ([username, password], [oldUsername, oldPassword]) => {
-    // touched should not be emitted when restoring from local storage
-    if (!oldUsername && username === get(savedUsername)) {
-      return;
-    }
-    if (username !== oldUsername || password !== oldPassword) {
-      touched();
-    }
-  }
-);
+watch([username, password], ([username, password], [oldUsername, oldPassword]) => {
+  // touched should not be emitted when restoring from local storage
+  if (!oldUsername && username === get(savedUsername))
+    return;
 
-const isLoggedInError = useArraySome(errors, error =>
-  error.includes('is already logged in')
-);
+  if (username !== oldUsername || password !== oldPassword)
+    touched();
+});
+
+const isLoggedInError = useArraySome(errors, error => error.includes('is already logged in'));
 
 const usernameError = useArrayFind(errors, error => error.startsWith('User '));
-const passwordError = useArrayFind(errors, error =>
-  error.startsWith('Wrong password ')
-);
+const passwordError = useArrayFind(errors, error => error.startsWith('Wrong password '));
 
-const savedUsernames: Ref<string[]> = ref([]);
+const savedUsernames = ref<string[]>([]);
 
 const orderedUsernamesList = computed(() => {
   const search = get(usernameSearch) || '';
   const usernames = get(savedUsernames);
 
-  if (!search) {
+  if (!search)
     return usernames;
-  }
+
   return usernames.sort((a, b) => compareTextByKeyword(a, b, search));
 });
 
-const hasServerError = computed(
-  () => !!get(usernameError) || !!get(passwordError)
-);
+const hasServerError = computed(() => !!get(usernameError) || !!get(passwordError));
 
 const usernameErrors = computed(() => {
   const formErrors = [...toMessages(get(v$).username)];
   const serverError = get(usernameError);
-  if (serverError) {
+  if (serverError)
     formErrors.push(serverError);
-  }
 
   return formErrors;
 });
@@ -156,75 +131,65 @@ const usernameErrors = computed(() => {
 const passwordErrors = computed(() => {
   const formErrors = [...toMessages(get(v$).password)];
   const serverError = get(passwordError);
-  if (serverError) {
+  if (serverError)
     formErrors.push(serverError);
-  }
 
   return formErrors;
 });
 
-const logout = async () => {
+async function logout() {
   const { success } = await logoutRemoteSession();
-  if (success) {
+  if (success)
     touched();
-  }
-};
+}
 
-const serverColor = computed<string | null>(() => {
-  if (get(customBackendSessionOnly)) {
+const serverColor = computed(() => {
+  if (get(customBackendSessionOnly))
     return 'primary';
-  } else if (get(customBackendSaved)) {
+  else if (get(customBackendSaved))
     return 'success';
-  }
 
-  return null;
+  return undefined;
 });
 
-const focusElement = (element: any) => {
-  if (!element) {
+function focusElement(element: any) {
+  if (!element)
     return;
-  }
-  const input = element.$el.querySelector(
-    'input:not([type=hidden])'
-  ) as HTMLInputElement;
-  input.focus();
-};
 
-const updateFocus = () => {
+  const input = element.$el.querySelector('input:not([type=hidden])') as HTMLInputElement;
+  input.focus();
+}
+
+function updateFocus() {
   nextTick(() => {
     focusElement(get(username) ? get(passwordRef) : get(usernameRef));
   });
-};
+}
 
-const saveCustomBackend = () => {
+function saveCustomBackend() {
   saveBackendUrl({
     url: get(customBackendUrl),
-    sessionOnly: get(customBackendSessionOnly)
+    sessionOnly: get(customBackendSessionOnly),
   });
   backendChanged(get(customBackendUrl));
   set(customBackendSaved, true);
   set(customBackendDisplay, false);
-};
+}
 
-const clearCustomBackend = () => {
+function clearCustomBackend() {
   set(customBackendUrl, '');
   set(customBackendSessionOnly, false);
   deleteBackendUrl();
   backendChanged(null);
   set(customBackendSaved, false);
   set(customBackendDisplay, false);
-};
+}
 
-const checkRememberUsername = () => {
-  set(
-    rememberUsername,
-    !!get(savedRememberUsername) ||
-      !!get(savedRememberPassword) ||
-      !get(isDocker)
-  );
-};
+function checkRememberUsername() {
+  set(rememberUsername, !!get(savedRememberUsername) || !!get(savedRememberPassword) || !get(isDocker));
+}
 
-const loadSettings = async () => {
+async function loadSettings() {
   set(rememberPassword, !!get(savedRememberPassword));
   checkRememberUsername();
   set(username, get(savedUsername));
@@ -241,7 +206,7 @@ const loadSettings = async () => {
       await login();
     }
   }
-};
+}
 
 const router = useRouter();
 
@@ -251,104 +216,103 @@ onBeforeMount(async () => {
   set(savedUsernames, profiles);
   if (profiles.length === 0) {
     const { currentRoute } = router;
-    if (!currentRoute.query.disableNoUserRedirection) {
+    if (!get(currentRoute).query.disableNoUserRedirection)
       newAccount();
-    } else {
-      await router.replace({ query: {} });
-    }
+    else await router.replace({ query: {} });
   }
 });
 
-onMounted(async () => {
+onMounted(() => {
   updateFocus();
 });
 
 watch(rememberUsername, (remember: boolean, previous: boolean) => {
-  if (remember === previous) {
+  if (remember === previous)
     return;
-  }
 
   if (!remember) {
     set(savedRememberUsername, null);
     set(savedUsername, null);
-  } else {
+  }
+  else {
     set(savedRememberUsername, 'true');
   }
 });
 
 watch(rememberPassword, async (remember: boolean, previous: boolean) => {
-  if (remember === previous) {
+  if (remember === previous)
     return;
-  }
 
   if (!remember) {
     set(savedRememberPassword, null);
-    if (isPackaged) {
+    if (isPackaged)
       await clearPassword();
-    }
-  } else {
+  }
+  else {
     set(savedRememberPassword, 'true');
   }
 
   checkRememberUsername();
 });
 
-const login = async (actions?: {
-  syncApproval?: SyncApproval;
-  resumeFromBackup?: boolean;
-}) => {
+async function login(actions?: { syncApproval?: SyncApproval; resumeFromBackup?: boolean }) {
   const credentials: LoginCredentials = {
     username: get(username),
     password: get(password),
-    ...actions
+    ...actions,
   };
   emit('login', credentials);
-  if (get(rememberUsername)) {
+  if (get(rememberUsername))
     set(savedUsername, get(username));
-  }
 
-  if (get(rememberPassword) && isPackaged) {
+  if (get(rememberPassword) && isPackaged)
     await storePassword(get(username), get(password));
-  }
-};
+}
 
-const abortLogin = () => {
+function abortLogin() {
   resetSyncConflict();
   resetIncompleteUpgradeConflict();
-};
+}
 </script>
 
 <template>
   <Transition
     appear
-    enter-class="translate-y-5 opacity-0"
+    enter-from-class="translate-y-5 opacity-0"
     enter-to-class="translate-y-0 opacity-1"
     enter-active-class="transform duration-300"
-    leave-class="-translate-y-0 opacity-1"
+    leave-from-class="-translate-y-0 opacity-1"
     leave-to-class="-translate-y-5 opacity-0"
     leave-active-class="transform duration-100"
   >
-    <div :class="css.login">
-      <div :class="css.login__wrapper">
+    <div :class="$style.login">
+      <div :class="$style.login__wrapper">
         <h4 class="text-h4 mb-3">
           {{ t('login.title') }}
         </h4>
 
         <div class="text-body-1 text-rui-text-secondary mb-8">
-          <p class="mb-3">{{ t('login.description.welcome') }}</p>
-          <i18n path="login.description.more_details" tag="p">
+          <p class="mb-3">
+            {{ t('login.description.welcome') }}
+          </p>
+          <i18n-t
+            keypath="login.description.more_details"
+            tag="p"
+          >
             <template #documentation>
-              <BaseExternalLink
+              <ExternalLink
                 :text="t('login.description.our_docs')"
-                :href="usageGuideUrl"
-                class="underline !text-rui-text-secondary"
+                :url="externalLinks.usageGuide"
               />
             </template>
-          </i18n>
+          </i18n-t>
         </div>
 
         <div>
-          <form novalidate @submit.stop.prevent="login()">
+          <form
+            novalidate
+            @submit.stop.prevent="login()"
+          >
             <RuiTextField
               v-if="isDocker || isTest"
               ref="usernameRef"
@@ -363,27 +327,32 @@ const abortLogin = () => {
               data-cy="username-input"
               dense
             />
-            <VAutocomplete
+            <RuiAutoComplete
               v-else
               ref="usernameRef"
               v-model="username"
-              :search-input.sync="usernameSearch"
+              v-model:search-input="usernameSearch"
               :label="t('login.label_username')"
-              :items="orderedUsernamesList"
+              :options="orderedUsernamesList"
               :disabled="loading || conflictExist || customBackendDisplay"
               :error-messages="usernameErrors"
               data-cy="username-input"
-              class="mb-2"
+              class="mb-2 [&_[data-id=activator]]:bg-transparent"
               auto-select-first
-              validate-on-blur
               :hide-no-data="savedUsernames.length > 0"
               clearable
-              outlined
+              variant="outlined"
+              :item-height="38"
               dense
             >
+              <template #item="{ item }">
+                <div class="py-1">
+                  {{ item }}
+                </div>
+              </template>
               <template #no-data>
                 <div class="px-4 py-2 text-body-2 font-medium">
-                  <i18n path="login.no_profiles_found">
+                  <i18n-t keypath="login.no_profiles_found">
                     <template #create_account>
                       <RuiButton
                         color="primary"
@@ -391,16 +360,15 @@ const abortLogin = () => {
                         class="text-[1em] py-0 inline px-1"
                         :disabled="loading"
                         type="button"
-                        data-cy="new-account"
                         @click="newAccount()"
                       >
                         {{ t('login.button_create_account') }}
                       </RuiButton>
                     </template>
-                  </i18n>
+                  </i18n-t>
                 </div>
               </template>
-            </VAutocomplete>
+            </RuiAutoComplete>
 
             <RuiRevealableTextField
               ref="passwordRef"
@@ -421,12 +389,10 @@ const abortLogin = () => {
                 <RuiCheckbox
                   v-if="isDocker"
                   v-model="rememberUsername"
-                  :disabled="
-                    customBackendDisplay || rememberPassword || loading
-                  "
+                  :disabled="customBackendDisplay || rememberPassword || loading"
                   color="primary"
                   hide-details
-                  :class="css.remember"
+                  :class="$style.remember"
                 >
                   {{ t('login.remember_username') }}
                 </RuiCheckbox>
@@ -440,27 +406,30 @@ const abortLogin = () => {
                       :disabled="customBackendDisplay || loading"
                       color="primary"
                       hide-details
-                      :class="css.remember"
+                      :class="$style.remember"
                     >
                       {{ t('login.remember_password') }}
                     </RuiCheckbox>
                   </div>
                   <RuiTooltip
-                    open-delay="400"
-                    close-delay="0"
+                    :open-delay="400"
+                    :close-delay="0"
                     class="ml-2"
                     tooltip-class="max-w-[16rem]"
                     :text="t('login.remember_password_tooltip')"
                   >
                     <template #activator>
-                      <RuiIcon name="question-line" color="primary" />
+                      <RuiIcon
+                        name="question-line"
+                        color="primary"
+                      />
                     </template>
                   </RuiTooltip>
                 </div>
               </div>
               <RuiTooltip
-                open-delay="400"
-                close-delay="0"
+                :open-delay="400"
+                :close-delay="0"
                 :text="t('login.custom_backend.tooltip')"
               >
                 <template #activator>
@@ -471,16 +440,15 @@ const abortLogin = () => {
                     icon
                     @click="customBackendDisplay = !customBackendDisplay"
                   >
-                    <RuiIcon name="server-line" :color="serverColor" />
+                    <RuiIcon
+                      name="server-line"
+                      :color="serverColor"
+                    />
                     <template #append>
                       <RuiIcon
                         size="16"
                         class="-ml-2"
-                        :name="
-                          customBackendDisplay
-                            ? 'arrow-up-s-line'
-                            : 'arrow-down-s-line'
-                        "
+                        :name="customBackendDisplay ? 'arrow-up-s-line' : 'arrow-down-s-line'"
                       />
                     </template>
                   </RuiButton>
@@ -489,10 +457,10 @@ const abortLogin = () => {
             </div>
 
             <Transition
-              enter-class="h-0 opacity-0"
+              enter-from-class="h-0 opacity-0"
               enter-to-class="h-full opacity-1"
               enter-active-class="transition duration-300"
-              leave-class="h-full opacity-1"
+              leave-from-class="h-full opacity-1"
               leave-to-class="h-0 opacity-0"
               leave-active-class="transition duration-100"
             >
@@ -504,9 +472,7 @@ const abortLogin = () => {
                   v-model="customBackendUrl"
                   color="primary"
                   variant="outlined"
-                  :error-messages="
-                    v$.customBackendUrl.$errors.map(e => e.$message)
-                  "
+                  :error-messages="toMessages(v$.customBackendUrl)"
                   :disabled="customBackendSaved"
                   :label="t('login.custom_backend.label')"
                   :placeholder="t('login.custom_backend.placeholder')"
@@ -514,7 +480,10 @@ const abortLogin = () => {
                   dense
                 >
                   <template #prepend>
-                    <RuiIcon name="server-line" :color="serverColor" />
+                    <RuiIcon
+                      name="server-line"
+                      :color="serverColor"
+                    />
                   </template>
                   <template #append>
                     <RuiButton
@@ -526,7 +495,11 @@ const abortLogin = () => {
                       icon
                       @click="saveCustomBackend()"
                     >
-                      <RuiIcon name="save-2-fill" color="primary" size="20" />
+                      <RuiIcon
+                        name="save-2-fill"
+                        color="primary"
+                        size="20"
+                      />
                     </RuiButton>
                     <RuiButton
                       v-else
@@ -547,7 +520,7 @@ const abortLogin = () => {
 
                 <RuiCheckbox
                   v-model="customBackendSessionOnly"
-                  :class="css.remember"
+                  :class="$style.remember"
                   color="primary"
                   hide-details
                   :disabled="customBackendSaved"
@@ -557,25 +530,18 @@ const abortLogin = () => {
               </div>
             </Transition>
 
-            <PremiumSyncConflictAlert
-              @proceed="login({ syncApproval: $event })"
-            />
+            <PremiumSyncConflictAlert @proceed="login({ syncApproval: $event })" />
 
             <IncompleteUpgradeAlert
               @confirm="login({ resumeFromBackup: true })"
               @cancel="abortLogin()"
             />
 
-            <div :class="css.login__actions">
+            <div :class="$style.login__actions">
               <RuiButton
                 color="primary"
                 size="lg"
-                :disabled="
-                  v$.$invalid ||
-                  loading ||
-                  conflictExist ||
-                  customBackendDisplay
-                "
+                :disabled="v$.$invalid || loading || conflictExist || customBackendDisplay"
                 :loading="loading"
                 type="submit"
                 data-cy="login-submit"
@@ -583,7 +549,46 @@ const abortLogin = () => {
                 {{ t('common.actions.continue') }}
               </RuiButton>
 
-              <div :class="css.login__actions__footer">
+              <RuiDialog
+                v-if="welcomeMessage && welcomeMessage.action"
+                v-model="dynamicMessageDialog"
+                max-width="400"
+              >
+                <template #activator="{ attrs }">
+                  <RuiButton
+                    color="primary"
+                    class="lg:hidden w-full"
+                    size="lg"
+                    :disabled="loading"
+                    variant="outlined"
+                    type="button"
+                    data-cy="show-dynamic-messages"
+                    v-bind="attrs"
+                  >
+                    {{ welcomeMessage.action.text }}
+                  </RuiButton>
+                </template>
+
+                <RuiCard>
+                  <WelcomeMessageDisplay
+                    class="!bg-transparent !p-0"
+                    :messages="activeWelcomeMessages"
+                  />
+
+                  <template #footer>
+                    <div class="w-full" />
+                    <RuiButton
+                      color="primary"
+                      variant="text"
+                      @click="dynamicMessageDialog = false"
+                    >
+                      {{ t('common.actions.close') }}
+                    </RuiButton>
+                  </template>
+                </RuiCard>
+              </RuiDialog>
+
+              <div :class="$style.login__actions__footer">
                 <span>{{ t('login.button_no_account') }}</span>
                 <RuiButton
                   color="primary"
@@ -602,7 +607,10 @@ const abortLogin = () => {
           </form>
         </div>
       </div>
-      <div v-if="errors.length > 0" class="mt-8 max-w-[41.25rem] mx-auto">
+      <div
+        v-if="errors.length > 0"
+        class="mt-8 max-w-[41.25rem] mx-auto"
+      >
         <RuiAlert
           v-if="hasServerError"
           :action-text="isLoggedInError ? t('login.logout') : ''"
@@ -621,14 +629,17 @@ const abortLogin = () => {
             </p>
           </template>
         </RuiAlert>
-        <RuiAlert v-else type="error">
+        <RuiAlert
+          v-else
+          type="error"
+        >
           <template #title>
             <p
               v-for="(error, i) in errors"
               :key="i"
               :class="{
                 'mb-2': i < errors.length - 1,
-                'mb-0': i === errors.length - 1
+                'mb-0': i === errors.length - 1,
               }"
             >
               {{ error }}
@@ -647,11 +658,11 @@ const abortLogin = () => {
   }
 
   &__actions {
-    &__footer {
-      @apply flex items-center justify-center text-rui-text-secondary;
-    }
-
     @apply flex flex-col justify-stretch space-y-8 pt-6;
+
+    &__footer {
+      @apply flex flex-wrap gap-1 sm:gap-0 items-center justify-center text-rui-text-secondary;
+    }
   }
 }
 </style>

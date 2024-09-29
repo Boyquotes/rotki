@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Sequence
 from json.decoder import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import urlencode
 
 import gevent
@@ -8,19 +9,32 @@ import requests
 from gevent.lock import Semaphore
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.chain.ethereum.modules.eth2.constants import LAST_PRODUCED_BLOCKS_QUERY_TS
-from rotkehlchen.chain.ethereum.modules.eth2.structures import ValidatorID, ValidatorPerformance
-from rotkehlchen.constants import ONE
+from rotkehlchen.chain.ethereum.modules.eth2.structures import ValidatorDailyStats, ValidatorID
+from rotkehlchen.chain.ethereum.modules.eth2.utils import calculate_query_chunks
+from rotkehlchen.constants.misc import ZERO
+from rotkehlchen.db.cache import DBCacheStatic
 from rotkehlchen.db.history_events import DBHistoryEvents
 from rotkehlchen.db.settings import CachedSettings
 from rotkehlchen.errors.misc import RemoteError
+from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.externalapis.interface import ExternalServiceWithApiKey
 from rotkehlchen.history.events.structures.eth2 import EthBlockEvent
 from rotkehlchen.logging import RotkehlchenLogsAdapter
-from rotkehlchen.serialization.deserialize import deserialize_evm_address, deserialize_fval
+from rotkehlchen.serialization.deserialize import (
+    deserialize_evm_address,
+    deserialize_fval,
+    deserialize_int,
+)
 from rotkehlchen.types import ChecksumEvmAddress, Eth2PubKey, ExternalService, Timestamp
 from rotkehlchen.user_messages import MessagesAggregator
-from rotkehlchen.utils.misc import from_wei, get_chunks, set_user_agent, ts_now, ts_sec_to_ms
+from rotkehlchen.utils.misc import (
+    create_timestamp,
+    from_gwei,
+    from_wei,
+    set_user_agent,
+    ts_now,
+    ts_sec_to_ms,
+)
 from rotkehlchen.utils.serialization import jsonloads_dict
 
 if TYPE_CHECKING:
@@ -30,23 +44,6 @@ from .constants import BEACONCHAIN_READ_TIMEOUT, BEACONCHAIN_ROOT_URL, MAX_WAIT_
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
-
-
-def _calculate_query_chunks(
-        indices_or_pubkeys: list[int] | list[Eth2PubKey],
-) -> list[list[int]] | list[list[Eth2PubKey]]:
-    """Create chunks of queries.
-
-    Beaconcha.in allows up to 100 validator or public keys in one query for most calls.
-    Also has a URI length limit of ~8190, so seems no more than 80 public keys can be per call.
-    """
-    if len(indices_or_pubkeys) == 0:
-        return []
-
-    n = 100
-    if isinstance(indices_or_pubkeys[0], str):
-        n = 80
-    return list(get_chunks(indices_or_pubkeys, n=n))  # type: ignore
 
 
 class BeaconChain(ExternalServiceWithApiKey):
@@ -65,7 +62,7 @@ class BeaconChain(ExternalServiceWithApiKey):
     def _query(
             self,
             module: Literal['validator', 'execution'],
-            endpoint: Literal['performance', 'eth1', 'deposits', 'produced'] | None,
+            endpoint: Literal['performance', 'eth1', 'deposits', 'produced', 'stats'] | None,
             encoded_args: str,
             extra_args: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]] | dict[str, Any]:
@@ -75,7 +72,7 @@ class BeaconChain(ExternalServiceWithApiKey):
         """
         if endpoint is None:  # for now only validator data
             query_str = f'{self.url}{module}/{encoded_args}'
-        elif endpoint == 'eth1':
+        elif endpoint in ('eth1', 'stats'):
             query_str = f'{self.url}{module}/{endpoint}/{encoded_args}'
         else:
             query_str = f'{self.url}{module}/{encoded_args}/{endpoint}'
@@ -177,11 +174,11 @@ class BeaconChain(ExternalServiceWithApiKey):
 
     def _query_chunked_endpoint(
             self,
-            indices_or_pubkeys: list[int] | list[Eth2PubKey],
+            indices_or_pubkeys: Sequence[int | Eth2PubKey],
             module: Literal['validator'],
             endpoint: Literal['performance'] | None,
     ) -> list[dict[str, Any]]:
-        chunks = _calculate_query_chunks(indices_or_pubkeys)
+        chunks = calculate_query_chunks(indices_or_pubkeys)
         data: list[dict[str, Any]] = []
         for chunk in chunks:
             result = self._query(
@@ -198,7 +195,7 @@ class BeaconChain(ExternalServiceWithApiKey):
 
     def _query_chunked_endpoint_with_pagination(
             self,
-            indices_or_pubkeys: list[int] | list[Eth2PubKey],
+            indices_or_pubkeys: list[int | Eth2PubKey],
             module: Literal['execution'],
             endpoint: Literal['produced'],
             limit: int,
@@ -210,7 +207,7 @@ class BeaconChain(ExternalServiceWithApiKey):
         The offset unfortunately also starts from latest entry so no way to store
         anything to avoid extra calls at the moment.
         """
-        chunks = _calculate_query_chunks(indices_or_pubkeys)
+        chunks = calculate_query_chunks(indices_or_pubkeys)
         data: list[dict[str, Any]] = []
         for chunk in chunks:
             offset = 0
@@ -230,7 +227,7 @@ class BeaconChain(ExternalServiceWithApiKey):
 
     def get_validator_data(
             self,
-            indices_or_pubkeys: list[int] | list[Eth2PubKey],
+            indices_or_pubkeys: Sequence[int | Eth2PubKey],
     ) -> list[dict[str, Any]]:
         """Returns data for the given validators
 
@@ -246,50 +243,16 @@ class BeaconChain(ExternalServiceWithApiKey):
             endpoint=None,
         )
 
-    def get_performance(
-            self,
-            indices_or_pubkeys: list[int] | list[Eth2PubKey],
-    ) -> dict[int, ValidatorPerformance]:
-        """Get the performance of all the validators given from the list of indices or pubkeys
-
-        Queries in chunks of 100 due to api limitations
-
-        May raise:
-        - RemoteError due to problems querying beaconcha.in API
-        """
-        data = self._query_chunked_endpoint(
-            indices_or_pubkeys=indices_or_pubkeys,
-            module='validator',
-            endpoint='performance',
-        )
-        performance = {}
-        for entry in data:
-            try:
-                index = entry['validatorindex']
-                performance[index] = ValidatorPerformance(
-                    balance=entry.get('balance', 0),
-                    performance_1d=entry.get('performance1d', 0),
-                    performance_1w=entry.get('performance7d', 0),
-                    performance_1m=entry.get('performance31d', 0),
-                    performance_1y=entry.get('performance365d', 0),
-                    performance_total=entry.get('performancetotal', 0),
-                )
-            except KeyError as e:
-                log.error(f'Skipping validator from performance endpoint due to unknown key {e} in entry: {entry}')  # noqa: E501
-                continue
-
-        return performance
-
     def get_and_store_produced_blocks(
             self,
-            indices_or_pubkeys: list[int] | list[Eth2PubKey],
+            indices_or_pubkeys: list[int | Eth2PubKey],
     ) -> None:
         with self.produced_blocks_lock:
             return self._get_and_store_produced_blocks(indices_or_pubkeys)
 
     def _get_and_store_produced_blocks(
             self,
-            indices_or_pubkeys: list[int] | list[Eth2PubKey],
+            indices_or_pubkeys: list[int | Eth2PubKey],
     ) -> None:
         """Get blocks produced by a set of validator indices/pubkeys and store the
         data in the DB.
@@ -367,11 +330,10 @@ class BeaconChain(ExternalServiceWithApiKey):
                         dbevents.add_history_event(write_cursor=write_cursor, event=mev_event)
 
             with self.db.user_write() as write_cursor:
-                self.db.update_used_query_range(
+                self.db.set_static_cache(
                     write_cursor=write_cursor,
-                    name=LAST_PRODUCED_BLOCKS_QUERY_TS,
-                    start_ts=Timestamp(0),
-                    end_ts=ts_now(),
+                    name=DBCacheStatic.LAST_PRODUCED_BLOCKS_QUERY_TS,
+                    value=ts_now(),
                 )
 
         except KeyError as e:  # raising and not continuing since if 1 key missing something is off  # noqa: E501
@@ -382,7 +344,9 @@ class BeaconChain(ExternalServiceWithApiKey):
     def get_eth1_address_validators(self, address: ChecksumEvmAddress) -> list[ValidatorID]:
         """Get a list of Validators that are associated with the given eth1 address.
 
-        Each entry is a tuple of (optional) validator index and pubkey
+        Each entry is a tuple of (optional) validator index and pubkey.
+
+        Index is not returned if the validator has not yet been seen by the Consensus layer
 
         May raise:
         - RemoteError due to problems querying beaconcha.in API
@@ -402,7 +366,6 @@ class BeaconChain(ExternalServiceWithApiKey):
                 ValidatorID(
                     index=x['validatorindex'],
                     public_key=x['publickey'],
-                    ownership_proportion=ONE,
                 ) for x in data
             ]
         except KeyError as e:
@@ -410,3 +373,81 @@ class BeaconChain(ExternalServiceWithApiKey):
                 f'Beaconcha.in eth1 response processing error. Missing key entry {e!s}',
             ) from e
         return validators
+
+    def query_validator_daily_stats(
+            self,
+            validator_index: int,
+            last_known_timestamp: Timestamp,
+            exit_ts: Timestamp | None,
+    ) -> list[ValidatorDailyStats]:
+        """
+        May raise:
+        - RemoteError if we can't query beaconcha.in or if the data is not in the expected format
+        """
+        if exit_ts is not None and last_known_timestamp > exit_ts:
+            return []  # nothing new to add
+
+        data = cast(list[dict[str, Any]], self._query(
+            module='validator',
+            endpoint='stats',
+            encoded_args=str(validator_index),
+        ))
+
+        timestamp = Timestamp(0)
+        stats: list[ValidatorDailyStats] = []
+        for day_data in data:
+            try:
+                start_effective_balance = day_data['start_effective_balance']
+                if start_effective_balance is None:
+                    start_effective_balance = ZERO
+                elif deserialize_int(start_effective_balance) == ZERO:
+                    continue  # validator exited
+
+                end_effective_balance = None
+                if day_data['end_effective_balance'] is not None:
+                    end_effective_balance = deserialize_int(day_data['end_effective_balance'])
+                withdrawals_amount = deserialize_int(day_data['withdrawals_amount'])
+
+                try:
+                    timestamp = create_timestamp(
+                        datestr=f"{day_data['day_start']}",
+                        formatstr='%Y-%m-%dT%I:%M:%S%z',
+                    )
+                except ValueError as e:
+                    raise RemoteError(
+                        f'Failed to parse {day_data["day_start"]} to timestamp',
+                    ) from e
+
+                if timestamp <= last_known_timestamp:
+                    return stats  # we are done
+
+                end_balance = start_balance = 0
+                if (raw_end_balance := day_data['end_balance']) is not None:
+                    end_balance = deserialize_int(raw_end_balance)
+
+                if (raw_start_balance := day_data['start_balance']) is not None:
+                    start_balance = deserialize_int(raw_start_balance)
+
+            except KeyError as e:
+                log.error(f'Missing key {e} in daily stats for {validator_index=}. Skipping day')
+                continue
+
+            except DeserializationError as e:
+                log.error(f'Failed to deserialize daily stats for {validator_index=} due to {e}. Skipping day')  # noqa: E501
+                continue
+
+            # end balance in the api is the actual balance of the validator at the end of the day,
+            # start balance is the actual balance of the validator at the start of the day,
+            # end_effective_balance and start_effective_balance are the effective balance
+            # of the validator at the end and start of the day. To calculate the PnL for the day
+            # we subtract end_balance - start_balance. If the validator exists its
+            # end_effective_balance becomes 0 and so does its end_balance. We obtain the PnL
+            # as withdrawals_amount - start_balance
+            pnl_as_int = end_balance - start_balance if end_effective_balance != 0 else withdrawals_amount - start_balance  # noqa: E501
+            stats.append(ValidatorDailyStats(
+                validator_index=validator_index,
+                timestamp=timestamp,
+                pnl=from_gwei(pnl_as_int),
+            ))
+
+        return stats

@@ -7,6 +7,7 @@ from rotkehlchen.api.websockets.typedefs import WSMessageType
 from rotkehlchen.constants.misc import USERSDIR_NAME
 from rotkehlchen.data_handler import DataHandler
 from rotkehlchen.data_migrations.manager import DataMigrationManager
+from rotkehlchen.db.cache import DBCacheStatic
 from rotkehlchen.errors.api import PremiumAuthenticationError, RotkehlchenPermissionError
 from rotkehlchen.errors.misc import RemoteError, UnableToDecryptRemoteData
 from rotkehlchen.logging import RotkehlchenLogsAdapter
@@ -16,6 +17,7 @@ from rotkehlchen.premium.premium import (
     RemoteMetadata,
     premium_create_and_verify,
 )
+from rotkehlchen.types import Timestamp
 from rotkehlchen.utils.misc import ts_now
 
 logger = logging.getLogger(__name__)
@@ -42,7 +44,10 @@ class PremiumSyncManager:
         # Initialize this with the value saved in the DB
         with data.db.conn.read_ctx() as cursor:
             # These 2 vars contain the timestamp of our side. When did this DB try to upload
-            self.last_data_upload_ts = data.db.get_setting(cursor, name='last_data_upload_ts')
+            self.last_data_upload_ts = data.db.get_static_cache(
+                cursor=cursor, name=DBCacheStatic.LAST_DATA_UPLOAD_TS,
+            )
+            self.last_data_upload_ts = Timestamp(0) if self.last_data_upload_ts is None else self.last_data_upload_ts  # noqa: E501
             self.last_upload_attempt_ts = self.last_data_upload_ts
         # This contains the last known succesful DB upload timestamp in the remote.
         self.last_remote_data_upload_ts = 0  # gets populated only after the first API call
@@ -152,11 +157,7 @@ class PremiumSyncManager:
                 return False
 
         # try an automatic upload only once per hour
-        diff = ts_now() - self.last_upload_attempt_ts
-        if diff < 3600 and not force_upload:
-            return False
-
-        return True
+        return ts_now() - self.last_upload_attempt_ts > 3600 or force_upload
 
     def maybe_upload_data_to_server(
             self,
@@ -213,17 +214,22 @@ class PremiumSyncManager:
 
         data_bytes_size = len(data)
         if data_bytes_size < metadata.data_size and not force_upload:
-            message = 'Remote database bigger than the local one'
-            log.debug(
-                f'upload to server stopped -- remote db({metadata.data_size}) '
-                f'bigger than local({data_bytes_size})',
-            )
-            self.data.msg_aggregator.add_message(
-                message_type=WSMessageType.DATABASE_UPLOAD_RESULT,
-                data={'uploaded': False, 'actionable': True, 'message': message},
-            )
-            self.last_upload_attempt_ts = ts_now()
-            return False, message
+            with self.data.db.conn.read_ctx() as cursor:
+                ask_user_upon_size_discrepancy = self.data.db.get_setting(
+                    cursor=cursor, name='ask_user_upon_size_discrepancy',
+                )
+            if ask_user_upon_size_discrepancy is True:
+                message = 'Remote database bigger than the local one'
+                log.debug(
+                    f'upload to server stopped -- remote db({metadata.data_size}) '
+                    f'bigger than local({data_bytes_size})',
+                )
+                self.data.msg_aggregator.add_message(
+                    message_type=WSMessageType.DATABASE_UPLOAD_RESULT,
+                    data={'uploaded': False, 'actionable': True, 'message': message},
+                )
+                self.last_upload_attempt_ts = ts_now()
+                return False, message
 
         try:
             self.premium.upload_data(
@@ -247,7 +253,11 @@ class PremiumSyncManager:
         self.last_upload_attempt_ts = self.last_data_upload_ts
         self.last_remote_data_upload_ts = self.last_data_upload_ts
         with self.data.db.user_write() as cursor:
-            self.data.db.set_setting(cursor, name='last_data_upload_ts', value=self.last_data_upload_ts)  # noqa: E501
+            self.data.db.set_static_cache(
+                write_cursor=cursor,
+                name=DBCacheStatic.LAST_DATA_UPLOAD_TS,
+                value=self.last_data_upload_ts,
+            )
 
         self.data.msg_aggregator.add_message(
             message_type=WSMessageType.DATABASE_UPLOAD_RESULT,

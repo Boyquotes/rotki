@@ -1,5 +1,13 @@
 <script setup lang="ts">
-defineProps<{ to: string }>();
+import type { RouteLocationRaw } from 'vue-router';
+
+const props = defineProps<{ to: RouteLocationRaw }>();
+
+const router = useRouter();
+
+function navigate() {
+  router.push(props.to);
+}
 </script>
 
 <template>
@@ -7,9 +15,9 @@ defineProps<{ to: string }>();
     <RuiButton
       variant="text"
       color="primary"
-      :href="to"
       tag="a"
       class="py-2 w-full"
+      @click="navigate()"
     >
       <div class="flex flex-col gap-2 items-center">
         <RuiIcon name="add-circle-line" />

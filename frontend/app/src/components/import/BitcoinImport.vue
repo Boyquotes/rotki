@@ -5,13 +5,19 @@ const { t } = useI18n();
 <template>
   <ImportSource source="bitcoin_tax">
     <template #upload-title>
-      <i18n tag="span" path="import_data.bitcoin_tax.import">
+      <i18n-t
+        tag="span"
+        keypath="import_data.bitcoin_tax.import"
+      >
         <strong>{{ t('import_data.bitcoin_tax.import_types') }}</strong>
-      </i18n>
+      </i18n-t>
     </template>
-    <i18n tag="span" path="import_data.note">
+    <i18n-t
+      tag="span"
+      keypath="import_data.note"
+    >
       <strong>{{ t('import_data.bitcoin_tax.name') }}</strong>
-    </i18n>
+    </i18n-t>
     <ul class="list-disc">
       <li>{{ t('import_data.bitcoin_tax.line_one') }}</li>
       <li>{{ t('import_data.bitcoin_tax.line_two') }}</li>

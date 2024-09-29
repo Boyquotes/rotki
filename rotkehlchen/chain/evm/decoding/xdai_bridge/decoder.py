@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
 
-class XdaiBridgeCommonDecoder(DecoderInterface, metaclass=abc.ABCMeta):
+class XdaiBridgeCommonDecoder(DecoderInterface, abc.ABC):
 
     def __init__(
             self,
@@ -115,7 +115,7 @@ class XdaiBridgeCommonDecoder(DecoderInterface, metaclass=abc.ABCMeta):
                 event.location_label == expected_location_label and
                 event.address == self.bridge_address and
                 event.asset == self.bridged_asset and
-                (amount is None or event.balance.amount == amount)
+                event.balance.amount == amount
             ):
                 bridge_match_transfer(
                     event=event,

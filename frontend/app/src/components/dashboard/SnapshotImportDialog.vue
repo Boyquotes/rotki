@@ -1,53 +1,59 @@
 <script lang="ts" setup>
 const props = withDefaults(
   defineProps<{
-    value: boolean;
-    balanceFile: File | null;
-    locationFile: File | null;
+    balanceFile?: File;
+    locationFile?: File;
     loading?: boolean;
     persistent?: boolean;
   }>(),
   {
     loading: false,
-    persistent: false
-  }
+    persistent: false,
+  },
 );
 
 const emit = defineEmits<{
-  (e: 'input', value: boolean): void;
   (e: 'import'): boolean;
-  (e: 'update:balance-file', file: File | null): void;
-  (e: 'update:location-file', file: File | null): void;
+  (e: 'update:balance-file', file?: File): void;
+  (e: 'update:location-file', file?: File): void;
 }>();
 
 const { t } = useI18n();
-const visible = useVModel(props, 'value', emit, { eventName: 'input' });
+const model = defineModel<boolean>({ required: true });
 
-const balanceFile = computed<File | null>({
+const balanceFile = computed<File | undefined>({
   get() {
     return props.balanceFile;
   },
   set(value) {
     emit('update:balance-file', value);
-  }
+  },
 });
 
-const locationFile = computed<File | null>({
+const locationFile = computed<File | undefined>({
   get() {
     return props.locationFile;
   },
   set(value) {
     emit('update:location-file', value);
-  }
+  },
 });
 
-const complete = logicOr(balanceFile, locationFile);
+const complete = logicAnd(balanceFile, locationFile);
 </script>
 
 <template>
-  <VDialog v-model="visible" max-width="600" :persistent="persistent">
-    <template #activator="{ on }">
-      <RuiButton color="primary" variant="outlined" v-on="on">
+  <RuiDialog
+    v-model="model"
+    max-width="650"
+    :persistent="persistent"
+  >
+    <template #activator="{ attrs }">
+      <RuiButton
+        color="primary"
+        variant="outlined"
+        v-bind="attrs"
+      >
         <template #prepend>
           <RuiIcon name="folder-received-line" />
         </template>
@@ -60,13 +66,16 @@ const complete = logicOr(balanceFile, locationFile);
         {{ t('snapshot_import_dialog.title') }}
       </template>
 
-      <div class="pt-2 flex flex-row gap-2">
+      <div class="grid grid-cols-2 gap-2">
         <div>
           <div class="font-bold">
             {{ t('snapshot_import_dialog.balance_snapshot_file') }}
           </div>
           <div class="py-2">
-            <FileUpload v-model="balanceFile" source="csv" />
+            <FileUpload
+              v-model="balanceFile"
+              source="csv"
+            />
           </div>
           <div class="text-caption">
             {{ t('snapshot_import_dialog.balance_snapshot_file_suggested') }}
@@ -77,7 +86,10 @@ const complete = logicOr(balanceFile, locationFile);
             {{ t('snapshot_import_dialog.location_data_snapshot_file') }}
           </div>
           <div class="py-2">
-            <FileUpload v-model="locationFile" source="csv" />
+            <FileUpload
+              v-model="locationFile"
+              source="csv"
+            />
           </div>
           <div class="text-caption">
             {{ t('snapshot_import_dialog.location_data_snapshot_suggested') }}
@@ -87,7 +99,11 @@ const complete = logicOr(balanceFile, locationFile);
 
       <template #footer>
         <div class="w-full" />
-        <RuiButton color="primary" variant="text" @click="visible = false">
+        <RuiButton
+          color="primary"
+          variant="text"
+          @click="model = false"
+        >
           {{ t('common.actions.cancel') }}
         </RuiButton>
         <RuiButton
@@ -100,5 +116,5 @@ const complete = logicOr(balanceFile, locationFile);
         </RuiButton>
       </template>
     </RuiCard>
-  </VDialog>
+  </RuiDialog>
 </template>

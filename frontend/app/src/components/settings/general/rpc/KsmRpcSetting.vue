@@ -6,14 +6,14 @@ const ksmRpcEndpoint = ref(Defaults.KSM_RPC_ENDPOINT);
 
 const { ksmRpcEndpoint: ksmRpc } = storeToRefs(useGeneralSettingsStore());
 
-const ksmSuccessMessage = (endpoint: string) => {
+function ksmSuccessMessage(endpoint: string) {
   if (endpoint) {
     return t('general_settings.validation.ksm_rpc.success_set', {
-      endpoint
+      endpoint,
     });
   }
   return t('general_settings.validation.ksm_rpc.success_unset');
-};
+}
 
 onBeforeMount(() => {
   set(ksmRpcEndpoint, get(ksmRpc) || Defaults.KSM_RPC_ENDPOINT);
@@ -27,9 +27,10 @@ onBeforeMount(() => {
     :error-message="t('general_settings.validation.ksm_rpc.error')"
     :success-message="ksmSuccessMessage"
   >
-    <VTextField
+    <RuiTextField
       v-model="ksmRpcEndpoint"
-      outlined
+      variant="outlined"
+      color="primary"
       class="general-settings__fields__ksm-rpc-endpoint"
       :label="t('general_settings.labels.ksm_rpc_endpoint')"
       type="text"
@@ -38,7 +39,7 @@ onBeforeMount(() => {
       clearable
       @paste="update($event.clipboardData.getData('text'))"
       @click:clear="update('')"
-      @change="update($event)"
+      @update:model-value="update($event)"
     />
   </SettingsOption>
 </template>

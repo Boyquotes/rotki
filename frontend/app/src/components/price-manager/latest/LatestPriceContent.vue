@@ -1,104 +1,91 @@
 <script setup lang="ts">
-import { type DataTableHeader } from '@/types/vuetify';
+import { objectOmit } from '@vueuse/core';
 import { isNft } from '@/utils/nft';
-import { type ManualPrice, type ManualPriceFormPayload } from '@/types/prices';
-import { type Nullable } from '@/types';
+import type { DataTableColumn, DataTableSortData } from '@rotki/ui-library';
+import type { ManualPriceFormPayload, ManualPriceWithUsd } from '@/types/prices';
 
 const { t } = useI18n();
 
-const emptyPrice: () => ManualPriceFormPayload = () => ({
-  fromAsset: '',
-  toAsset: '',
-  price: '0'
-});
-
-const price = ref<ManualPriceFormPayload>(emptyPrice());
-const filter = ref<Nullable<string>>(null);
-const update = ref(false);
+const price = ref<Partial<ManualPriceFormPayload> | null>(null);
+const filter = ref<string>();
+const editMode = ref<boolean>(false);
 
 const { currencySymbol } = storeToRefs(useGeneralSettingsStore());
 
-const headers = computed<DataTableHeader[]>(() => [
+const sort = ref<DataTableSortData<ManualPriceWithUsd>>([]);
+
+const headers = computed<DataTableColumn<ManualPriceWithUsd>[]>(() => [
   {
-    text: t('price_table.headers.from_asset'),
-    value: 'fromAsset'
+    label: t('price_table.headers.from_asset'),
+    key: 'fromAsset',
+    sortable: true,
   },
   {
-    text: '',
-    value: 'isWorth',
-    sortable: false
+    label: '',
+    key: 'isWorth',
+    cellClass: '!text-xs !text-rui-text-secondary',
   },
   {
-    text: t('common.price'),
-    value: 'price',
-    align: 'end'
+    label: t('common.price'),
+    key: 'price',
+    align: 'end',
+    sortable: true,
   },
   {
-    text: t('price_table.headers.to_asset'),
-    value: 'toAsset'
+    label: t('price_table.headers.to_asset'),
+    key: 'toAsset',
+    sortable: true,
   },
   {
-    text: t('common.price_in_symbol', { symbol: get(currencySymbol) }),
-    value: 'usdPrice',
-    align: 'end'
+    label: t('common.price_in_symbol', { symbol: get(currencySymbol) }),
+    key: 'usdPrice',
+    align: 'end',
+    sortable: true,
   },
   {
-    text: '',
-    value: 'actions',
-    sortable: false
-  }
+    label: '',
+    key: 'actions',
+    class: 'w-[3rem]',
+    align: 'end',
+  },
 ]);
 
 const router = useRouter();
 const route = useRoute();
-const { items, loading, refreshing, save, deletePrice, refresh } =
-  useLatestPrices(filter, t);
+const { items, loading, refreshing, deletePrice, refreshCurrentPrices } = useLatestPrices(t, filter);
 
-const {
-  setPostSubmitFunc,
-  openDialog,
-  setOpenDialog,
-  submitting,
-  closeDialog,
-  setSubmitFunc,
-  trySubmit
-} = useLatestPriceForm();
+const { setPostSubmitFunc, setOpenDialog } = useLatestPriceForm();
 const { show } = useConfirmStore();
 
-const showDeleteConfirmation = (item: ManualPrice) => {
+function showDeleteConfirmation(item: ManualPriceWithUsd) {
   show(
     {
       title: t('price_table.delete.dialog.title'),
-      message: t('price_table.delete.dialog.message')
+      message: t('price_table.delete.dialog.message'),
     },
-    () => deletePrice(item)
+    () => deletePrice(item),
   );
-};
+}
 
-const openForm = (cPrice: ManualPrice | null = null) => {
-  set(update, !!cPrice);
-  if (cPrice) {
+function openForm(selectedEntry: ManualPriceWithUsd | null = null) {
+  set(editMode, !!selectedEntry);
+  if (selectedEntry) {
+    set(price, objectOmit({
+      ...selectedEntry,
+      price: selectedEntry.price.toFixed() ?? '',
+    }, ['id', 'usdPrice']));
+  }
+  else {
     set(price, {
-      ...cPrice,
-      price: cPrice.price.toFixed() ?? ''
-    });
-  } else {
-    set(price, {
-      ...emptyPrice(),
-      fromAsset: get(filter) ?? ''
+      fromAsset: get(filter) ?? '',
     });
   }
   setOpenDialog(true);
-};
-
-const hideForm = () => {
-  closeDialog();
-  set(price, emptyPrice());
-};
+}
 
 onMounted(async () => {
-  setSubmitFunc(() => save(get(price), get(update)));
-  setPostSubmitFunc(() => refresh(true));
+  await refreshCurrentPrices();
+  setPostSubmitFunc(() => refreshCurrentPrices());
 
   const query = get(route).query;
 
@@ -110,12 +97,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <TablePageLayout
-    :title="[
-      t('navigation_menu.manage_prices'),
-      t('navigation_menu.manage_prices_sub.latest_prices')
-    ]"
-  >
+  <TablePageLayout :title="[t('navigation_menu.manage_prices'), t('navigation_menu.manage_prices_sub.latest_prices')]">
     <template #buttons>
       <RuiTooltip :open-delay="400">
         <template #activator>
@@ -123,7 +105,7 @@ onMounted(async () => {
             color="primary"
             variant="outlined"
             :loading="loading || refreshing"
-            @click="refresh(true)"
+            @click="refreshCurrentPrices()"
           >
             <template #prepend>
               <RuiIcon name="refresh-line" />
@@ -134,7 +116,10 @@ onMounted(async () => {
         {{ t('price_table.refresh_tooltip') }}
       </RuiTooltip>
 
-      <RuiButton color="primary" @click="openForm()">
+      <RuiButton
+        color="primary"
+        @click="openForm()"
+      >
         <template #prepend>
           <RuiIcon name="add-line" />
         </template>
@@ -154,64 +139,67 @@ onMounted(async () => {
           hide-details
         >
           <template #prepend>
-            <RuiIcon size="20" name="filter-line" />
+            <RuiIcon
+              size="20"
+              name="filter-line"
+            />
           </template>
         </AssetSelect>
       </div>
-      <DataTable :items="items" :headers="headers" :loading="loading">
-        <template #item.fromAsset="{ item }">
+      <RuiDataTable
+        v-model:sort="sort"
+        outlined
+        dense
+        :cols="headers"
+        :loading="loading || refreshing"
+        :rows="items"
+        row-attr="id"
+      >
+        <template #item.fromAsset="{ row }">
           <NftDetails
-            v-if="isNft(item.fromAsset)"
-            :identifier="item.fromAsset"
+            v-if="isNft(row.fromAsset)"
+            :identifier="row.fromAsset"
           />
-          <AssetDetails v-else :asset="item.fromAsset" />
+          <AssetDetails
+            v-else
+            class="[&_.avatar]:ml-1.5 [&_.avatar]:mr-2"
+            :asset="row.fromAsset"
+          />
         </template>
-        <template #item.toAsset="{ item }">
-          <AssetDetails :asset="item.toAsset" />
+        <template #item.toAsset="{ row }">
+          <AssetDetails :asset="row.toAsset" />
         </template>
-        <template #item.price="{ item }">
-          <AmountDisplay :value="item.price" />
+        <template #item.price="{ row }">
+          <AmountDisplay :value="row.price" />
         </template>
         <template #item.isWorth>
           {{ t('price_table.is_worth') }}
         </template>
-        <template #item.usdPrice="{ item }">
+        <template #item.usdPrice="{ row }">
           <AmountDisplay
-            v-if="item.usdPrice && item.usdPrice.gte(0)"
+            :loading="!row.usdPrice || row.usdPrice.lt(0)"
             show-currency="symbol"
-            :price-asset="item.fromAsset"
-            :price-of-asset="item.usdPrice"
+            :price-asset="row.fromAsset"
+            :price-of-asset="row.usdPrice"
             fiat-currency="USD"
-            :value="item.usdPrice"
+            :value="row.usdPrice"
           />
-          <div v-else class="flex justify-end">
-            <VSkeletonLoader width="70" type="text" />
-          </div>
         </template>
-        <template #item.actions="{ item }">
+        <template #item.actions="{ row }">
           <RowActions
             :disabled="loading"
             :delete-tooltip="t('price_table.actions.delete.tooltip')"
             :edit-tooltip="t('price_table.actions.edit.tooltip')"
-            @delete-click="showDeleteConfirmation(item)"
-            @edit-click="openForm(item)"
+            @delete-click="showDeleteConfirmation(row)"
+            @edit-click="openForm(row)"
           />
         </template>
-      </DataTable>
+      </RuiDataTable>
     </RuiCard>
 
-    <BigDialog
-      :display="openDialog"
-      :title="
-        update
-          ? t('price_management.dialog.edit_title')
-          : t('price_management.dialog.add_title')
-      "
-      :loading="submitting"
-      @confirm="trySubmit()"
-      @cancel="hideForm()"
-    >
-      <LatestPriceForm v-model="price" :edit="update" />
-    </BigDialog>
+    <LatestPriceFormDialog
+      :value="price"
+      :edit-mode="editMode"
+    />
   </TablePageLayout>
 </template>

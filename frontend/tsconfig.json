@@ -1,22 +1,22 @@
 {
   "compilerOptions": {
     "target": "es2020",
-    "module": "esnext",
-    "strict": true,
-    "esModuleInterop": true,
     "jsx": "preserve",
-    "skipLibCheck": true,
-    "moduleResolution": "node",
-    "resolveJsonModule": true,
-    "noUnusedLocals": true,
-    "strictNullChecks": true,
+    "lib": ["es2020", "dom", "dom.iterable", "scripthost"],
     "experimentalDecorators": true,
-    "allowSyntheticDefaultImports": true,
+    "module": "esnext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
     "allowJs": false,
-    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "noUnusedLocals": true,
     "sourceMap": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
-    "lib": ["es2020", "dom", "dom.iterable", "scripthost"]
+    "skipLibCheck": true
   },
   "exclude": ["node_modules/**", "**/.*", "cypress"]
 }

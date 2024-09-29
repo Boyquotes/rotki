@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { type ComputedRef } from 'vue';
-import { type StyleValue } from 'vue/types/jsx';
-import { Routes } from '@/router/routes';
-import { type NftAsset } from '@/types/nfts';
+import type { StyleValue } from 'vue';
+import type { NftAsset } from '@/types/nfts';
 
 const props = withDefaults(
   defineProps<{
@@ -24,57 +22,59 @@ const props = withDefaults(
     dense: false,
     enableAssociation: true,
     showChain: true,
-    isCollectionParent: false
-  }
+    isCollectionParent: false,
+  },
 );
 
 const { asset, opensDetails, isCollectionParent } = toRefs(props);
-const rootAttrs = useAttrs();
 
-const symbol: ComputedRef<string> = computed(() => get(asset).symbol ?? '');
-const name: ComputedRef<string> = computed(() => get(asset).name ?? '');
+const symbol = computed<string>(() => get(asset).symbol ?? '');
+const name = computed<string>(() => get(asset).name ?? '');
 
 const router = useRouter();
-const navigate = async () => {
-  if (!get(opensDetails)) {
+
+async function navigate() {
+  if (!get(opensDetails))
     return;
-  }
-  const id = encodeURIComponent(get(asset).identifier);
   const collectionParent = get(isCollectionParent);
 
   await router.push({
-    path: Routes.ASSETS.replace(':identifier', id),
-    query: !collectionParent
+    name: '/assets/[identifier]',
+    params: {
+      identifier: get(asset).identifier,
+    },
+    ...(!collectionParent
       ? {}
       : {
-          collectionParent: 'true'
-        }
+          query: {
+            collectionParent: 'true',
+          },
+        }),
   });
-};
+}
 
 const { isPending } = useAssetCacheStore();
-const loading: ComputedRef<boolean> = computed(() =>
-  get(isPending(get(asset).identifier))
-);
+const loading = computed<boolean>(() => get(isPending(get(asset).identifier)));
 </script>
 
 <template>
   <ListItem
-    v-bind="rootAttrs"
+    no-padding
+    no-hover
+    class="max-w-[20rem]"
+    v-bind="$attrs"
     :class="opensDetails ? 'cursor-pointer' : null"
-    :dense="dense"
+    :size="dense ? 'sm' : 'md'"
     :loading="loading"
     :title="asset.isCustomAsset ? name : symbol"
     :subtitle="asset.isCustomAsset ? asset.customAssetType : name"
     @click="navigate()"
   >
-    <template #icon>
-      <VImg
+    <template #avatar>
+      <AppImage
         v-if="asset.imageUrl"
         contain
-        height="26px"
-        width="26px"
-        max-width="26px"
+        size="26px"
         :src="asset.imageUrl"
       />
       <AssetIcon
@@ -83,7 +83,7 @@ const loading: ComputedRef<boolean> = computed(() =>
         size="26px"
         :styled="assetStyled"
         :identifier="asset.identifier"
-        :enable-association="enableAssociation"
+        :resolution-options="{ associate: enableAssociation }"
         :show-chain="showChain"
       />
     </template>

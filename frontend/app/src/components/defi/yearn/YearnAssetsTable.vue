@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { type DataTableColumn } from '@rotki/ui-library-compat';
-import { type YearnVaultAsset } from '@/types/defi/yearn';
 import { ProtocolVersion } from '@/types/defi';
+import type { DataTableColumn, DataTableSortData } from '@rotki/ui-library';
+import type { YearnVaultAsset } from '@/types/defi/yearn';
+import type { BigNumber } from '@rotki/common';
+
+interface VaultAssets extends YearnVaultAsset {
+  underlyingUsdValue: BigNumber;
+  vaultUsdValue: BigNumber;
+}
 
 const props = withDefaults(
   defineProps<{
@@ -10,63 +16,62 @@ const props = withDefaults(
     version?: ProtocolVersion | null;
   }>(),
   {
-    version: null
-  }
+    version: null,
+  },
 );
 const { selectedAddresses, version } = toRefs(props);
 
-const sortBy = ref({
+const sortBy = ref<DataTableSortData<VaultAssets>>({
   column: 'roi',
-  direction: 'desc' as const
+  direction: 'desc' as const,
 });
 
 const { yearnVaultsAssets } = useYearnStore();
 const { t } = useI18n();
 
-const columns: DataTableColumn[] = [
+const columns: DataTableColumn<VaultAssets>[] = [
   { label: t('yearn_asset_table.headers.vault'), key: 'vault' },
   {
     label: t('yearn_asset_table.headers.version'),
     key: 'version',
-    cellClass: 'w-8'
+    cellClass: 'w-8',
   },
   {
     label: t('yearn_asset_table.headers.underlying_asset'),
     key: 'underlyingUsdValue',
     align: 'end',
-    sortable: true
+    sortable: true,
   },
   {
     label: t('yearn_asset_table.headers.vault_asset'),
     key: 'vaultUsdValue',
     align: 'end',
-    sortable: true
+    sortable: true,
   },
   {
     label: t('yearn_asset_table.headers.roi'),
     key: 'roi',
     align: 'end',
-    sortable: true
-  }
+    sortable: true,
+  },
 ];
 
-const vaults = computed(() => {
+const vaults = computed<VaultAssets[]>(() => {
   const protocolVersion = get(version);
   let v1Assets: YearnVaultAsset[] = [];
 
   const addresses = get(selectedAddresses);
-  if (protocolVersion === ProtocolVersion.V1 || !protocolVersion) {
+  if (protocolVersion === ProtocolVersion.V1 || !protocolVersion)
     v1Assets = get(yearnVaultsAssets(addresses, ProtocolVersion.V1));
-  }
 
   let v2Assets: YearnVaultAsset[] = [];
-  if (protocolVersion === ProtocolVersion.V2 || !protocolVersion) {
+  if (protocolVersion === ProtocolVersion.V2 || !protocolVersion)
     v2Assets = get(yearnVaultsAssets(addresses, ProtocolVersion.V2));
-  }
+
   return [...v1Assets, ...v2Assets].map(x => ({
     ...x,
     underlyingUsdValue: x.underlyingValue.usdValue,
-    vaultUsdValue: x.vaultValue.usdValue
+    vaultUsdValue: x.vaultValue.usdValue,
   }));
 });
 </script>
@@ -78,12 +83,12 @@ const vaults = computed(() => {
     </template>
 
     <RuiDataTable
+      v-model:sort="sortBy"
       :cols="columns"
       :rows="vaults"
+      row-attr="vaultToken"
       outlined
-      :sort="sortBy"
       :loading="loading"
-      @update:sort="sortBy = $event"
     >
       <template #item.version="{ row }">
         {{ row.version }}
@@ -95,7 +100,10 @@ const vaults = computed(() => {
         />
       </template>
       <template #item.vaultUsdValue="{ row }">
-        <BalanceDisplay :asset="row.vaultToken" :value="row.vaultValue" />
+        <BalanceDisplay
+          :asset="row.vaultToken"
+          :value="row.vaultValue"
+        />
       </template>
       <template #item.roi="{ row }">
         <PercentageDisplay :value="row.roi" />

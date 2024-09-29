@@ -11,18 +11,18 @@ const { t } = useI18n();
 
 <template>
   <SettingsOption
-    #default="{ error, success, update }"
+    #default="{ error, success, updateImmediate }"
     setting="submitUsageAnalytics"
     :error-message="t('general_settings.validation.analytics.error')"
   >
-    <VSwitch
+    <RuiSwitch
       v-model="anonymousUsageAnalytics"
-      class="general-settings__fields__anonymous-usage-statistics mb-4 mt-0"
+      class="general-settings__fields__anonymous-usage-statistics"
       color="primary"
       :label="t('general_settings.labels.anonymous_analytics')"
       :success-messages="success"
       :error-messages="error"
-      @change="update($event)"
+      @update:model-value="updateImmediate($event)"
     />
   </SettingsOption>
 </template>

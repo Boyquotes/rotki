@@ -1,159 +1,215 @@
 <script setup lang="ts">
-defineProps<{ visible: boolean }>();
+import { Priority, Severity } from '@rotki/common';
+import { Routes } from '@/router/routes';
 
-const emit = defineEmits(['close']);
+const display = defineModel<boolean>({ required: true });
 
 const { t } = useI18n();
-
-const css = useCssModule();
 
 const confirmStore = useConfirmStore();
 const { visible: dialogVisible } = storeToRefs(confirmStore);
 const { show } = confirmStore;
 
 const notificationStore = useNotificationsStore();
-const { prioritized: notifications } = storeToRefs(notificationStore);
+const { prioritized: allNotifications } = storeToRefs(notificationStore);
 const { remove } = notificationStore;
 
-const close = () => {
-  emit('close');
-};
+function close() {
+  set(display, false);
+}
 
-const input = (visible: boolean) => {
-  if (visible) {
-    return;
-  }
-  close();
-};
-
-const clear = () => {
+function clear() {
   notificationStore.$reset();
   close();
-};
+}
 
-const showConfirmation = () => {
+function showConfirmation() {
   show(
     {
       title: t('notification_sidebar.confirmation.title'),
       message: t('notification_sidebar.confirmation.message'),
-      type: 'info'
+      type: 'info',
     },
-    clear
+    clear,
   );
-};
+}
 
-const { mobile } = useDisplay();
 const { hasRunningTasks } = storeToRefs(useTaskStore());
+
+enum TabCategory {
+  VIEW_ALL = 'view_all',
+  NEEDS_ACTION = 'needs_action',
+  REMINDER = 'reminder',
+  ERROR = 'error',
+}
+
+const tabCategoriesLabel = computed(() => ({
+  [TabCategory.VIEW_ALL]: t('notification_sidebar.tabs.view_all'),
+  [TabCategory.NEEDS_ACTION]: t('notification_sidebar.tabs.needs_action'),
+  [TabCategory.REMINDER]: t('notification_sidebar.tabs.reminder'),
+  [TabCategory.ERROR]: t('notification_sidebar.tabs.error'),
+}));
+
+const selectedTab = ref<TabCategory>(TabCategory.VIEW_ALL);
+
+const selectedNotifications = computed(() => {
+  const all = get(allNotifications);
+  const tab = get(selectedTab);
+
+  if (tab === TabCategory.NEEDS_ACTION)
+    return all.filter(item => item.priority === Priority.ACTION);
+
+  if (tab === TabCategory.ERROR)
+    return all.filter(item => item.severity === Severity.ERROR);
+
+  if (tab === TabCategory.REMINDER)
+    return all.filter(item => item.severity === Severity.REMINDER);
+
+  return all;
+});
+
+const [DefineNoMessages, ReuseNoMessages] = createReusableTemplate();
+
+const contentWrapper = ref();
+const { y } = useScroll(contentWrapper);
+
+const initialAppear = ref<boolean>(false);
+
+watch(
+  [y, selectedTab, selectedNotifications],
+  ([currentY, currSelectedTab, currNotifications], [_, prevSelectedTab, prevNotifications]) => {
+    if (currSelectedTab !== prevSelectedTab || (prevNotifications.length === 0 && currNotifications.length > 0)) {
+      set(initialAppear, false);
+      nextTick(() => {
+        set(initialAppear, true);
+      });
+    }
+    else {
+      if (currentY > 0)
+        set(initialAppear, false);
+      else set(initialAppear, true);
+    }
+  },
+);
 </script>
 
 <template>
-  <VNavigationDrawer
-    :class="{ [css.mobile]: mobile, [css.sidebar]: true }"
+  <RuiNavigationDrawer
+    v-model="display"
+    :content-class="$style.sidebar"
     width="400px"
-    absolute
-    clipped
-    :value="visible"
-    :stateless="dialogVisible"
-    right
+    position="right"
     temporary
-    hide-overlay
-    @input="input($event)"
+    :stateless="dialogVisible"
   >
-    <div v-if="visible" class="h-full">
-      <div class="flex items-center p-2 gap-1">
-        <RuiTooltip :open-delay="400">
-          <template #activator>
-            <RuiButton variant="text" icon class="!p-2" @click="close()">
-              <RuiIcon name="arrow-right-s-line" size="20" />
-            </RuiButton>
-          </template>
-          <span>{{ t('notification_sidebar.close_tooltip') }}</span>
-        </RuiTooltip>
-        <div
-          class="flex-1 text-uppercase text--secondary text-caption font-medium"
-        >
-          {{ t('notification_sidebar.title') }}
-        </div>
-        <RuiButton
-          variant="text"
-          class="text-caption text-lowercase"
-          color="secondary"
-          :disabled="notifications.length === 0"
-          @click="showConfirmation()"
-        >
-          {{ t('notification_sidebar.clear_tooltip') }}
-        </RuiButton>
-      </div>
-      <div
-        v-if="!hasRunningTasks && notifications.length === 0"
-        :class="css['no-messages']"
-      >
-        <RuiIcon size="64px" color="primary" name="information-line" />
+    <DefineNoMessages>
+      <div :class="$style['no-messages']">
+        <RuiIcon
+          size="64px"
+          color="primary"
+          name="information-line"
+        />
         <div class="text-rui-text text-lg mt-2">
           {{ t('notification_sidebar.no_messages') }}
         </div>
       </div>
-      <div v-else :class="css.messages">
-        <PendingTasks />
-        <div v-if="notifications.length > 0" class="pl-2" :class="css.content">
-          <VVirtualScroll :items="notifications" item-height="172px">
-            <template #default="{ item }">
-              <Notification :notification="item" @dismiss="remove($event)" />
-            </template>
-          </VVirtualScroll>
+    </DefineNoMessages>
+    <div class="h-full overflow-hidden flex flex-col">
+      <div class="flex justify-between items-center p-2 pl-4">
+        <div class="text-h6">
+          {{ t('notification_sidebar.title') }}
         </div>
+        <RuiButton
+          variant="text"
+          icon
+          @click="close()"
+        >
+          <RuiIcon name="close-line" />
+        </RuiButton>
+      </div>
+
+      <ReuseNoMessages v-if="!hasRunningTasks && allNotifications.length === 0" />
+      <div
+        v-else
+        :class="$style.messages"
+      >
+        <PendingTasks />
+        <div class="border-b border-default mx-4">
+          <RuiTabs
+            v-model="selectedTab"
+            color="primary"
+          >
+            <RuiTab
+              v-for="item in Object.values(TabCategory)"
+              :key="item"
+              size="sm"
+              class="!min-w-0"
+              :value="item"
+            >
+              {{ tabCategoriesLabel[item] }}
+            </RuiTab>
+          </RuiTabs>
+        </div>
+        <div
+          v-if="selectedNotifications.length > 0"
+          ref="contentWrapper"
+          :class="$style.content"
+        >
+          <LazyLoader
+            v-for="item in selectedNotifications"
+            :key="item.id"
+            :initial-appear="initialAppear"
+            min-height="120px"
+            class="grow-0 shrink-0"
+          >
+            <Notification
+              :notification="item"
+              @dismiss="remove($event)"
+            />
+          </LazyLoader>
+        </div>
+        <ReuseNoMessages v-else />
+      </div>
+      <div class="p-3 flex justify-between border-t border-default mt-2">
+        <RuiButton
+          variant="text"
+          color="primary"
+          :disabled="allNotifications.length === 0"
+          @click="showConfirmation()"
+        >
+          {{ t('notification_sidebar.clear_tooltip') }}
+        </RuiButton>
+        <RouterLink :to="Routes.CALENDAR">
+          <RuiButton
+            color="primary"
+            @click="close()"
+          >
+            <template #prepend>
+              <RuiIcon
+                name="calendar-event-line"
+                size="20"
+              />
+            </template>
+            {{ t('notification_sidebar.view_calendar') }}
+          </RuiButton>
+        </RouterLink>
       </div>
     </div>
-  </VNavigationDrawer>
+  </RuiNavigationDrawer>
 </template>
 
 <style module lang="scss">
-.sidebar {
-  top: 64px !important;
-  box-shadow: 0 2px 12px rgba(74, 91, 120, 0.1);
-  padding-top: 0 !important;
-  border-top: var(--v-rotki-light-grey-darken1) solid thin;
-
-  :global {
-    .v-badge {
-      &__badge {
-        top: 0 !important;
-        right: 0 !important;
-      }
-    }
-
-    .v-list-item {
-      &__action-text {
-        margin-right: -8px;
-        margin-top: -8px;
-      }
-    }
-  }
-
-  @media only screen and (max-width: 960px) {
-    top: 56px !important;
-  }
-}
-
-.mobile {
-  top: 56px !important;
-  padding-top: 0 !important;
-}
-
 .no-messages {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: calc(100% - 64px);
+  @apply flex flex-col items-center justify-center flex-1;
 }
 
 .messages {
-  height: calc(100% - 50px);
-  padding-right: 0.5rem;
+  @apply flex flex-col;
+  height: calc(100% - 133px);
 }
 
 .content {
-  height: calc(100% - 64px);
+  @apply ps-3.5 pe-2 mt-2 flex flex-col gap-2;
+  @apply overflow-y-auto #{!important};
 }
 </style>

@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import logging
+import operator
 from json.decoder import JSONDecodeError
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlencode
@@ -128,11 +129,11 @@ class Poloniex(ExchangeInterface):
             api_key=api_key,
             secret=secret,
             database=database,
+            msg_aggregator=msg_aggregator,
         )
 
         self.uri = 'https://api.poloniex.com'
         self.session.headers.update({'key': self.api_key})
-        self.msg_aggregator = msg_aggregator
 
     def first_connection(self) -> None:
         if self.first_connection_made:
@@ -186,7 +187,7 @@ class Poloniex(ExchangeInterface):
         """
         if method == 'GET':
             params.update({'signTimestamp': timestamp})
-            sorted_params = sorted(params.items(), key=lambda d: d[0], reverse=False)
+            sorted_params = sorted(params.items(), key=operator.itemgetter(0), reverse=False)
             encode_params = urlencode(sorted_params)
             del params['signTimestamp']
         else:
@@ -396,9 +397,9 @@ class Poloniex(ExchangeInterface):
                         )
                         continue
                     except UnknownAsset as e:
-                        self.msg_aggregator.add_warning(
-                            f'Found unknown poloniex asset {e.identifier}. '
-                            f'Ignoring its balance query.',
+                        self.send_unknown_asset_message(
+                            asset_identifier=e.identifier,
+                            details='balance query',
                         )
                         continue
                     except DeserializationError:
@@ -416,7 +417,7 @@ class Poloniex(ExchangeInterface):
                         continue  # https://github.com/rotki/rotki/issues/2530
 
                     try:
-                        usd_price = Inquirer().find_usd_price(asset=asset)
+                        usd_price = Inquirer.find_usd_price(asset=asset)
                     except RemoteError as e:
                         self.msg_aggregator.add_error(
                             f'Error processing poloniex balance entry due to inability to '
@@ -471,9 +472,9 @@ class Poloniex(ExchangeInterface):
                 )
                 continue
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found poloniex trade with unknown asset'
-                    f' {e.identifier}. Ignoring it.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='trade',
                 )
                 continue
             except (UnprocessableTradePair, DeserializationError) as e:
@@ -534,9 +535,9 @@ class Poloniex(ExchangeInterface):
                 f'{e.identifier}. Ignoring it.',
             )
         except UnknownAsset as e:
-            self.msg_aggregator.add_warning(
-                f'Found {movement_type!s} of unknown poloniex asset '
-                f'{e.identifier}. Ignoring it.',
+            self.send_unknown_asset_message(
+                asset_identifier=e.identifier,
+                details='asset movement',
             )
         except (DeserializationError, KeyError) as e:
             msg = str(e)

@@ -31,12 +31,13 @@ def assert_coin_data_same(given, expected, compare_description=False):
     assert given.image_url == expected.image_url
 
 
+@pytest.mark.vcr
 def test_asset_data(session_coingecko):
     expected_data = CoingeckoAssetData(
         identifier='bitcoin',
         symbol='btc',
         name='Bitcoin',
-        image_url='https://assets.coingecko.com/coins/images/1/small/bitcoin.png?1696501400',
+        image_url='https://coin-images.coingecko.com/coins/images/1/small/bitcoin.png?1696501400',
     )
     data = session_coingecko.asset_data(A_BTC.resolve_to_asset_with_oracles().to_coingecko())
     assert_coin_data_same(data, expected_data)
@@ -45,7 +46,7 @@ def test_asset_data(session_coingecko):
         identifier='yearn-finance',
         symbol='yfi',
         name='yearn.finance',
-        image_url='https://assets.coingecko.com/coins/images/11849/small/yearn.jpg?1696511720',
+        image_url='https://coin-images.coingecko.com/coins/images/11849/small/yearn.jpg?1696511720',
     )
     data = session_coingecko.asset_data(A_YFI.resolve_to_asset_with_oracles().to_coingecko())
     assert_coin_data_same(data, expected_data, compare_description=False)
@@ -54,19 +55,14 @@ def test_asset_data(session_coingecko):
         session_coingecko.asset_data(EvmToken('eip155:1/erc20:0x1844b21593262668B7248d0f57a220CaaBA46ab9').to_coingecko())  # PRL, a token without coingecko page  # noqa: E501
 
 
+@pytest.mark.vcr
 def test_coingecko_historical_price(session_coingecko):
     price = session_coingecko.query_historical_price(
         from_asset=A_ETH,
         to_asset=A_EUR,
-        timestamp=1483056100,
+        timestamp=1704135600,
     )
-    assert price == Price(FVal('7.7478028375650725'))
-
-
-def test_assets_with_icons(icon_manager):
-    """Checks that _assets_with_coingecko_id returns a proper result"""
-    x = icon_manager._assets_with_coingecko_id()
-    assert len(x) > 1000
+    assert price == Price(FVal('2065.603754353392'))
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -85,29 +81,26 @@ def test_asset_icons_for_collections(icon_manager: IconManager) -> None:
     assert icon_path.exists() is False
 
     # mock coingecko response
-    def mock_coingecko(url, timeout):  # pylint: disable=unused-argument
+    def mock_coingecko(url, *args, **kwargs):  # pylint: disable=unused-argument
         nonlocal times_api_was_queried
         times_api_was_queried += 1
         test_data_folder = Path(__file__).resolve().parent.parent / 'data' / 'mocks' / 'test_coingecko'  # noqa: E501
         if 'https://api.coingecko.com/api/v3/coins/dai' in url:
-            with open(test_data_folder / 'coins' / 'dai.json', encoding='utf8') as f:
-                return MockResponse(HTTPStatus.OK, f.read())
+            return MockResponse(HTTPStatus.OK, (test_data_folder / 'coins' / 'dai.json').read_text(encoding='utf8'))  # noqa: E501
         elif 'https://api.coingecko.com/api/v3/coins/ethereum' in url:
-            with open(test_data_folder / 'coins' / 'ethereum.json', encoding='utf8') as f:
-                return MockResponse(HTTPStatus.OK, f.read())
+            return MockResponse(HTTPStatus.OK, (test_data_folder / 'coins' / 'ethereum.json').read_text(encoding='utf8'))  # noqa: E501
         elif url in {
-            'https://assets.coingecko.com/coins/images/9956/small/4943.png?1636636734',
-            'https://assets.coingecko.com/coins/images/279/small/ethereum.png?1595348880',
+            'https://coin-images.coingecko.com/coins/images/9956/small/4943.png?1636636734',
+            'https://coin-images.coingecko.com/coins/images/279/small/ethereum.png?1595348880',
         }:
             icon_name = '4943.png'
             if '279' in url:
                 icon_name = '279.png'
-            with open(test_data_folder / 'icons' / icon_name, 'rb') as f:
-                return MockResponse(
-                    status_code=HTTPStatus.OK,
-                    text=str(f.read()),
-                    headers={'Content-Type': 'image/png'},
-                )
+            return MockResponse(
+                status_code=HTTPStatus.OK,
+                text=str((test_data_folder / 'icons' / icon_name).read_bytes()),
+                headers={'Content-Type': 'image/png'},
+            )
 
         raise AssertionError(f'Unexpected url {url} in asset collection icons test')
 

@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 import requests
-from flaky import flaky
 
 from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.chain.ethereum.modules.makerdao.vaults import MakerdaoVault
@@ -18,10 +17,9 @@ from rotkehlchen.tests.utils.api import (
     ASYNC_TASK_WAIT_TIMEOUT,
     api_url_for,
     assert_error_response,
-    assert_ok_async_response,
     assert_proper_response,
     assert_proper_response_with_result,
-    wait_for_async_task_with_result,
+    assert_proper_sync_response_with_result,
 )
 from rotkehlchen.tests.utils.checks import (
     assert_serialized_dicts_equal,
@@ -224,15 +222,12 @@ def test_query_vaults(rotkehlchen_api_server, ethereum_accounts):
         rotkehlchen_api_server,
         'makerdaovaultsresource',
     ), json={'async_query': async_query})
-    if async_query:
-        task_id = assert_ok_async_response(response)
-        vaults = wait_for_async_task_with_result(
-            rotkehlchen_api_server,
-            task_id,
-            timeout=ASYNC_TASK_WAIT_TIMEOUT * 3,
-        )
-    else:
-        vaults = assert_proper_response_with_result(response)
+    vaults = assert_proper_response_with_result(
+        response=response,
+        rotkehlchen_api_server=rotkehlchen_api_server,
+        async_query=async_query,
+        timeout=ASYNC_TASK_WAIT_TIMEOUT * 3,
+    )
 
     _check_vaults_values(vaults, ethereum_accounts[0])
 
@@ -240,15 +235,12 @@ def test_query_vaults(rotkehlchen_api_server, ethereum_accounts):
         rotkehlchen_api_server,
         'makerdaovaultdetailsresource',
     ), json={'async_query': async_query})
-    if async_query:
-        task_id = assert_ok_async_response(response)
-        details = wait_for_async_task_with_result(
-            rotkehlchen_api_server,
-            task_id,
-            timeout=ASYNC_TASK_WAIT_TIMEOUT * 3,
-        )
-    else:
-        details = assert_proper_response_with_result(response)
+    details = assert_proper_response_with_result(
+        response=response,
+        rotkehlchen_api_server=rotkehlchen_api_server,
+        async_query=async_query,
+        timeout=ASYNC_TASK_WAIT_TIMEOUT * 3,
+    )
     _check_vault_details_values(
         details=details,
         total_interest_owed_list=[FVal('0.2810015984764')],
@@ -256,7 +248,6 @@ def test_query_vaults(rotkehlchen_api_server, ethereum_accounts):
 
 
 @pytest.mark.vcr(filter_query_parameters=['apikey'])
-@flaky(max_runs=3, min_passes=1)  # some makerdao vault tests take long time and may time out
 @pytest.mark.parametrize('ethereum_accounts', [[TEST_ADDRESS_1]])
 @pytest.mark.parametrize('ethereum_modules', [['makerdao_vaults']])
 @pytest.mark.parametrize('start_with_valid_premium', [True])
@@ -272,7 +263,7 @@ def test_query_only_details_and_not_vaults(rotkehlchen_api_server, ethereum_acco
         rotkehlchen_api_server,
         'makerdaovaultdetailsresource',
     ))
-    details = assert_proper_response_with_result(response)
+    details = assert_proper_sync_response_with_result(response)
     _check_vault_details_values(
         details=details,
         total_interest_owed_list=[FVal('0.2810015984764')],
@@ -282,7 +273,7 @@ def test_query_only_details_and_not_vaults(rotkehlchen_api_server, ethereum_acco
         rotkehlchen_api_server,
         'makerdaovaultsresource',
     ))
-    vaults = assert_proper_response_with_result(response)
+    vaults = assert_proper_sync_response_with_result(response)
     _check_vaults_values(vaults, ethereum_accounts[0])
 
 
@@ -297,7 +288,7 @@ def test_query_vaults_details_non_premium(rotkehlchen_api_server):
     assert_error_response(
         response=response,
         contained_in_msg='Currently logged in user testuser does not have a premium subscription',
-        status_code=HTTPStatus.CONFLICT,
+        status_code=HTTPStatus.FORBIDDEN,
     )
 
 
@@ -323,7 +314,7 @@ def test_query_vaults_details_liquidation(rotkehlchen_api_server, ethereum_accou
         rotkehlchen_api_server,
         'makerdaovaultsresource',
     ))
-    vaults = assert_proper_response_with_result(response)
+    vaults = assert_proper_sync_response_with_result(response)
     vault_6021 = {
         'identifier': 6021,
         'owner': ethereum_accounts[2],
@@ -423,7 +414,7 @@ def test_query_vaults_details_liquidation(rotkehlchen_api_server, ethereum_accou
             'tx_hash': '0xded0f9de641087692555d92a7fa94fa9fa7abf22744b2d16c20a66c5e48a8edf',
         }],
     }
-    details = assert_proper_response_with_result(response)
+    details = assert_proper_sync_response_with_result(response)
     assert len(details) >= 2
     assert_serialized_dicts_equal(vault_6021_details, details[0], ignore_keys=['stability_fee'])
     assert_serialized_dicts_equal(
@@ -454,7 +445,7 @@ def test_query_vaults_wbtc(rotkehlchen_api_server, ethereum_accounts):
         'makerdaovaultsresource',
     ))
     # That proxy has 3 vaults. We only want to test 8913, which is closed/repaid so just keep that
-    vaults = [x for x in assert_proper_response_with_result(response) if x['identifier'] == 8913]
+    vaults = [x for x in assert_proper_sync_response_with_result(response) if x['identifier'] == 8913]  # noqa: E501
     vault_8913 = MakerdaoVault(
         identifier=8913,
         owner=ethereum_accounts[0],
@@ -521,7 +512,7 @@ def test_query_vaults_wbtc(rotkehlchen_api_server, ethereum_accounts):
             'tx_hash': '0x678c4da562173c102473f1904ff293a767ebac9ec6c7d728ef2fd41acf00a13a',
         }],  # way too many events in the vault, so no need to check them all
     }
-    details = assert_proper_response_with_result(response)
+    details = assert_proper_sync_response_with_result(response)
     assert len(details) == 1
     assert_serialized_dicts_equal(
         details[0],
@@ -532,7 +523,6 @@ def test_query_vaults_wbtc(rotkehlchen_api_server, ethereum_accounts):
 
 
 @pytest.mark.vcr(filter_query_parameters=['apikey'])
-@flaky(max_runs=3, min_passes=1)  # some makerdao vault tests take long time and may time out
 @pytest.mark.parametrize('ethereum_accounts', [[TEST_ADDRESS_1]])
 @pytest.mark.parametrize('ethereum_modules', [['makerdao_vaults']])
 @pytest.mark.parametrize('start_with_valid_premium', [True])
@@ -547,7 +537,7 @@ def test_query_vaults_usdc(rotkehlchen_api_server, ethereum_accounts):
         rotkehlchen_api_server,
         'makerdaovaultsresource',
     ))
-    vaults = assert_proper_response_with_result(response)
+    vaults = assert_proper_sync_response_with_result(response)
     vault_7588 = MakerdaoVault(
         identifier=7588,
         owner=ethereum_accounts[0],
@@ -621,13 +611,12 @@ def test_query_vaults_usdc(rotkehlchen_api_server, ethereum_accounts):
             'tx_hash': '0x97462ebba7ce2467787bf6de25a25c24e538cf8a647919112c5f048b6a293408',
         }],
     }
-    details = assert_proper_response_with_result(response)
+    details = assert_proper_sync_response_with_result(response)
     expected_details = [vault_7588_details]
     assert_serialized_lists_equal(expected_details, details, ignore_keys=['liquidation_ratio'])
 
 
 @pytest.mark.vcr(filter_query_parameters=['apikey'])
-@flaky(max_runs=3, min_passes=1)  # some makerdao vault tests take long time and may time out
 @pytest.mark.parametrize('ethereum_accounts', [[TEST_ADDRESS_1]])
 @pytest.mark.parametrize('ethereum_modules', [['makerdao_vaults']])
 @pytest.mark.parametrize('start_with_valid_premium', [True])
@@ -645,7 +634,7 @@ def test_two_vaults_same_account_same_collateral(rotkehlchen_api_server, ethereu
         rotkehlchen_api_server,
         'makerdaovaultsresource',
     ))
-    vaults = assert_proper_response_with_result(response)
+    vaults = assert_proper_sync_response_with_result(response)
     vault_8543 = {
         'identifier': 8543,
         'owner': ethereum_accounts[0],
@@ -791,7 +780,7 @@ def test_two_vaults_same_account_same_collateral(rotkehlchen_api_server, ethereu
             'tx_hash': '0x36bfa27e157c03393a8816f6c1e3e990474f8f7473413810d87e2f4981d58044',
         }],
     }
-    details = assert_proper_response_with_result(response)
+    details = assert_proper_sync_response_with_result(response)
     assert len(details) == 2
     assert_serialized_dicts_equal(details[0], vault_8543_details, ignore_keys=['stability_fee'])
     assert_serialized_dicts_equal(
@@ -827,7 +816,7 @@ def test_query_vaults_usdc_strange(rotkehlchen_api_server, ethereum_accounts):
         'makerdaovaultsresource',
     ))
     # That proxy has 3 vaults. We only want to test 7538, which is closed/repaid so just keep that
-    vaults = [x for x in assert_proper_response_with_result(response) if x['identifier'] == 7538]
+    vaults = [x for x in assert_proper_sync_response_with_result(response) if x['identifier'] == 7538]  # noqa: E501
     vault_7538 = MakerdaoVault(
         identifier=7538,
         owner=ethereum_accounts[0],
@@ -893,12 +882,12 @@ def test_query_vaults_usdc_strange(rotkehlchen_api_server, ethereum_accounts):
             'tx_hash': '0x678c4da562173c102473f1904ff293a767ebac9ec6c7d728ef2fd41acf00a13a',
         }],
     }
-    details = assert_proper_response_with_result(response)
+    details = assert_proper_sync_response_with_result(response)
     expected_details = [vault_7538_details]
     assert_serialized_lists_equal(expected_details, details)
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [[TEST_ADDRESS_1]])
 @pytest.mark.parametrize('ethereum_modules', [['makerdao_vaults']])
 @pytest.mark.parametrize('mocked_proxies', [{

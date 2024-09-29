@@ -1,71 +1,80 @@
 <script setup lang="ts">
-import {
-  NotificationCategory,
-  type NotificationPayload,
-  Severity
-} from '@rotki/common/lib/messages';
-import { type Ref } from 'vue';
-import { type Blockchain } from '@rotki/common/lib/blockchain';
-import { type DataTableHeader } from '@/types/vuetify';
-import {
-  type AddressBookEntry,
-  type AddressBookLocation,
-  type AddressBookRequestPayload
-} from '@/types/eth-names';
-import { type Collection } from '@/types/collection';
-import { type TablePagination } from '@/types/pagination';
+import { NotificationCategory, type NotificationPayload, Severity } from '@rotki/common';
+import type { DataTableColumn, DataTableSortData, TablePaginationData } from '@rotki/ui-library';
+import type { AddressBookEntry, AddressBookLocation } from '@/types/eth-names';
+import type { Collection } from '@/types/collection';
 
 const props = defineProps<{
   collection: Collection<AddressBookEntry>;
   location: AddressBookLocation;
   loading: boolean;
-  options: TablePagination<AddressBookEntry>;
 }>();
 
 const emit = defineEmits<{
   (e: 'edit', item: AddressBookEntry): void;
-  (e: 'update:page', page: number): void;
-  (e: 'update:options', pagination: AddressBookRequestPayload): void;
   (e: 'refresh'): void;
 }>();
 
+const { location } = toRefs(props);
+
 const { t } = useI18n();
 
-const setPage = (page: number) => {
-  emit('update:page', page);
-};
+const paginationModel = defineModel<TablePaginationData>('pagination', { required: true });
+const sortModel = defineModel<DataTableSortData<AddressBookEntry>>('sort', { required: true });
 
-const updatePagination = (pagination: AddressBookRequestPayload) =>
-  emit('update:options', pagination);
+const cols = computed<DataTableColumn<AddressBookEntry>[]>(() => [
+  {
+    label: t('common.address'),
+    key: 'address',
+    sortable: true,
+  },
+  {
+    label: t('common.name'),
+    key: 'name',
+    sortable: true,
+  },
+  {
+    label: '',
+    key: 'actions',
+  },
+]);
 
-const refresh = () => {
+function refresh() {
   emit('refresh');
-};
+}
 
-const addressBookDeletion = (location: Ref<AddressBookLocation>) => {
+function edit(item: AddressBookEntry) {
+  emit('edit', item);
+}
+
+function setPage(page: number) {
+  set(paginationModel, {
+    ...get(paginationModel),
+    page,
+  });
+}
+
+function addressBookDeletion(location: Ref<AddressBookLocation>) {
   const { show } = useConfirmStore();
   const { notify } = useNotificationsStore();
-  const { deleteAddressBook: deleteAddressBookCaller } =
-    useAddressesNamesStore();
+  const { deleteAddressBook: deleteAddressBookCaller } = useAddressesNamesStore();
 
-  const deleteAddressBook = async (
-    address: string,
-    blockchain: Blockchain | null
-  ) => {
+  const deleteAddressBook = async (address: string, blockchain: string | null) => {
     try {
       await deleteAddressBookCaller(get(location), [{ address, blockchain }]);
       refresh();
-    } catch (e: any) {
+    }
+    catch (error: any) {
       const notification: NotificationPayload = {
         title: t('address_book.actions.delete.error.title'),
         message: t('address_book.actions.delete.error.description', {
           chain: blockchain || t('common.multi_chain'),
           address,
-          message: e.message
-        }).toString(),
+          message: error.message,
+        }),
         category: NotificationCategory.DEFAULT,
         display: true,
-        severity: Severity.ERROR
+        severity: Severity.ERROR,
       };
       notify(notification);
     }
@@ -77,77 +86,58 @@ const addressBookDeletion = (location: Ref<AddressBookLocation>) => {
         title: t('address_book.actions.delete.dialog.title'),
         message: t('address_book.actions.delete.dialog.message', {
           chain: item.blockchain || t('common.multi_chain'),
-          address: item.address
-        })
+          address: item.address,
+        }),
       },
-      () => deleteAddressBook(item.address, item.blockchain)
+      () => deleteAddressBook(item.address, item.blockchain),
     );
   };
 
   return {
-    showDeleteConfirmation
+    showDeleteConfirmation,
   };
-};
-
-const { location } = toRefs(props);
-
-const edit = (item: AddressBookEntry) => {
-  emit('edit', item);
-};
-
-const tableHeaders = computed<DataTableHeader[]>(() => [
-  {
-    text: t('common.address').toString(),
-    value: 'address',
-    sortable: false
-  },
-  {
-    text: t('common.name').toString(),
-    value: 'name',
-    sortable: false
-  },
-  {
-    text: '',
-    value: 'actions',
-    sortable: false
-  }
-]);
+}
 
 const { showDeleteConfirmation } = addressBookDeletion(location);
 </script>
 
 <template>
   <div>
-    <CollectionHandler :collection="collection" @set-page="setPage($event)">
-      <template #default="{ data, itemLength }">
-        <DataTable
-          :items="data"
-          :headers="tableHeaders"
+    <CollectionHandler
+      :collection="collection"
+      @set-page="setPage($event)"
+    >
+      <template #default="{ data }">
+        <RuiDataTable
+          v-model:pagination.external="paginationModel"
+          v-model:sort.external="sortModel"
+          :rows="data"
+          :cols="cols"
           :loading="loading"
-          :options="options"
-          :server-items-length="itemLength"
-          @update:options="updatePagination($event)"
+          row-attr="address"
+          outlined
+          dense
         >
-          <template #item.address="{ item }">
+          <template #item.address="{ row }">
             <AccountDisplay
               :account="{
-                address: item.address,
-                chain: item.blockchain
+                address: row.address,
+                chain: row.blockchain ?? 'ALL',
               }"
               :use-alias-name="false"
               :truncate="false"
             />
           </template>
-          <template #item.actions="{ item }">
+          <template #item.actions="{ row }">
             <RowActions
               :disabled="loading"
               :delete-tooltip="t('address_book.actions.delete.tooltip')"
               :edit-tooltip="t('address_book.actions.edit.tooltip')"
-              @delete-click="showDeleteConfirmation(item)"
-              @edit-click="edit(item)"
+              @delete-click="showDeleteConfirmation(row)"
+              @edit-click="edit(row)"
             />
           </template>
-        </DataTable>
+        </RuiDataTable>
       </template>
     </CollectionHandler>
   </div>

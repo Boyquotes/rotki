@@ -1,27 +1,34 @@
 import json
+from collections.abc import Callable
 from unittest.mock import patch
 
 import pytest
+import requests
 
+from rotkehlchen.assets.asset import Asset
 from rotkehlchen.assets.types import AssetData, AssetType
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants.assets import A_BTC, A_ETH
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.globaldb.updates import ASSETS_VERSION_KEY, AssetsUpdater, UpdateFileType
+from rotkehlchen.globaldb.utils import GLOBAL_DB_VERSION
+from rotkehlchen.tests.api.test_assets_updates import mock_asset_updates
 from rotkehlchen.tests.utils.mock import MockResponse
 from rotkehlchen.types import ChainID, EvmTokenKind, Timestamp
 
-VALID_ASSET_MAPPINGS = """INSERT INTO multiasset_mappings(collection_id, asset) VALUES (99999999, "ETH");
+VALID_ASSET_MAPPINGS = """INSERT INTO multiasset_mappings(collection_id, asset) VALUES (5, "ETH");
     *
-    INSERT INTO multiasset_mappings(collection_id, asset) VALUES (99999999, "eip155:1/erc20:0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84");
+    INSERT INTO multiasset_mappings(collection_id, asset) VALUES (5, "BTC");
     *
-"""  # noqa: E501
+"""
 VALID_ASSET_COLLECTIONS = """INSERT INTO asset_collections(id, name, symbol) VALUES (99999999, "My custom ETH", "ETHS")
     *
 """  # noqa: E501
 VALID_ASSETS = """INSERT INTO assets(identifier, name, type) VALUES("MYBONK", "Bonk", "Y"); INSERT INTO common_asset_details(identifier, symbol, coingecko, cryptocompare, forked, started, swapped_for) VALUES("MYBONK", "BONK", "bonk", "BONK", NULL, 1672279200, NULL);
     *
+UPDATE common_asset_details SET coingecko="coingecko-id" where identifier="new-asset";
+INSERT INTO assets(identifier, name, type) VALUES("new-asset", "New Asset", "Y"); INSERT INTO common_asset_details(identifier, symbol, coingecko, cryptocompare, forked, started, swapped_for) VALUES("new-asset", "NEW", "coingecko-id", "", NULL, 1672279200, NULL);
 """  # noqa: E501
 
 
@@ -30,28 +37,37 @@ def fixture_assets_updater(messages_aggregator):
     return AssetsUpdater(messages_aggregator)
 
 
-def mock_github_assets_response(url, timeout):  # pylint: disable=unused-argument
-    """Mock response from github for assets updates"""
-    if 'mappings' in url:
-        return MockResponse(200, VALID_ASSET_MAPPINGS)
-    if 'collections' in url:
-        return MockResponse(200, VALID_ASSET_COLLECTIONS)
-    if 'info' in url:
-        local_schema = GlobalDBHandler().get_schema_version()
-        data = json.dumps(
-            {
+def get_mock_github_assets_response(
+        assets_exists: bool,
+        collections_exists: bool,
+        mappings_exists: bool,
+) -> Callable[..., MockResponse]:
+    """Return mocked response from github for assets updates.
+    Each of the boolean parameters indicates if the mocked response should return
+    corresponding update files' content or 404 error."""
+
+    def mocked_response_fn(url, timeout):  # pylint: disable=unused-argument
+        if 'mappings' in url:
+            return MockResponse(200, VALID_ASSET_MAPPINGS) if mappings_exists else MockResponse(404, '')  # noqa: E501
+        if 'collections' in url:
+            return MockResponse(200, VALID_ASSET_COLLECTIONS) if collections_exists else MockResponse(404, '')  # noqa: E501
+        if 'info' in url:
+            local_schema = GlobalDBHandler.get_schema_version()
+            data = json.dumps({
                 'updates': {
                     '998': {'min_schema_version': 4, 'max_schema_version': 4, 'changes': 1},
                     '999': {'min_schema_version': local_schema, 'max_schema_version': local_schema, 'changes': 1},  # noqa: E501
                 },
                 'latest': 999,
-            },
-        )
-        return MockResponse(200, data)
-    if 'updates' in url:
-        return MockResponse(200, VALID_ASSETS)
+            })
+            return MockResponse(200, data)
 
-    raise AssertionError(f'Unknown url {url}')
+        if 'updates' in url:
+            return MockResponse(200, VALID_ASSETS) if assets_exists else MockResponse(404, '')
+
+        raise AssertionError(f'Unknown url {url}')
+
+    return mocked_response_fn
 
 
 @pytest.mark.parametrize(('text', 'expected_data', 'error_msg'), [
@@ -446,7 +462,15 @@ def test_updates_assets_collections_errors(assets_updater: AssetsUpdater):
     ]
 
 
-def test_asset_update(assets_updater: AssetsUpdater):
+@pytest.mark.parametrize('update_assets', [True, False])
+@pytest.mark.parametrize('update_collections', [True, False])
+@pytest.mark.parametrize('update_mappings', [True, False])
+def test_asset_update(
+        assets_updater: AssetsUpdater,
+        update_assets: bool,
+        update_collections: bool,
+        update_mappings: bool,
+):
     """
     Check that globaldb updates work properly when getting information from github
     and assets collections are applied correctly in the process
@@ -454,19 +478,97 @@ def test_asset_update(assets_updater: AssetsUpdater):
     # consume warnings from other tests
     assets_updater.msg_aggregator.consume_warnings()
     # set a high version of the globaldb to avoid conflicts with future changes
-    GlobalDBHandler().add_setting_value(ASSETS_VERSION_KEY, 997)
-    with patch('requests.get', wraps=mock_github_assets_response):
+    GlobalDBHandler.add_setting_value(ASSETS_VERSION_KEY, 997)
+    with patch('requests.get', wraps=get_mock_github_assets_response(update_assets, update_collections, update_mappings)):  # noqa: E501
         assets_updater.perform_update(up_to_version=999, conflicts={})
 
     with GlobalDBHandler().conn.read_ctx() as cursor:
-        cursor.execute('SELECT * FROM asset_collections WHERE id = 99999999')
-        assert cursor.fetchall() == [(99999999, 'My custom ETH', 'ETHS')]
-        cursor.execute('SELECT * FROM multiasset_mappings WHERE collection_id = 99999999')
-        assert cursor.fetchall() == [(99999999, 'ETH'), (99999999, 'eip155:1/erc20:0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84')]  # noqa: E501
+        assert cursor.execute('SELECT * FROM assets WHERE identifier = "MYBONK"').fetchall() == ([
+            ('MYBONK', 'Bonk', 'Y'),
+        ] if update_assets else [])
+        assert cursor.execute('SELECT * FROM assets WHERE identifier = "new-asset"').fetchall() == ([  # noqa: E501
+            ('new-asset', 'New Asset', 'Y'),
+        ] if update_assets else [])
 
-    # check that we skip versions with wrong schema and that all the versions
-    # required are correctly queried.
-    warnings = assets_updater.msg_aggregator.consume_warnings()
-    assert warnings == [
-        f'Skipping assets update 998 since it requires a min schema of 4 and max schema of 4 while the local DB schema version is {GlobalDBHandler().get_schema_version()}. You will have to follow an alternative method to obtain the assets of this update. Easiest would be to reset global DB.',  # noqa: E501
-    ]
+        cursor.execute('SELECT * FROM asset_collections WHERE id = 99999999')
+        assert cursor.fetchall() == ([
+            (99999999, 'My custom ETH', 'ETHS'),
+        ] if update_collections else [])
+
+        cursor.execute('SELECT * FROM multiasset_mappings WHERE collection_id = 5')
+        assert cursor.fetchall() == ([(5, 'BTC'), (5, 'ETH')] if update_mappings else []) + [  # plus the already existing ones  # noqa: E501
+            (5, 'eip155:1/erc20:0xa1faa113cbE53436Df28FF0aEe54275c13B40975'),
+            (5, 'eip155:43114/erc20:0x2147EFFF675e4A4eE1C2f918d181cDBd7a8E208f'),
+        ]
+
+        # check that we skip versions with wrong schema and that all the versions
+        # required are correctly queried.
+        warnings = assets_updater.msg_aggregator.consume_warnings()
+        assert warnings == [
+            f'Skipping assets update 998 since it requires a min schema of 4 and max schema of 4 while the local DB schema version is {GlobalDBHandler().get_schema_version()}. You will have to follow an alternative method to obtain the assets of this update. Easiest would be to reset global DB.',  # noqa: E501
+        ]
+
+
+def test_conflict_updates(assets_updater: AssetsUpdater, globaldb: GlobalDBHandler):
+    """Test that the logic doesn't add duplicates for assets that were inserted twice
+    in the globaldb assets updates. Also test a bug in asset updates where the foreign key entries
+    are removed when an asset update conflict is resolved through 'remote' option.
+    """
+    with globaldb.conn.write_ctx() as write_cursor:
+        assert write_cursor.execute(
+            'SELECT COUNT(*) FROM underlying_tokens_list WHERE parent_token_entry=?;',
+            ('eip155:42161/erc20:0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA',),
+        ).fetchone()[0] == 1
+        assert write_cursor.execute(
+            'SELECT COUNT(*) FROM multiasset_mappings WHERE asset=?;',
+            ('eip155:42161/erc20:0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8',),
+        ).fetchone()[0] == 1
+
+    update_1 = """INSERT INTO assets(identifier, name, type) VALUES("eip155:42161/erc20:0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", "Bridged USDC", "C"); INSERT INTO evm_tokens(identifier, token_kind, chain, address, decimals, protocol) VALUES("eip155:42161/erc20:0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", "A", 42161, "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", 6, ""); INSERT INTO common_asset_details(identifier, symbol, coingecko, cryptocompare, forked, started, swapped_for) VALUES("eip155:42161/erc20:0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", "USDC.e", "usd-coin", "USDC", NULL, 1623868379, NULL);
+*"""  # noqa: E501
+    update_2 = """INSERT INTO assets(identifier, name, type) VALUES("eip155:42161/erc20:0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", "Bridged USDC", "C"); INSERT INTO evm_tokens(identifier, token_kind, chain, address, decimals, protocol) VALUES("eip155:42161/erc20:0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", "A", 42161, "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", 6, NULL); INSERT INTO common_asset_details(identifier, symbol, coingecko, cryptocompare, forked, started, swapped_for) VALUES("eip155:42161/erc20:0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", "USDC.e", "usd-coin-ethereum-bridged", "USDC", NULL, 1623868379, NULL);
+*"""  # noqa: E501
+    update_patch = mock_asset_updates(
+        original_requests_get=requests.get,
+        latest=2,
+        updates={'1': {
+            'changes': 1,
+            'min_schema_version': GLOBAL_DB_VERSION,
+            'max_schema_version': GLOBAL_DB_VERSION,
+        }, '2': {
+            'changes': 1,
+            'min_schema_version': GLOBAL_DB_VERSION,
+            'max_schema_version': GLOBAL_DB_VERSION,
+        }},
+        sql_actions={'1': {'assets': update_1, 'collections': '', 'mappings': ''}, '2': {'assets': update_2, 'collections': '', 'mappings': ''}},  # noqa: E501
+    )
+    cursor = globaldb.conn.cursor()
+    cursor.execute(f'DELETE FROM settings WHERE name="{ASSETS_VERSION_KEY}"')
+    with update_patch:
+        conflicts = assets_updater.perform_update(
+            up_to_version=2,
+            conflicts=None,
+        )
+    assert conflicts is not None
+    assert len(conflicts) == 1
+    assert conflicts[0]['remote'] == {'name': 'Bridged USDC', 'symbol': 'USDC.e', 'asset_type': 'evm token', 'started': 1623868379, 'forked': None, 'swapped_for': None, 'address': '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8', 'token_kind': 'erc20', 'decimals': 6, 'cryptocompare': 'USDC', 'coingecko': 'usd-coin-ethereum-bridged', 'protocol': None, 'evm_chain': 'arbitrum_one'}  # noqa: E501
+
+    # resolve with all the remote updates and check if the multiasset and underlying_asset mappings still exists  # noqa: E501
+    with update_patch:
+        assets_updater.perform_update(
+            up_to_version=2,
+            conflicts={
+                Asset(conflict['identifier']): 'remote'
+                for conflict in conflicts
+            },
+        )
+    assert cursor.execute('SELECT value FROM settings WHERE name="assets_version"').fetchone()[0] == '2'  # noqa: E501
+    with globaldb.conn.read_ctx() as cursor:
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM underlying_tokens_list WHERE parent_token_entry=?;',
+            ('eip155:42161/erc20:0xA5EDBDD9646f8dFF606d7448e414884C7d905dCA',),
+        ).fetchone()[0] == 1
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM multiasset_mappings WHERE asset=?;',
+            ('eip155:42161/erc20:0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8',),
+        ).fetchone()[0] == 1

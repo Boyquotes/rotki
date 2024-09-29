@@ -2,99 +2,108 @@
 import useVuelidate from '@vuelidate/core';
 import { helpers, required } from '@vuelidate/validators';
 import { toMessages } from '@/utils/validation';
+import type { AssetInfoWithId } from '@/types/asset';
 
-type Errors = Partial<
-  Record<'targetIdentifier' | 'sourceIdentifier', string[]>
->;
+type Errors = Partial<Record<'targetIdentifier' | 'sourceIdentifier', string[]>>;
 
-defineProps<{ value: boolean }>();
+const display = defineModel<boolean>({ required: true });
 
-const emit = defineEmits<{ (e: 'input', value: boolean): void }>();
 const done = ref(false);
 const errorMessages = ref<Errors>({});
 const targetIdentifier = ref('');
+const target = ref<AssetInfoWithId>();
 const sourceIdentifier = ref('');
 const pending = ref(false);
 
 const { mergeAssets } = useAssets();
 const { t } = useI18n();
 
-const reset = () => {
-  set(done, false);
-  set(targetIdentifier, '');
-  set(sourceIdentifier, '');
-  set(pending, false);
-  set(errorMessages, {});
-  get(v$).$reset();
-};
-
-const clearErrors = () => {
-  set(done, false);
-  set(errorMessages, {});
-};
-
-async function merge() {
-  set(pending, true);
-  const result = await mergeAssets({
-    sourceIdentifier: get(sourceIdentifier),
-    targetIdentifier: get(targetIdentifier)
-  });
-
-  if (result.success) {
-    reset();
-    set(done, true);
-  } else {
-    set(
-      errorMessages,
-      typeof result.message === 'string'
-        ? ({
-            sourceIdentifier: [result.message || t('merge_dialog.error')]
-          } satisfies Errors)
-        : result.message
-    );
-    await get(v$).$validate();
-  }
-  set(pending, false);
-}
-
-const input = (value: boolean) => {
-  emit('input', value);
-  setTimeout(() => reset(), 100);
-};
-
 const rules = {
   sourceIdentifier: {
-    required: helpers.withMessage(
-      t('merge_dialog.source.non_empty').toString(),
-      required
-    )
+    required: helpers.withMessage(t('merge_dialog.source.non_empty'), required),
   },
   targetIdentifier: {
-    required: helpers.withMessage(
-      t('merge_dialog.target.non_empty').toString(),
-      required
-    )
-  }
+    required: helpers.withMessage(t('merge_dialog.target.non_empty'), required),
+  },
 };
 
 const v$ = useVuelidate(
   rules,
   {
     sourceIdentifier,
-    targetIdentifier
+    targetIdentifier,
   },
   {
     $autoDirty: true,
-    $externalResults: errorMessages
-  }
+    $externalResults: errorMessages,
+  },
 );
+
+function reset() {
+  set(done, false);
+  set(targetIdentifier, '');
+  set(sourceIdentifier, '');
+  set(pending, false);
+  set(errorMessages, {});
+  get(v$).$reset();
+  set(target, undefined);
+}
+
+function clearErrors() {
+  set(done, false);
+  set(errorMessages, {});
+}
+
+async function merge() {
+  set(pending, true);
+  const result = await mergeAssets({
+    sourceIdentifier: get(sourceIdentifier),
+    targetIdentifier: get(targetIdentifier),
+  });
+
+  if (result.success) {
+    reset();
+    set(done, true);
+  }
+  else {
+    set(
+      errorMessages,
+      typeof result.message === 'string'
+        ? ({
+            sourceIdentifier: [result.message || t('merge_dialog.error')],
+          } satisfies Errors)
+        : result.message,
+    );
+    await get(v$).$validate();
+  }
+  set(pending, false);
+}
+
+function input(value: boolean) {
+  set(display, value);
+  setTimeout(() => reset(), 100);
+}
+
+const excluded = computed(() => {
+  const source = get(sourceIdentifier);
+  if (!source)
+    return [];
+  return [source];
+});
 </script>
 
 <template>
-  <VDialog :value="value" max-width="500" @input="input($event)">
+  <RuiDialog
+    v-model="display"
+    max-width="500"
+  >
     <RuiCard>
-      <template #header>{{ t('merge_dialog.title') }}</template>
-      <template #subheader>{{ t('merge_dialog.subtitle') }}</template>
+      <template #header>
+        {{ t('merge_dialog.title') }}
+      </template>
+      <template #subheader>
+        {{ t('merge_dialog.subtitle') }}
+      </template>
       <div class="mb-4 text-body-2 text-rui-text-secondary">
         {{ t('merge_dialog.hint') }}
       </div>
@@ -109,7 +118,6 @@ const v$ = useVuelidate(
           variant="outlined"
           color="primary"
           :disabled="pending"
-          persistent-hint
           :hint="t('merge_dialog.source_hint')"
           @focus="clearErrors()"
           @blur="v$.sourceIdentifier.$touch()"
@@ -119,21 +127,32 @@ const v$ = useVuelidate(
         </div>
         <AssetSelect
           v-model="targetIdentifier"
+          v-model:asset="target"
           outlined
           :error-messages="toMessages(v$.targetIdentifier)"
           :label="t('merge_dialog.target.label')"
           :disabled="pending"
+          :excludes="excluded"
+          :hint="target ? t('merge_dialog.target_hint', { identifier: target.identifier }) : ''"
           @focus="clearErrors()"
           @blur="v$.targetIdentifier.$touch()"
         />
       </form>
 
-      <RuiAlert v-if="done" type="success">
+      <RuiAlert
+        v-if="done"
+        class="mt-4"
+        type="success"
+      >
         {{ t('merge_dialog.done') }}
       </RuiAlert>
       <template #footer>
         <div class="grow" />
-        <RuiButton variant="text" color="primary" @click="input(false)">
+        <RuiButton
+          variant="text"
+          color="primary"
+          @click="input(false)"
+        >
           {{ t('common.actions.close') }}
         </RuiButton>
         <RuiButton
@@ -146,5 +165,5 @@ const v$ = useVuelidate(
         </RuiButton>
       </template>
     </RuiCard>
-  </VDialog>
+  </RuiDialog>
 </template>

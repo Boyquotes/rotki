@@ -1,7 +1,9 @@
-import { type Wrapper, mount } from '@vue/test-utils';
-import Vuetify from 'vuetify';
+import { type VueWrapper, mount } from '@vue/test-utils';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { setActivePinia } from 'pinia';
 import SuggestedItem from '@/components/table-filter/SuggestedItem.vue';
-import { type Suggestion } from '@/types/filtering';
+import { createCustomPinia } from '../../../utils/create-pinia';
+import type { Suggestion } from '@/types/filtering';
 
 vi.mock('@/composables/assets/retrieval', () => ({
   useAssetInfoRetrieval: vi.fn().mockReturnValue({
@@ -10,27 +12,23 @@ vi.mock('@/composables/assets/retrieval', () => ({
       evmChain: 'ethereum',
       symbol: 'SYMBOL 2',
       isCustomAsset: false,
-      name: 'Name 2'
-    }))
-  })
+      name: 'Name 2',
+    })),
+  }),
 }));
 
-vi.mocked(useCssModule).mockReturnValue({
-  comparator: 'comparator'
-});
-
 describe('table-filter/SuggestedItem.vue', () => {
-  let wrapper: Wrapper<any>;
-  const createWrapper = (props: {
-    suggestion?: Suggestion;
-    chip?: boolean;
-  }) => {
-    const vuetify = new Vuetify();
+  let wrapper: VueWrapper<InstanceType<typeof SuggestedItem>>;
+  const createWrapper = (props: { suggestion: Suggestion; chip?: boolean }) => {
+    const pinia = createCustomPinia();
+    setActivePinia(pinia);
     return mount(SuggestedItem, {
-      vuetify,
-      propsData: {
-        ...props
-      }
+      global: {
+        plugins: [pinia],
+      },
+      props: {
+        ...props,
+      },
     });
   };
 
@@ -42,28 +40,27 @@ describe('table-filter/SuggestedItem.vue', () => {
     evmChain: 'optimism',
     symbol: 'SYMBOL 1',
     isCustomAsset: false,
-    name: 'Name 1'
+    name: 'Name 1',
   };
 
-  describe('Check if suggestion type is asset', () => {
+  afterEach(() => {
+    wrapper.unmount();
+  });
+
+  describe('check if suggestion type is asset', () => {
     it('asset = false', () => {
       const suggestion = {
         index: 0,
         total: 1,
         asset: false,
         key,
-        value
+        value,
       };
       wrapper = createWrapper({ suggestion });
 
       expect(wrapper.find('span > span:nth-child(1)').text()).toBe(key);
       expect(wrapper.find('span > span:nth-child(2)').text()).toBe('=');
-      expect(
-        wrapper
-          .find('span > span:nth-child(2)')
-          .classes()
-          .includes('comparator')
-      ).toBe(false);
+      expect(wrapper.find('span > span:nth-child(2)').classes().includes('comparator')).toBe(false);
       expect(wrapper.find('span > span:nth-child(3)').text()).toBe(value);
     });
 
@@ -73,14 +70,12 @@ describe('table-filter/SuggestedItem.vue', () => {
         total: 1,
         asset: true,
         key,
-        value: asset
+        value: asset,
       };
       wrapper = createWrapper({ suggestion });
 
       expect(wrapper.find('span > span:nth-child(1)').text()).toBe(key);
-      expect(wrapper.find('span > span:nth-child(3)').text()).toBe(
-        `${asset.symbol} (${asset.evmChain})`
-      );
+      expect(wrapper.find('span > div span').text()).toBe(`${asset.symbol} (${toSentenceCase(asset.evmChain)})`);
     });
 
     it('asset = true, send only the id', () => {
@@ -89,14 +84,12 @@ describe('table-filter/SuggestedItem.vue', () => {
         total: 1,
         asset: true,
         key,
-        value: assetId
+        value: assetId,
       };
       wrapper = createWrapper({ suggestion });
 
       expect(wrapper.find('span > span:nth-child(1)').text()).toBe(key);
-      expect(wrapper.find('span > span:nth-child(3)').text()).toBe(
-        'SYMBOL 2 (ethereum)'
-      );
+      expect(wrapper.find('span > div span').text()).toBe('SYMBOL 2 (Ethereum)');
     });
   });
 
@@ -107,7 +100,7 @@ describe('table-filter/SuggestedItem.vue', () => {
       asset: false,
       exclude: true,
       key,
-      value
+      value,
     };
     wrapper = createWrapper({ suggestion });
 
@@ -120,13 +113,13 @@ describe('table-filter/SuggestedItem.vue', () => {
       total: 1,
       asset: false,
       key,
-      value
+      value,
     };
     wrapper = createWrapper({ suggestion, chip: true });
 
-    expect(
-      wrapper.find('span > span:nth-child(2)').classes().includes('comparator')
-    ).toBe(true);
+    expect(wrapper.find('span > span:nth-child(2)').classes()).toEqual(
+      expect.arrayContaining([expect.stringMatching(/_comparator_/)]),
+    );
   });
 
   it('for boolean value', async () => {
@@ -135,14 +128,14 @@ describe('table-filter/SuggestedItem.vue', () => {
       total: 1,
       asset: false,
       key,
-      value: true
+      value: true,
     };
     wrapper = createWrapper({ suggestion });
 
-    await expect(wrapper.find('span').text()).toBe(`${key} = true`);
+    expect(wrapper.find('span').text()).toBe(`${key}=true`);
 
     await wrapper.setProps({ chip: true });
 
-    await expect(wrapper.find('span').text()).toBe(key);
+    expect(wrapper.find('span').text()).toBe(key);
   });
 });

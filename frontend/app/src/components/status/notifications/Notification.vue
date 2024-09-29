@@ -1,38 +1,54 @@
 <script setup lang="ts">
-import { type NotificationData, Severity } from '@rotki/common/lib/messages';
+import { type NotificationAction, type NotificationData, Severity } from '@rotki/common';
 import dayjs from 'dayjs';
+import { type RuiIcons, isRuiIcon } from '@rotki/ui-library';
 
 const props = withDefaults(
   defineProps<{
     notification: NotificationData;
     popup?: boolean;
   }>(),
-  { popup: false }
+  { popup: false },
 );
 
 const emit = defineEmits<{ (e: 'dismiss', id: number): void }>();
 
-const css = useCssModule();
 const { t } = useI18n();
 const { copy: copyToClipboard } = useClipboard();
 
 const { notification } = toRefs(props);
-const dismiss = (id: number) => {
-  emit('dismiss', id);
-};
 
-const icon = computed(() => {
+const actions = computed<NotificationAction[]>(() => {
+  const action = get(notification).action;
+
+  if (!action)
+    return [];
+
+  return arrayify(action);
+});
+
+function dismiss(id: number) {
+  emit('dismiss', id);
+}
+
+const icon = computed<RuiIcons>(() => {
   switch (get(notification).severity) {
     case Severity.ERROR:
     case Severity.INFO:
       return 'error-warning-line';
     case Severity.WARNING:
       return 'alarm-warning-line';
+    case Severity.REMINDER:
+      return 'alarm-line';
+    default:
+      return 'error-warning-line';
   }
-  return '';
 });
 
 const color = computed(() => {
+  if (get(notification).action)
+    return 'warning';
+
   switch (get(notification).severity) {
     case Severity.ERROR:
       return 'error';
@@ -40,13 +56,31 @@ const color = computed(() => {
       return 'info';
     case Severity.WARNING:
       return 'warning';
+    case Severity.REMINDER:
+      return 'reminder';
+    default:
+      return '';
   }
-  return '';
+});
+
+const circleBgClass = computed(() => {
+  switch (props.notification.severity) {
+    case Severity.ERROR:
+      return 'bg-rui-error';
+    case Severity.INFO:
+      return 'bg-rui-info';
+    case Severity.WARNING:
+      return 'bg-rui-warning';
+    case Severity.REMINDER:
+      return 'bg-rui-secondary';
+    default:
+      return 'bg-rui-success';
+  }
 });
 
 const date = computed(() => dayjs(get(notification).date).format('LLL'));
 
-const copy = async () => {
+async function copy() {
   const { message, i18nParam } = get(notification);
   let messageText = message;
 
@@ -54,106 +88,177 @@ const copy = async () => {
     messageText = t(i18nParam.message, {
       service: i18nParam.props.service,
       location: i18nParam.props.location,
-      url: i18nParam.props.url
-    }).toString();
+      url: i18nParam.props.url,
+    });
   }
   await copyToClipboard(messageText);
-};
+}
 
-const action = async (notification: NotificationData) => {
-  const action = notification.action?.action;
-  action?.();
-  dismiss(notification.id);
-};
+function doAction(id: number, action: NotificationAction) {
+  action.action?.();
+  if (!action.persist)
+    dismiss(id);
+}
+
+const message = ref();
+const MAX_HEIGHT = 64;
+
+const { height } = useElementSize(message);
+
+const showExpandArrow = computed(() => get(height) > MAX_HEIGHT);
+const expanded = ref<boolean>(false);
+
+const messageWrapperStyle = computed(() => {
+  if (!get(showExpandArrow))
+    return {};
+
+  const usedHeight = get(expanded) ? get(height) + 24 : MAX_HEIGHT;
+  return {
+    height: `${usedHeight}px`,
+  };
+});
+
+function messageClicked() {
+  if (!get(showExpandArrow) && get(expanded))
+    return;
+
+  set(expanded, true);
+}
+
+function buttonClicked() {
+  set(expanded, !get(expanded));
+}
+
+function getIcon(action: NotificationAction): RuiIcons {
+  return isRuiIcon(action.icon) ? action.icon : 'arrow-right-line';
+}
 </script>
 
 <template>
   <RuiCard
     :class="[
-      css.notification,
+      $style.notification,
       {
-        [css.action]: !!notification.action,
-        [css['fixed-height']]: !popup,
-        [css[`bg_${color}`]]: !!color,
-        ['!rounded-none']: popup
-      }
+        [$style[`bg_${color}`]]: color,
+        [$style.flat]: !color,
+        [$style.popup]: popup,
+      },
     ]"
-    class="!p-2"
+    class="!p-2 !pb-1.5"
     no-padding
     :variant="popup ? 'flat' : 'outlined'"
   >
-    <VListItem :class="css.body" class="flex-col items-stretch p-0">
-      <div class="flex pa-1">
-        <VListItemAvatar class="mr-3 ml-1 my-0" :color="color">
-          <div>
-            <RuiIcon size="24" class="text-white" :name="icon" />
-          </div>
-        </VListItemAvatar>
-        <VListItemContent class="py-0">
-          <VListItemTitle :title="notification.title">
-            {{ notification.title }}
-          </VListItemTitle>
-          <VListItemSubtitle>
-            {{ date }}
-          </VListItemSubtitle>
-        </VListItemContent>
-        <RuiTooltip
-          :popper="{ placement: 'bottom', offsetDistance: 0 }"
-          open-delay="400"
-          class="z-[9999]"
-        >
-          <template #activator>
-            <RuiButton variant="text" icon @click="dismiss(notification.id)">
-              <RuiIcon name="close-line" />
-            </RuiButton>
-          </template>
-          <span>{{ t('notification.dismiss_tooltip') }}</span>
-        </RuiTooltip>
-      </div>
+    <div class="flex pb-1 items-center overflow-hidden">
       <div
-        class="mt-1 px-2 text-rui-text break-words text-sm leading-2"
-        :class="[css.message, { [css.inline]: !popup }]"
+        class="mr-3 ml-1 my-0 rounded-full p-2"
+        :class="circleBgClass"
+      >
+        <RuiIcon
+          size="20"
+          class="text-white"
+          :name="icon"
+        />
+      </div>
+      <div class="flex-1 text-truncate">
+        <div
+          class="font-medium text-truncate"
+          :title="notification.title"
+        >
+          {{ notification.title }}
+        </div>
+        <div class="text-caption text-rui-text-secondary -mt-0.5">
+          {{ date }}
+        </div>
+      </div>
+      <RuiButton
+        variant="text"
+        icon
+        class="!p-2"
+        @click="dismiss(notification.id)"
+      >
+        <RuiIcon name="close-line" />
+      </RuiButton>
+    </div>
+    <div
+      class="mt-1 px-2 break-words text-rui-text-secondary text-body-2 leading-2 group overflow-hidden"
+      :class="[
+        $style.message,
+        {
+          'cursor-pointer': showExpandArrow && !expanded,
+          'pb-6': showExpandArrow && expanded,
+        },
+      ]"
+      :style="messageWrapperStyle"
+      @click="messageClicked()"
+    >
+      <div
+        ref="message"
+        :class="{
+          'max-h-[calc(100vh-15rem)] overflow-auto': popup && expanded,
+        }"
       >
         <MissingKeyNotification
           v-if="notification.i18nParam"
           :params="notification.i18nParam"
         />
-        <div v-else :title="notification.message">
+        <div
+          v-else
+          :title="notification.message"
+        >
           {{ notification.message }}
         </div>
       </div>
-      <slot />
-      <div class="flex mt-auto items-center mx-0.5">
-        <div v-if="notification.action" class="flex items-start mr-2">
-          <RuiButton
-            color="primary"
-            variant="text"
-            size="sm"
-            @click="action(notification)"
-          >
-            {{ notification.action.label }}
-            <template #append>
-              <RuiIcon name="arrow-right-line" size="16" />
-            </template>
-          </RuiButton>
-        </div>
-        <RuiTooltip
-          :popper="{ placement: 'bottom', offsetDistance: 0 }"
-          open-delay="400"
-          class="z-[9999]"
+      <div
+        v-if="showExpandArrow"
+        :class="$style.expand"
+      >
+        <RuiButton
+          class="!p-0.5"
+          :class="$style['expand-button']"
+          @click.stop="buttonClicked()"
         >
-          <template #activator>
-            <RuiButton color="primary" variant="text" size="sm" @click="copy()">
-              {{ t('notification.copy') }}
-              <template #append>
-                <RuiIcon name="file-copy-line" size="16" />
-              </template>
-            </RuiButton>
-          </template>
-          <span> {{ t('notification.copy_tooltip') }}</span>
-        </RuiTooltip>
+          <RuiIcon
+            :name="expanded ? 'arrow-up-s-line' : 'arrow-down-s-line'"
+            :class="{ 'invisible opacity-0 group-hover:translate-y-1': !expanded }"
+            class="transition-all group-hover:visible group-hover:opacity-100 group-hover:-translate-y-1 text-rui-text-secondary"
+            size="20"
+          />
+        </RuiButton>
       </div>
-    </VListItem>
+    </div>
+    <div class="flex mt-1 gap-2 mx-0.5">
+      <RuiButton
+        v-for="(action, index) in actions"
+        :key="index"
+        color="primary"
+        variant="text"
+        size="sm"
+        @click="doAction(notification.id, action)"
+      >
+        {{ action.label }}
+        <template #append>
+          <RuiIcon
+            :name="getIcon(action)"
+            size="16"
+          />
+        </template>
+      </RuiButton>
+      <RuiButton
+        v-if="notification.severity === Severity.ERROR"
+        color="primary"
+        variant="text"
+        size="sm"
+        @click="copy()"
+      >
+        {{ t('common.actions.copy') }}
+        <template #append>
+          <RuiIcon
+            name="file-copy-line"
+            size="16"
+          />
+        </template>
+      </RuiButton>
+    </div>
   </RuiCard>
 </template>
 
@@ -161,42 +266,53 @@ const action = async (notification: NotificationData) => {
 .notification {
   max-width: 400px;
 
-  &.fixed-height {
-    height: 164px;
+  &.popup {
+    @apply rounded-none #{!important};
   }
 
-  &.action {
-    background-color: rgba(237, 108, 2, 0.12);
+  .expand {
+    @apply bg-gradient-to-b from-transparent to-white absolute bottom-0 w-full;
+
+    &-button {
+      @apply w-full bg-gradient-to-b from-transparent to-white rounded-none;
+      background-color: transparent !important;
+    }
   }
 
-  @each $color in (warning, error, info) {
+  @each $color in (warning, error, info, secondary) {
     &.bg_#{$color} {
-      @apply bg-rui-#{$color}/[.12] #{!important};
+      @apply bg-rui-#{$color}/[.1] #{!important};
+
+      .expand {
+        &-button {
+          @apply to-rui-#{$color}/[.1] #{!important};
+        }
+      }
     }
   }
 }
 
-.body {
-  max-width: 400px;
-  height: 100% !important;
-
-  &::after {
-    display: none;
-  }
-}
-
 .message {
-  height: 60px;
-  overflow-y: auto;
-  white-space: pre-line;
-
-  .inline {
-    min-height: 60px;
-  }
+  @apply overflow-hidden whitespace-pre-line relative transition-all;
 }
 
-.copy-area {
-  position: absolute;
-  left: -999em;
+:global(.dark) {
+  .notification {
+    &.flat {
+      .expand {
+        @apply to-[#1E1E1E];
+
+        &-button {
+          @apply to-[#1E1E1E];
+        }
+      }
+    }
+
+    &:not(.flat) {
+      .expand {
+        @apply to-[#363636];
+      }
+    }
+  }
 }
 </style>

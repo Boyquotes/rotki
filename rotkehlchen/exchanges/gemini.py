@@ -22,7 +22,11 @@ from rotkehlchen.errors.misc import RemoteError
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.exchanges.data_structures import AssetMovement, MarginPosition, Trade
 from rotkehlchen.exchanges.exchange import ExchangeInterface, ExchangeQueryBalances
-from rotkehlchen.exchanges.utils import deserialize_asset_movement_address, get_key_if_has_val
+from rotkehlchen.exchanges.utils import (
+    deserialize_asset_movement_address,
+    get_key_if_has_val,
+    pair_symbol_to_base_quote,
+)
 from rotkehlchen.history.deserialization import deserialize_price
 from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.logging import RotkehlchenLogsAdapter
@@ -69,29 +73,12 @@ def gemini_symbol_to_base_quote(symbol: str) -> tuple[AssetWithOracles, AssetWit
     - Can raise UnprocessableTradePair if symbol is in unexpected format
     - Case raise UnknownAsset if any of the pair assets are not known to rotki
     """
-    five_letter_assets = ('sushi', '1inch', 'storj', 'matic', 'audio', 'index', 'metis')
-    if len(symbol) == 5:
-        base_asset = asset_from_gemini(symbol[:2].upper())
-        quote_asset = asset_from_gemini(symbol[2:].upper())
-    elif len(symbol) == 6:
-        base_asset = asset_from_gemini(symbol[:3].upper())
-        quote_asset = asset_from_gemini(symbol[3:].upper())
-    elif len(symbol) == 7:
-        try:
-            base_asset = asset_from_gemini(symbol[:4].upper())
-            quote_asset = asset_from_gemini(symbol[4:].upper())
-        except UnknownAsset:
-            base_asset = asset_from_gemini(symbol[:3].upper())
-            quote_asset = asset_from_gemini(symbol[3:].upper())
-    elif len(symbol) == 8:
-        if any(asset in symbol for asset in five_letter_assets):
-            base_asset = asset_from_gemini(symbol[:5].upper())
-            quote_asset = asset_from_gemini(symbol[5:].upper())
-        else:
-            base_asset = asset_from_gemini(symbol[:4].upper())
-            quote_asset = asset_from_gemini(symbol[4:].upper())
-    else:
-        raise UnprocessableTradePair(symbol)
+    five_letter_assets = {'sushi', '1inch', 'storj', 'matic', 'audio', 'index', 'metis'}
+    base_asset, quote_asset = pair_symbol_to_base_quote(
+        symbol=symbol,
+        asset_deserialize_fn=asset_from_gemini,
+        five_letter_assets=five_letter_assets,
+    )
 
     return base_asset, quote_asset
 
@@ -113,9 +100,9 @@ class Gemini(ExchangeInterface):
             api_key=api_key,
             secret=secret,
             database=database,
+            msg_aggregator=msg_aggregator,
         )
         self.base_uri = base_uri
-        self.msg_aggregator = msg_aggregator
 
         self.session.headers.update({
             'Content-Type': 'text/plain',
@@ -330,7 +317,7 @@ class Gemini(ExchangeInterface):
 
                 asset = asset_from_gemini(entry['currency'])
                 try:
-                    usd_price = Inquirer().find_usd_price(asset=asset)
+                    usd_price = Inquirer.find_usd_price(asset=asset)
                 except RemoteError as e:
                     self.msg_aggregator.add_error(
                         f'Error processing gemini {balance_type} balance result due to '
@@ -343,9 +330,9 @@ class Gemini(ExchangeInterface):
                     usd_value=amount * usd_price,
                 )
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found gemini balance result with unknown asset '
-                    f'{e.identifier}. Ignoring it.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='balance query',
                 )
                 continue
             except UnsupportedAsset as e:
@@ -487,9 +474,9 @@ class Gemini(ExchangeInterface):
                     )
                     continue
                 except UnknownAsset as e:
-                    self.msg_aggregator.add_warning(
-                        f'Found unknown Gemini asset {e.identifier}. '
-                        f'Ignoring the trade.',
+                    self.send_unknown_asset_message(
+                        asset_identifier=e.identifier,
+                        details='trade',
                     )
                     continue
                 except (DeserializationError, KeyError) as e:
@@ -540,9 +527,9 @@ class Gemini(ExchangeInterface):
                     link=str(entry['eid']),
                 )
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found gemini deposit/withdrawal with unknown asset '
-                    f'{e.identifier}. Ignoring it.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='deposit/withdrawal',
                 )
                 continue
             except UnsupportedAsset as e:

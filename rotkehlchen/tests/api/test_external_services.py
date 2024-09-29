@@ -6,43 +6,46 @@ import requests
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
 )
 
 
 @pytest.mark.parametrize('include_etherscan_key', [False])
 @pytest.mark.parametrize('include_cryptocompare_key', [False])
+@pytest.mark.parametrize('start_with_valid_premium', [True])  # for monerium
 def test_add_get_external_service(rotkehlchen_api_server):
     """Tests that adding and retrieving external service credentials works"""
     # With no data an empty response should be returned
     response = requests.get(
         api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == {}
 
     # Now add some data and see that the response shows they are added
     expected_result = {
         'etherscan': {'ethereum': {'api_key': 'key1'}, 'arbitrum_one': {'api_key': 'key3'}},
         'cryptocompare': {'api_key': 'key2'},
+        'monerium': {'username': 'Ben', 'password': 'supersafepassword'},
     }
     data = {'services': [
         {'name': 'etherscan', 'api_key': 'key1'},
         {'name': 'arbitrum_one_etherscan', 'api_key': 'key3'},
         {'name': 'cryptocompare', 'api_key': 'key2'},
+        {'name': 'monerium', 'username': 'Ben', 'password': 'supersafepassword'},
     ]}
     response = requests.put(
         api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
         json=data,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == expected_result
 
     # Query again and see that the newly added services are returned
     response = requests.get(
         api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == expected_result
 
     # Test that we can replace a value of an already existing service
@@ -53,14 +56,14 @@ def test_add_get_external_service(rotkehlchen_api_server):
         api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
         json=data,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == expected_result
 
     # Query again and see that the modified services are returned
     response = requests.get(
         api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == expected_result
 
 
@@ -80,7 +83,7 @@ def test_delete_external_service(rotkehlchen_api_server):
         api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
         json=data,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == expected_result
 
     # Now try to delete an entry and see the response shows it's deleted
@@ -90,14 +93,14 @@ def test_delete_external_service(rotkehlchen_api_server):
         api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
         json=data,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == expected_result
 
     # Query again and see that the modified services are returned
     response = requests.get(
         api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == expected_result
 
     # Now try to delete an existing and a non-existing service to make sure
@@ -107,14 +110,14 @@ def test_delete_external_service(rotkehlchen_api_server):
         api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
         json=data,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == {}
 
     # Query again and see that the modified services are returned
     response = requests.get(
         api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == {}
 
 
@@ -162,7 +165,7 @@ def test_add_external_services_errors(rotkehlchen_api_server):
     )
     assert_error_response(
         response=response,
-        contained_in_msg='"api_key": ["Missing data for required field."',
+        contained_in_msg='"api_key": ["an api key is needed for etherscan"',
         status_code=HTTPStatus.BAD_REQUEST,
     )
 
@@ -212,6 +215,43 @@ def test_add_external_services_errors(rotkehlchen_api_server):
         response=response,
         contained_in_msg='"api_key": ["Not a valid string."',
         status_code=HTTPStatus.BAD_REQUEST,
+    )
+
+    # monerium without username
+    data = {'services': [{'name': 'monerium', 'api_key': 'aaa'}]}
+    response = requests.put(
+        api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
+        json=data,
+    )
+    assert_error_response(
+        response=response,
+        contained_in_msg='monerium needs a username and password"',
+        status_code=HTTPStatus.BAD_REQUEST,
+    )
+
+    # monerium without password
+    data = {'services': [{'name': 'monerium', 'username': 'Ben'}]}
+    response = requests.put(
+        api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
+        json=data,
+    )
+    assert_error_response(
+        response=response,
+        contained_in_msg='monerium needs a username and password"',
+        status_code=HTTPStatus.BAD_REQUEST,
+    )
+
+    # monerium without premium
+    rotkehlchen_api_server.rest_api.rotkehlchen.premium = None
+    data = {'services': [{'name': 'monerium', 'username': 'Ben', 'password': 'secure'}]}
+    response = requests.put(
+        api_url_for(rotkehlchen_api_server, 'externalservicesresource'),
+        json=data,
+    )
+    assert_error_response(
+        response=response,
+        contained_in_msg='You can only use monerium with rotki premium',
+        status_code=HTTPStatus.FORBIDDEN,
     )
 
 

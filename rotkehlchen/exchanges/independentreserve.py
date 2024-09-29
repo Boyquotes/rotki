@@ -133,7 +133,7 @@ def independentreserve_asset(symbol: str) -> AssetWithOracles:
 
     May raise UnknownAsset
     """
-    asset = IR_TO_WORLD.get(symbol, None)
+    asset = IR_TO_WORLD.get(symbol)
     if asset is None:
         raise UnknownAsset(symbol)
     return asset.resolve_to_asset_with_oracles()
@@ -242,9 +242,9 @@ class Independentreserve(ExchangeInterface):
             api_key=api_key,
             secret=secret,
             database=database,
+            msg_aggregator=msg_aggregator,
         )
         self.uri = 'https://api.independentreserve.com'
-        self.msg_aggregator = msg_aggregator
         self.session.headers.update({'Content-Type': 'application/json'})
         self.account_guids: list | None = None
 
@@ -362,13 +362,13 @@ class Independentreserve(ExchangeInterface):
         for entry in response:
             try:
                 asset = independentreserve_asset(entry['CurrencyCode'])
-                usd_price = Inquirer().find_usd_price(asset=asset)
+                usd_price = Inquirer.find_usd_price(asset=asset)
                 amount = deserialize_asset_amount(entry['TotalBalance'])
                 account_guids.append(entry['AccountGuid'])
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found IndependentReserve balance result with unknown asset '
-                    f'{e.identifier}. Ignoring it.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='balance query',
                 )
                 continue
             except RemoteError as e:  # raised only by find_usd_price
@@ -439,9 +439,9 @@ class Independentreserve(ExchangeInterface):
                     continue
                 trades.append(trade)
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found IndependentReserve trade with unknown asset '
-                    f'{e.identifier}. Ignoring it.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='trade',
                 )
                 continue
             except (DeserializationError, KeyError) as e:
@@ -498,9 +498,9 @@ class Independentreserve(ExchangeInterface):
                     if movement:
                         movements.append(movement)
                 except UnknownAsset as e:
-                    self.msg_aggregator.add_warning(
-                        f'Found unknown IndependentReserve asset {e.identifier}. '
-                        f'Ignoring the deposit/withdrawal containing it.',
+                    self.send_unknown_asset_message(
+                        asset_identifier=e.identifier,
+                        details='deposit/withdrawal',
                     )
                     continue
                 except (DeserializationError, KeyError) as e:

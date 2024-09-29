@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from rotkehlchen.assets.asset import Asset
+from rotkehlchen.chain.polygon_pos.constants import POLYGON_POS_POL_HARDFORK
 from rotkehlchen.constants import ONE
-from rotkehlchen.constants.assets import A_KFEE, A_USD
+from rotkehlchen.constants.assets import A_ETH, A_ETH2, A_KFEE, A_POLYGON_POS_MATIC, A_USD
 from rotkehlchen.constants.prices import ZERO_PRICE
 from rotkehlchen.errors.asset import UnknownAsset, WrongAssetType
 from rotkehlchen.errors.misc import RemoteError
@@ -17,14 +18,15 @@ from rotkehlchen.globaldb.manual_price_oracles import ManualPriceOracle
 from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import Price, Timestamp
-from rotkehlchen.user_messages import MessagesAggregator
 
 from .types import HistoricalPriceOracle, HistoricalPriceOracleInstance
 
 if TYPE_CHECKING:
+    from rotkehlchen.chain.ethereum.oracles.uniswap import UniswapV2Oracle, UniswapV3Oracle
     from rotkehlchen.externalapis.coingecko import Coingecko
     from rotkehlchen.externalapis.cryptocompare import Cryptocompare
     from rotkehlchen.externalapis.defillama import Defillama
+    from rotkehlchen.user_messages import MessagesAggregator
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -56,7 +58,7 @@ def query_usd_price_zero_if_error(
         asset: Asset,
         time: Timestamp,
         location: str,
-        msg_aggregator: MessagesAggregator,
+        msg_aggregator: 'MessagesAggregator',
 ) -> Price:
     try:
         usd_price = PriceHistorian().query_historical_price(
@@ -79,6 +81,8 @@ class PriceHistorian:
     _cryptocompare: 'Cryptocompare'
     _coingecko: 'Coingecko'
     _defillama: 'Defillama'
+    _uniswapv2: 'UniswapV2Oracle'
+    _uniswapv3: 'UniswapV3Oracle'
     _manual: ManualPriceOracle  # This is used when iterating through all oracles
     _oracles: Sequence[HistoricalPriceOracle] | None = None
     _oracle_instances: list[HistoricalPriceOracleInstance] | None = None
@@ -89,6 +93,8 @@ class PriceHistorian:
             cryptocompare: Optional['Cryptocompare'] = None,
             coingecko: Optional['Coingecko'] = None,
             defillama: Optional['Defillama'] = None,
+            uniswapv2: Optional['UniswapV2Oracle'] = None,
+            uniswapv3: Optional['UniswapV3Oracle'] = None,
     ) -> 'PriceHistorian':
         if PriceHistorian.__instance is not None:
             return PriceHistorian.__instance
@@ -98,11 +104,15 @@ class PriceHistorian:
         assert cryptocompare, error_msg
         assert coingecko, error_msg
         assert defillama, error_msg
+        assert uniswapv2, error_msg
+        assert uniswapv3, error_msg
 
         PriceHistorian.__instance = object.__new__(cls)
         PriceHistorian._cryptocompare = cryptocompare
         PriceHistorian._coingecko = coingecko
         PriceHistorian._defillama = defillama
+        PriceHistorian._uniswapv2 = uniswapv2
+        PriceHistorian._uniswapv3 = uniswapv3
         PriceHistorian._manual = ManualPriceOracle()
 
         return PriceHistorian.__instance
@@ -139,6 +149,13 @@ class PriceHistorian:
         - NoPriceForGivenTimestamp if we can't find a price for the asset in the given
         timestamp from the external service.
         """
+        if from_asset == A_ETH2:
+            return PriceHistorian.query_historical_price(
+                from_asset=A_ETH,
+                to_asset=to_asset,
+                timestamp=timestamp,
+            )
+
         if from_asset == A_KFEE:
             # For KFEE the price is fixed at 0.01$
             usd_price = Price(FVal(0.01))
@@ -151,6 +168,13 @@ class PriceHistorian:
                 timestamp=timestamp,
             )
             return Price(usd_price * price_mapping)
+
+        if from_asset == A_POLYGON_POS_MATIC and timestamp > POLYGON_POS_POL_HARDFORK:
+            return PriceHistorian.query_historical_price(
+                from_asset=Asset('eip155:1/erc20:0x455e53CBB86018Ac2B8092FdCd39d8444aFFC3F6'),  # POL token  # noqa: E501,
+                to_asset=to_asset,
+                timestamp=timestamp,
+            )
         return None
 
     @staticmethod
@@ -167,7 +191,7 @@ class PriceHistorian:
             from_asset: The ticker symbol of the asset for which we want to know
                         the price.
             to_asset: The ticker symbol of the asset against which we want to
-                      know the price.
+                        know the price.
             timestamp: The timestamp at which to query the price
 
         May raise:

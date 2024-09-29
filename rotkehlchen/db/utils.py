@@ -1,27 +1,14 @@
-from collections.abc import Callable
+import re
 from dataclasses import dataclass
-from functools import wraps
-from operator import attrgetter
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Concatenate,
-    Literal,
-    NamedTuple,
-    Protocol,
-    TypeVar,
-    Union,
-    overload,
-)
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Union
 
 from eth_utils import is_checksum_address
-from typing_extensions import ParamSpec
 
 from rotkehlchen.accounting.structures.balance import BalanceType
 from rotkehlchen.assets.asset import Asset, AssetWithOracles
-from rotkehlchen.chain.accounts import BlockchainAccountData
+from rotkehlchen.chain.accounts import BlockchainAccountData, SingleBlockchainAccountData
 from rotkehlchen.chain.substrate.utils import is_valid_substrate_address
-from rotkehlchen.db.drivers.gevent import DBCursor
+from rotkehlchen.db.checks import db_script_normalizer
 from rotkehlchen.fval import FVal
 from rotkehlchen.types import (
     AssetMovementCategory,
@@ -37,84 +24,14 @@ from rotkehlchen.utils.misc import pairwise_longest, rgetattr, timestamp_to_date
 if TYPE_CHECKING:
     from rotkehlchen.balances.manual import ManuallyTrackedBalance
     from rotkehlchen.chain.bitcoin.xpub import XpubData
-    from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.db.drivers.gevent import DBCursor
 
-P = ParamSpec('P')
-T_co = TypeVar('T_co', covariant=True)
-
-
-class MaybeInjectWriteCursor(Protocol[P, T_co]):
-    @overload
-    def __call__(self, write_cursor: 'DBCursor', *args: P.args, **kwargs: P.kwargs) -> T_co:
-        ...
-
-    @overload
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> T_co:
-        ...
-
-
-def need_writable_cursor(path_to_context_manager: str) -> Callable[[Callable[Concatenate['DBHandler', 'DBCursor', P], T_co]], MaybeInjectWriteCursor[P, T_co]]:  # noqa: E501
-    def _need_writable_cursor(method: Callable[Concatenate['DBHandler', 'DBCursor', P], T_co]) -> MaybeInjectWriteCursor[P, T_co]:  # noqa: E501
-        """Wraps the method of a class in a write cursor or uses one if passed.
-
-        The method should:
-        1. have the write_cursor as the first argument.
-        2. **NOT HAVE** a cursor as the 2nd argument
-
-        The class should have something that would return a cursor context manager
-
-        Typing guide: https://sobolevn.me/2021/12/paramspec-guide
-
-        Keeping this only as an advanced example for typing and not using
-        it much as I did not wanna add extra if checks in heavy calls
-        """
-        @wraps(method)
-        def _impl(self: 'DBHandler', *args: Any, **kwargs: Any) -> T_co:
-            if kwargs.get('write_cursor') or len(args) != 0 and isinstance(args[0], DBCursor):
-                return method(self, *args, **kwargs)
-
-            # else we need to wrap this in a new writable cursor
-            with attrgetter(path_to_context_manager)(self)() as cursor:
-                result = method(self, cursor, *args, **kwargs)
-
-            return result
-
-        return _impl  # type: ignore
-    return _need_writable_cursor
-
-
-class MaybeInjectCursor(Protocol[P, T_co]):
-    @overload
-    def __call__(self, cursor: 'DBCursor', *args: P.args, **kwargs: P.kwargs) -> T_co:
-        ...
-
-    @overload
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> T_co:
-        ...
-
-
-def need_cursor(path_to_context_manager: str) -> Callable[[Callable[Concatenate['DBHandler', 'DBCursor', P], T_co]], MaybeInjectCursor[P, T_co]]:  # noqa: E501
-    def _need_cursor(method: Callable[Concatenate['DBHandler', 'DBCursor', P], T_co]) -> MaybeInjectCursor[P, T_co]:  # noqa: E501
-        """Wraps the method of DBHandler in a read cursor or uses one if passed.
-
-        The method should:
-        1. have the cursor as the first argument.
-        2. **NOT HAVE** a cursor as the 2nd argument
-
-        Typing guide: https://sobolevn.me/2021/12/paramspec-guide
-        """
-        @wraps(method)
-        def _impl(self: 'DBHandler', *args: Any, **kwargs: Any) -> T_co:
-            if kwargs.get('cursor') or len(args) != 0 and isinstance(args[0], DBCursor):
-                return method(self, *args, **kwargs)
-
-            # else we need to wrap this in a new read only cursor
-            with attrgetter(path_to_context_manager)(self)() as cursor:
-                result = method(self, cursor, *args, **kwargs)
-            return result
-
-        return _impl  # type: ignore
-    return _need_cursor
+TAG_REFENCE_ENTRY_TYPE = Union[
+    'ManuallyTrackedBalance',
+    BlockchainAccountData,
+    'XpubData',
+    'SingleBlockchainAccountData',
+]
 
 
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
@@ -272,9 +189,9 @@ def deserialize_tags_from_db(val: str | None) -> list[str] | None:
 
 
 def _get_tag_reference(
-        entry: Union['ManuallyTrackedBalance', BlockchainAccountData, 'XpubData'],
+        entry: TAG_REFENCE_ENTRY_TYPE,
         object_reference_keys: list[
-            Literal['id', 'chain', 'address', 'xpub.xpub', 'derivation_path'],
+            Literal['identifier', 'chain', 'address', 'xpub.xpub', 'derivation_path'],
         ],
 ) -> str:
     reference = ''
@@ -286,9 +203,9 @@ def _get_tag_reference(
 
 
 def _prepare_tag_mappings(
-        entry: Union['ManuallyTrackedBalance', BlockchainAccountData, 'XpubData'],
+        entry: TAG_REFENCE_ENTRY_TYPE,
         object_reference_keys: list[
-            Literal['id', 'chain', 'address', 'xpub.xpub', 'derivation_path'],
+            Literal['identifier', 'chain', 'address', 'xpub.xpub', 'derivation_path'],
         ],
 ) -> list[tuple[str, str]]:
     """Common function to prepare tag mappings. Caller has to make sure entry.tags is not None"""
@@ -300,9 +217,9 @@ def _prepare_tag_mappings(
 
 def insert_tag_mappings(
         write_cursor: 'DBCursor',
-        data: list['ManuallyTrackedBalance'] | (list[BlockchainAccountData] | list['XpubData']),
+        data: list['ManuallyTrackedBalance'] | (list[BlockchainAccountData] | list['XpubData'] | list['SingleBlockchainAccountData']),  # noqa: E501
         object_reference_keys: list[
-            Literal['id', 'chain', 'address', 'xpub.xpub', 'derivation_path'],
+            Literal['identifier', 'chain', 'address', 'xpub.xpub', 'derivation_path'],
         ],
 ) -> None:
     """
@@ -321,9 +238,9 @@ def insert_tag_mappings(
 
 def replace_tag_mappings(
         write_cursor: 'DBCursor',
-        data: list['ManuallyTrackedBalance'] | (list[BlockchainAccountData] | list['XpubData']),
+        data: list['ManuallyTrackedBalance'] | (list[BlockchainAccountData] | list['XpubData'] | list['SingleBlockchainAccountData']),  # noqa: E501
         object_reference_keys: list[
-            Literal['id', 'chain', 'address', 'xpub.xpub', 'derivation_path'],
+            Literal['identifier', 'chain', 'address', 'xpub.xpub', 'derivation_path'],
         ],
 ) -> None:
     """Just like insert_tag_mappings but first deletes all existing mappings"""
@@ -352,7 +269,7 @@ def is_valid_db_blockchain_account(
         return True
     if blockchain == SupportedBlockchain.BITCOIN_CASH:
         return True
-    if blockchain.is_evm():
+    if blockchain.is_evm_or_evmlike():
         return is_checksum_address(account)
     if blockchain.is_substrate():  # mypy does not understand the type narrowing here
         return is_valid_substrate_address(blockchain, account)  # type: ignore[arg-type]
@@ -390,10 +307,23 @@ def combine_asset_balances(balances: list[SingleDBAssetBalance]) -> list[SingleD
     return new_balances
 
 
-def table_exists(cursor: 'DBCursor', name: str) -> bool:
-    return cursor.execute(
+def table_exists(cursor: 'DBCursor', name: str, schema: str | None = None) -> bool:
+    exists: bool = cursor.execute(
         'SELECT COUNT(*) FROM sqlite_master WHERE type="table" AND name=?', (name,),
     ).fetchone()[0] == 1
+    if exists and schema is not None:
+        cursor.execute('SELECT sql from sqlite_master WHERE type="table" AND name=?', (name,))
+        returned_schema = cursor.fetchone()[0].lower()
+        returned_properties = re.findall(
+            pattern=r'createtable.*?\((.+)\)',
+            string=db_script_normalizer(returned_schema),
+        )[0]
+        given_properties = re.findall(
+            pattern=r'createtable.*?\((.+)\)',
+            string=db_script_normalizer(schema.lower()),
+        )[0]
+        return returned_properties == given_properties
+    return exists
 
 
 DBTupleType = Literal[
@@ -402,6 +332,7 @@ DBTupleType = Literal[
     'margin_position',
     'evm_transaction',
     'evm_internal_transaction',
+    'zksynclite_transaction',
 ]
 
 
@@ -430,6 +361,8 @@ def db_tuple_to_str(
             f'Margin position with id {data[0]} in {Location.deserialize_from_db(data[1])} '
             f'for {data[5]} closed at timestamp {data[3]}'
         )
+    if tuple_type == 'zksynclite_transaction':
+        return f'ZKSyncLite transaction with hash "{data[0].hex()}"'
 
     # else can only be evm transaction
     assert tuple_type == 'evm_transaction', 'only DBTupleType possible here is evm_transaction'

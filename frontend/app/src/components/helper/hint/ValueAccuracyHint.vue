@@ -12,11 +12,14 @@ const notUsd = computed(() => get(currencySymbol) !== CURRENCY_USD);
     v-if="notUsd"
     class="mx-2 text-rui-text-secondary"
     :popper="{ placement: 'top' }"
-    open-delay="400"
+    :open-delay="400"
     tooltip-class="max-w-[10rem]"
   >
     <template #activator>
-      <RuiIcon size="20" name="information-line" />
+      <RuiIcon
+        size="20"
+        name="information-line"
+      />
     </template>
     <span>{{ t('price_accuracy_hint.tooltip') }}</span>
   </RuiTooltip>

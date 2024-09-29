@@ -1,89 +1,92 @@
 <script setup lang="ts">
-import { type DataTableHeader } from '@/types/vuetify';
-import { type Collection } from '@/types/collection';
-import { Routes } from '@/router/routes';
-import {
-  type AssetMovement,
-  type AssetMovementEntry,
-  type AssetMovementRequestPayload
-} from '@/types/history/asset-movements';
-import { type TradeLocation } from '@/types/history/trade/location';
 import { Section } from '@/types/status';
 import { IgnoreActionType } from '@/types/history/ignored';
 import { SavedFilterLocation } from '@/types/filtering';
+import type { AssetMovement, AssetMovementEntry, AssetMovementRequestPayload } from '@/types/history/asset-movements';
+import type { Collection } from '@/types/collection';
 import type { Filters, Matcher } from '@/composables/filters/asset-movement';
+import type { Writeable } from '@rotki/common';
+import type { DataTableColumn } from '@rotki/ui-library';
 
 const props = withDefaults(
   defineProps<{
-    locationOverview?: TradeLocation;
+    locationOverview?: string;
   }>(),
   {
-    locationOverview: ''
-  }
+    locationOverview: '',
+  },
 );
 
 const { t } = useI18n();
 
 const { locationOverview } = toRefs(props);
 
+const showIgnoredAssets = ref<boolean>(false);
+
 const mainPage = computed(() => get(locationOverview) === '');
 
-const tableHeaders = computed<DataTableHeader[]>(() => {
-  const overview = get(locationOverview);
-  const headers: DataTableHeader[] = [
+const tableHeaders = computed<DataTableColumn<AssetMovementEntry>[]>(() => {
+  const overview = !get(mainPage);
+  const headers: DataTableColumn<AssetMovementEntry>[] = [
     {
-      text: '',
-      value: 'ignoredInAccounting',
-      sortable: false,
-      class: !overview ? 'pa-0' : 'pr-0',
-      cellClass: !overview ? 'pa-0' : 'pr-0'
+      label: '',
+      key: 'ignoredInAccounting',
+      class: !overview ? '!p-0' : '',
+      cellClass: !overview ? '!p-0' : '!w-0 !max-w-[4rem]',
     },
     {
-      text: t('common.location'),
-      value: 'location',
-      width: '120px',
-      align: 'center'
+      label: t('common.location'),
+      key: 'location',
+      class: '!w-[7.5rem]',
+      cellClass: '!py-1',
+      align: 'center',
+      sortable: true,
     },
     {
-      text: t('deposits_withdrawals.headers.action'),
-      value: 'category',
+      label: t('deposits_withdrawals.headers.action'),
+      key: 'category',
       align: overview ? 'start' : 'center',
-      class: `text-no-wrap ${overview ? 'pl-0' : ''}`,
-      cellClass: overview ? 'pl-0' : ''
+      class: `text-no-wrap${overview ? ' !pl-0' : ''}`,
+      cellClass: overview ? '!pl-0' : 'py-1',
+      sortable: true,
     },
     {
-      text: t('common.asset'),
-      value: 'asset',
-      sortable: false
+      label: t('common.asset'),
+      cellClass: '!py-1',
+      key: 'asset',
     },
     {
-      text: t('common.amount'),
-      value: 'amount',
-      align: 'end'
+      label: t('common.amount'),
+      key: 'amount',
+      align: 'end',
+      sortable: true,
     },
     {
-      text: t('deposits_withdrawals.headers.fee'),
-      value: 'fee',
-      align: 'end'
+      label: t('deposits_withdrawals.headers.fee'),
+      key: 'fee',
+      align: 'end',
+      sortable: true,
     },
     {
-      text: t('common.datetime'),
-      value: 'timestamp'
+      label: t('common.datetime'),
+      key: 'timestamp',
+      sortable: true,
     },
-    { text: '', value: 'data-table-expand', sortable: false }
   ];
 
-  if (overview) {
+  if (overview)
     headers.splice(1, 1);
-  }
 
   return headers;
 });
 
+const extraParams = computed(() => ({
+  excludeIgnoredAssets: !get(showIgnoredAssets),
+}));
+
 const { fetchAssetMovements, refreshAssetMovements } = useAssetMovements();
 
 const {
-  options,
   selected,
   expanded,
   isLoading,
@@ -91,9 +94,9 @@ const {
   filters,
   matchers,
   setPage,
-  setOptions,
-  setFilter,
-  fetchData
+  sort,
+  pagination,
+  fetchData,
 } = usePaginationFilters<
   AssetMovement,
   AssetMovementRequestPayload,
@@ -101,26 +104,54 @@ const {
   Collection<AssetMovementEntry>,
   Filters,
   Matcher
->(locationOverview, mainPage, useAssetMovementFilters, fetchAssetMovements);
+>(locationOverview, mainPage, useAssetMovementFilters, fetchAssetMovements, {
+  onUpdateFilters(query) {
+    set(showIgnoredAssets, query.excludeIgnoredAssets === 'false');
+  },
+  customPageParams: computed<Partial<AssetMovementRequestPayload>>(() => {
+    const params: Writeable<Partial<AssetMovementRequestPayload>> = {};
+    const location = get(locationOverview);
+
+    if (location)
+      params.location = toSnakeCase(location);
+
+    return params;
+  }),
+  extraParams,
+});
 
 useHistoryAutoRefresh(fetchData);
 
 const { ignore } = useIgnore(
   {
     actionType: IgnoreActionType.MOVEMENTS,
-    toData: (item: AssetMovementEntry) => item.identifier
+    toData: (item: AssetMovementEntry) => item.identifier,
   },
   selected,
-  () => fetchData()
+  () => fetchData(),
 );
 
 const { isLoading: isSectionLoading } = useStatusStore();
 const loading = isSectionLoading(Section.ASSET_MOVEMENT);
 
-const getItemClass = (item: AssetMovementEntry) =>
-  item.ignoredInAccounting ? 'darken-row' : '';
+const value = computed({
+  get: () => {
+    if (!get(mainPage))
+      return undefined;
 
-const pageRoute = Routes.HISTORY_DEPOSITS_WITHDRAWALS;
+    return get(selected).map(({ identifier }: AssetMovementEntry) => identifier);
+  },
+  set: (values) => {
+    set(
+      selected,
+      get(assetMovements).data.filter(({ identifier }: AssetMovementEntry) => values?.includes(identifier)),
+    );
+  },
+});
+
+function getItemClass(item: AssetMovementEntry) {
+  return item.ignoredInAccounting ? 'opacity-50' : '';
+}
 
 onMounted(async () => {
   await fetchData();
@@ -128,9 +159,8 @@ onMounted(async () => {
 });
 
 watch(loading, async (isLoading, wasLoading) => {
-  if (!isLoading && wasLoading) {
+  if (!isLoading && wasLoading)
     await fetchData();
-  }
 });
 </script>
 
@@ -141,7 +171,7 @@ watch(loading, async (isLoading, wasLoading) => {
     :title="[t('navigation_menu.history'), t('deposits_withdrawals.title')]"
   >
     <template #buttons>
-      <RuiTooltip open-delay="400">
+      <RuiTooltip :open-delay="400">
         <template #activator>
           <RuiButton
             variant="outlined"
@@ -160,9 +190,12 @@ watch(loading, async (isLoading, wasLoading) => {
     </template>
 
     <RuiCard>
-      <template v-if="!mainPage" #header>
+      <template
+        v-if="!mainPage"
+        #header
+      >
         <CardTitle>
-          <NavigatorLink :to="{ path: pageRoute }">
+          <NavigatorLink :to="{ path: '/history/deposits-withdrawals' }">
             {{ t('deposits_withdrawals.title') }}
           </NavigatorLink>
         </CardTitle>
@@ -170,11 +203,22 @@ watch(loading, async (isLoading, wasLoading) => {
 
       <HistoryTableActions v-if="mainPage">
         <template #filter>
+          <TableStatusFilter>
+            <div class="py-1 max-w-[16rem]">
+              <RuiSwitch
+                v-model="showIgnoredAssets"
+                class="p-4"
+                color="primary"
+                hide-details
+                :label="t('transactions.filter.show_ignored_assets')"
+              />
+            </div>
+          </TableStatusFilter>
           <TableFilter
-            :matches="filters"
+            v-model:matches="filters"
+            class="min-w-full sm:min-w-[26rem]"
             :matchers="matchers"
             :location="SavedFilterLocation.HISTORY_DEPOSITS_WITHDRAWALS"
-            @update:matches="setFilter($event)"
           />
         </template>
         <IgnoreButtons
@@ -186,7 +230,11 @@ watch(loading, async (isLoading, wasLoading) => {
           class="flex flex-row items-center gap-2"
         >
           {{ t('deposits_withdrawals.selected', { count: selected.length }) }}
-          <RuiButton variant="text" size="sm" @click="selected = []">
+          <RuiButton
+            variant="text"
+            size="sm"
+            @click="selected = []"
+          >
             {{ t('common.actions.clear_selection') }}
           </RuiButton>
         </div>
@@ -196,78 +244,72 @@ watch(loading, async (isLoading, wasLoading) => {
         :collection="assetMovements"
         @set-page="setPage($event)"
       >
-        <template #default="{ data, limit, total, showUpgradeRow, itemLength }">
-          <DataTable
-            v-model="selected"
-            :expanded.sync="expanded"
-            :headers="tableHeaders"
-            :items="data"
-            :loading="isLoading"
+        <template #default="{ data, limit, total, showUpgradeRow }">
+          <RuiDataTable
+            v-model="value"
+            v-model:expanded="expanded"
+            v-model:sort.external="sort"
+            v-model:pagination.external="pagination"
+            :cols="tableHeaders"
+            :rows="data"
+            :loading="isLoading || loading"
             :loading-text="t('deposits_withdrawals.loading')"
-            :options="options"
-            :server-items-length="itemLength"
             class="asset-movements"
-            :single-select="false"
-            :show-select="mainPage"
-            item-key="identifier"
-            show-expand
+            outlined
+            row-attr="identifier"
             single-expand
-            multi-sort
-            :must-sort="false"
+            sticky-header
             :item-class="getItemClass"
-            @update:options="setOptions($event)"
           >
-            <template #item.ignoredInAccounting="{ item, isMobile }">
-              <IgnoredInAcountingIcon
-                v-if="item.ignoredInAccounting"
-                :mobile="isMobile"
-              />
+            <template #item.ignoredInAccounting="{ row }">
+              <IgnoredInAcountingIcon v-if="row.ignoredInAccounting" />
+              <span v-else />
             </template>
-            <template #item.location="{ item }">
-              <LocationDisplay :identifier="item.location" />
+            <template #item.location="{ row }">
+              <LocationDisplay :identifier="row.location" />
             </template>
-            <template #item.category="{ item }">
-              <BadgeDisplay
-                :color="
-                  item.category.toLowerCase() === 'withdrawal'
-                    ? 'grey'
-                    : 'green'
-                "
-              >
-                {{ item.category }}
+            <template #item.category="{ row }">
+              <BadgeDisplay :color="row.category.toLowerCase() === 'withdrawal' ? 'grey' : 'green'">
+                {{ row.category }}
               </BadgeDisplay>
             </template>
-            <template #item.asset="{ item }">
-              <AssetDetails opens-details :asset="item.asset" />
+            <template #item.asset="{ row }">
+              <AssetDetails
+                opens-details
+                :asset="row.asset"
+              />
             </template>
-            <template #item.amount="{ item }">
+            <template #item.amount="{ row }">
               <AmountDisplay
                 class="deposits-withdrawals__movement__amount"
-                :value="item.amount"
+                :value="row.amount"
               />
             </template>
-            <template #item.fee="{ item }">
+            <template #item.fee="{ row }">
               <AmountDisplay
                 class="deposits-withdrawals__trade__fee"
-                :asset="item.feeAsset"
-                :value="item.fee"
+                :asset="row.feeAsset"
+                :value="row.fee"
               />
             </template>
-            <template #item.timestamp="{ item }">
-              <DateDisplay :timestamp="item.timestamp" />
+            <template #item.timestamp="{ row }">
+              <DateDisplay :timestamp="row.timestamp" />
             </template>
-            <template #expanded-item="{ headers, item }">
-              <DepositWithdrawalDetails :span="headers.length" :item="item" />
+            <template #expanded-item="{ row }">
+              <DepositWithdrawalDetails :item="row" />
             </template>
-            <template v-if="showUpgradeRow" #body.prepend="{ headers }">
+            <template
+              v-if="showUpgradeRow"
+              #body.prepend="{ colspan }"
+            >
               <UpgradeRow
                 :limit="limit"
                 :total="total"
-                :colspan="headers.length"
+                :colspan="colspan"
                 :label="t('deposits_withdrawals.label')"
               />
             </template>
-          </DataTable>
+          </RuiDataTable>
         </template>
       </CollectionHandler>
     </RuiCard>

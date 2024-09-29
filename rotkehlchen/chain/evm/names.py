@@ -6,6 +6,7 @@ from rotkehlchen.constants import ENS_UPDATE_INTERVAL
 from rotkehlchen.db.addressbook import DBAddressbook
 from rotkehlchen.db.dbhandler import DBHandler
 from rotkehlchen.db.ens import DBEns
+from rotkehlchen.db.settings import CachedSettings
 from rotkehlchen.errors.misc import BlockchainQueryError, RemoteError
 from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.types import (
@@ -33,6 +34,9 @@ def find_ens_mappings(
     """
     Find and return ens names for the given addresses.
     First check the db, and if can't find, call the blockchain.
+
+    IMPORTANT: If this implementation changes also change the one in tests/api/test_ens.py
+
     May raise:
     - RemoteError if was not able to query blockchain
     """
@@ -69,7 +73,7 @@ def find_ens_mappings(
 
 
 def search_for_addresses_names(
-        database: DBHandler,
+        prioritizer: 'NamePrioritizer',
         chain_addresses: list[OptionalChainAddress],
 ) -> list[AddressbookEntry]:
     """
@@ -79,21 +83,8 @@ def search_for_addresses_names(
     For now this works only for evm chains.
     TODO: support not only ChecksumEvmAddress, but other address formats too.
     """
-    prioritizer = NamePrioritizer(database)
-    prioritizer.add_fetchers({
-        'blockchain_account': _blockchain_address_to_name,
-        'global_addressbook': _global_addressbook_address_to_name,
-        'private_addressbook': _private_addressbook_address_to_name,
-        'ethereum_tokens': _token_mappings_address_to_name,
-        'hardcoded_mappings': _hardcoded_address_to_name,
-        'ens_names': _ens_address_to_name,
-    })
-
-    with database.conn.read_ctx() as cursor:
-        settings = database.get_settings(cursor)
-
     prioritized_addresses = prioritizer.get_prioritized_names(
-        prioritized_name_source=settings.address_name_priority,
+        prioritized_name_source=CachedSettings().get_entry('address_name_priority'),  # type: ignore  # mypy doesn't detect correctly the type of the cached setting
         chain_addresses=chain_addresses,
     )
 
@@ -107,6 +98,14 @@ class NamePrioritizer:
     def __init__(self, database: DBHandler):
         self._fetchers: dict[AddressNameSource, FetcherFunc] = {}
         self._db = database
+        self.add_fetchers({
+            'blockchain_account': _blockchain_address_to_name,
+            'global_addressbook': _global_addressbook_address_to_name,
+            'private_addressbook': _private_addressbook_address_to_name,
+            'ethereum_tokens': _token_mappings_address_to_name,
+            'hardcoded_mappings': _hardcoded_address_to_name,
+            'ens_names': _ens_address_to_name,
+        })
 
     def add_fetchers(self, fetchers: dict[AddressNameSource, FetcherFunc]) -> None:
         self._fetchers.update(fetchers)
@@ -155,7 +154,7 @@ def _blockchain_address_to_name(
         return None
 
     chain_address = cast(ChainAddress, chain_address)
-    return db.get_blockchain_account_label(chain_address=chain_address)
+    return DBAddressbook(db).get_addressbook_entry_name(AddressbookType.PRIVATE, chain_address)
 
 
 def _private_addressbook_address_to_name(
@@ -203,9 +202,9 @@ def _token_mappings_address_to_name(
     """Returns the token name for a token address/chain id combination
     in the global database or None if the address is no token address
     """
-    if chain_address.blockchain is None or chain_address.blockchain.is_evm() is False:
+    if chain_address.blockchain is None or not chain_address.blockchain.is_evm():
         return None
-    return GlobalDBHandler().get_token_name(address=chain_address.address, chain_id=chain_address.blockchain.to_chain_id())  # noqa: E501
+    return GlobalDBHandler.get_token_name(address=chain_address.address, chain_id=chain_address.blockchain.to_chain_id())  # noqa: E501
 
 
 def _ens_address_to_name(

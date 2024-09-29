@@ -1,31 +1,35 @@
-import { Blockchain } from '@rotki/common/lib/blockchain';
-import { chainSection } from '@/types/blockchain';
+import { Blockchain } from '@rotki/common';
+import { computed } from 'vue';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Section } from '@/types/status';
+import { useBlockchainStore } from '@/store/blockchain';
+import type { EvmChainInfo, SupportedChains } from '@/types/api/chains';
 
 vi.mock('@/store/blockchain/balances/eth', () => ({
   useEthBalancesStore: vi.fn().mockReturnValue({
     updatePrices: vi.fn(),
-    update: vi.fn()
-  })
+    update: vi.fn(),
+  }),
 }));
 
 vi.mock('@/store/blockchain/balances/btc', () => ({
   useBtcBalancesStore: vi.fn().mockReturnValue({
     updatePrices: vi.fn(),
-    update: vi.fn()
-  })
+    update: vi.fn(),
+  }),
 }));
 
 vi.mock('@/store/blockchain/balances/chains', () => ({
   useChainBalancesStore: vi.fn().mockReturnValue({
     updatePrices: vi.fn(),
-    update: vi.fn()
-  })
+    update: vi.fn(),
+  }),
 }));
 
 vi.mock('@/composables/api/balances/blockchain', () => ({
   useBlockchainBalancesApi: vi.fn().mockReturnValue({
-    queryBlockchainBalances: vi.fn().mockResolvedValue(1)
-  })
+    queryBlockchainBalances: vi.fn().mockResolvedValue(1),
+  }),
 }));
 
 vi.mock('@/store/tasks', () => ({
@@ -35,21 +39,58 @@ vi.mock('@/store/tasks', () => ({
         perAccount: {},
         totals: {
           assets: {},
-          liabilities: {}
-        }
+          liabilities: {},
+        },
       },
-      meta: { title: '' }
+      meta: { title: '' },
     }),
-    isTaskRunning: vi.fn()
-  })
+    isTaskRunning: vi.fn(),
+  }),
+}));
+
+vi.mock('@/composables/info/chains', () => ({
+  useSupportedChains: vi.fn().mockReturnValue({
+    supportedChains: computed<SupportedChains>(() => [
+      {
+        evmChainName: 'ethereum',
+        id: Blockchain.ETH,
+        type: 'evm',
+        name: 'Ethereum',
+        image: '',
+        nativeToken: 'ETH',
+      } satisfies EvmChainInfo,
+    ]),
+    getChain: () => Blockchain.ETH,
+    getChainName: () => 'Ethereum',
+    getNativeAsset: (chain: Blockchain) => chain,
+    getChainImageUrl: (chain: Blockchain) => `${chain}.png`,
+  }),
+}));
+
+vi.mock('@/composables/info/chains', () => ({
+  useSupportedChains: vi.fn().mockReturnValue({
+    supportedChains: computed<SupportedChains>(() => [
+      {
+        evmChainName: 'ethereum',
+        id: Blockchain.ETH,
+        type: 'evm',
+        name: 'Ethereum',
+        image: '',
+        nativeToken: 'ETH',
+      } satisfies EvmChainInfo,
+    ]),
+    getChain: () => Blockchain.ETH,
+    getChainName: () => 'Ethereum',
+    getNativeAsset: (chain: Blockchain) => chain,
+    getChainImageUrl: (chain: Blockchain) => `${chain}.png`,
+  }),
 }));
 
 describe('composables::blockchain/balances/index', () => {
   setActivePinia(createPinia());
-  let api: ReturnType<typeof useBlockchainBalancesApi> =
-    useBlockchainBalancesApi();
-  let blockchainBalances: ReturnType<typeof useBlockchainBalances> =
-    useBlockchainBalances();
+  let api: ReturnType<typeof useBlockchainBalancesApi> = useBlockchainBalancesApi();
+  let blockchainBalances: ReturnType<typeof useBlockchainBalances> = useBlockchainBalances();
+  const blockchainStore: ReturnType<typeof useBlockchainStore> = useBlockchainStore();
 
   beforeEach(() => {
     api = useBlockchainBalancesApi();
@@ -57,13 +98,26 @@ describe('composables::blockchain/balances/index', () => {
     vi.clearAllMocks();
   });
 
-  describe('fetchBlockchainBalances', async () => {
-    it('all blockchain', async () => {
+  describe('fetchBlockchainBalances', () => {
+    it('all supported blockchains', async () => {
+      // won't call if no account
       await blockchainBalances.fetchBlockchainBalances();
 
-      expect(api.queryBlockchainBalances).toHaveBeenCalledTimes(
-        Object.values(Blockchain).length
-      );
+      expect(api.queryBlockchainBalances).toHaveBeenCalledTimes(0);
+      expect(api.queryBlockchainBalances).not.toHaveBeenCalledWith(false, 'eth');
+
+      // call if there's account
+      blockchainStore.updateAccounts(Blockchain.ETH, [
+        createAccount(
+          { address: '0x49ff149D649769033d43783E7456F626862CD160', label: null, tags: null },
+          { nativeAsset: 'ETH', chain: Blockchain.ETH },
+        ),
+      ]);
+
+      await blockchainBalances.fetchBlockchainBalances();
+
+      expect(api.queryBlockchainBalances).toHaveBeenCalledTimes(1);
+      expect(api.queryBlockchainBalances).toHaveBeenCalledWith(false, 'eth');
     });
 
     describe('particular blockchain', () => {
@@ -71,24 +125,21 @@ describe('composables::blockchain/balances/index', () => {
         await blockchainBalances.fetchBlockchainBalances(
           {
             blockchain: Blockchain.ETH,
-            ignoreCache: true
+            ignoreCache: true,
           },
-          periodic
+          periodic,
         );
       };
 
       const assert = (times = 1) => {
         expect(api.queryBlockchainBalances).toHaveBeenCalledTimes(times);
-        expect(api.queryBlockchainBalances).toHaveBeenCalledWith(
-          true,
-          Blockchain.ETH
-        );
+        expect(api.queryBlockchainBalances).toHaveBeenCalledWith(true, Blockchain.ETH);
       };
 
       const { isLoading } = useStatusStore();
-      const loading = isLoading(chainSection[Blockchain.ETH]);
+      const loading = isLoading(Section.BLOCKCHAIN, Blockchain.ETH);
 
-      it('default', async () => {
+      it('default', () => {
         startPromise(call());
         assert();
       });
@@ -114,30 +165,6 @@ describe('composables::blockchain/balances/index', () => {
         await until(loading).toBe(false);
         assert(2);
       });
-    });
-  });
-
-  describe('updatePrices', () => {
-    it('default', () => {
-      const assetPrices = {
-        ETH: {
-          value: bigNumberify(1000),
-          usdPrice: null,
-          isManualPrice: false,
-          isCurrentCurrency: true
-        }
-      };
-      blockchainBalances.updatePrices(assetPrices);
-
-      expect(useEthBalancesStore().updatePrices).toHaveBeenCalledWith(
-        assetPrices
-      );
-      expect(useBtcBalancesStore().updatePrices).toHaveBeenCalledWith(
-        assetPrices
-      );
-      expect(useChainBalancesStore().updatePrices).toHaveBeenCalledWith(
-        assetPrices
-      );
     });
   });
 });

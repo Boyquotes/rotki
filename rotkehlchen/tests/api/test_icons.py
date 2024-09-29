@@ -17,7 +17,7 @@ from rotkehlchen.icons import ALLOWED_ICON_EXTENSIONS
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     assert_simple_ok_response,
 )
 from rotkehlchen.tests.utils.constants import A_DOGE, A_GNO
@@ -53,7 +53,7 @@ def test_upload_custom_icon(rotkehlchen_api_server, file_upload, data_dir):
             ), json=json_data,
         )
 
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == {'identifier': A_GNO.identifier}
     uploaded_icon = data_dir / IMAGESDIR_NAME / ASSETIMAGESDIR_NAME / CUSTOMASSETIMAGESDIR_NAME / f'{gno_id_quoted}.svg'  # noqa: E501
     assert uploaded_icon.is_file()
@@ -144,8 +144,7 @@ def test_case_insensitive_icon(rotkehlchen_api_server):
     Test that providing asset identifier in a case insensitive way still maps to the correct asset
     """
     icon_manager = rotkehlchen_api_server.rest_api.rotkehlchen.icon_manager
-    with open(icon_manager.icons_dir / 'ETH_small.png', 'wb') as f:
-        f.write(b'123')
+    Path(icon_manager.icons_dir / 'ETH_small.png').write_bytes(b'123')
 
     for identifier in ('ETH', 'eth', 'eTh'):
         response = requests.get(

@@ -1,0 +1,31 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@shared/*": ["./shared/*"],
+      "@electron/*": ["./electron/*"]
+    }
+  },
+  "include": [
+    "env.d.ts",
+    "components.d.ts",
+    "typed-router.d.ts",
+    "src/**/*",
+    "src/**/*.vue",
+    "shared/**/*",
+    "electron/**/*"
+  ],
+  "exclude": [
+    "node_modules/**",
+    "**/.*",
+    "tests/**/*",
+    "src/**/__tests__/*"
+  ],
+  "vueCompilerOptions": {
+    "target": 3.4
+  }
+}

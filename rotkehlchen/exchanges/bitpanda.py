@@ -69,10 +69,10 @@ class Bitpanda(ExchangeInterface):
             api_key=api_key,
             secret=secret,
             database=database,
+            msg_aggregator=msg_aggregator,
         )
         self.uri = 'https://api.bitpanda.com/v1'
         self.session.headers.update({'X-API-KEY': self.api_key})
-        self.msg_aggregator = msg_aggregator
         self.cryptocoin_map: dict[str, AssetWithOracles] = {}
         # AssetWithOracles instead of FiatAsset to comply with cryptocoin_map
         self.fiat_map: dict[str, AssetWithOracles] = {}
@@ -105,9 +105,9 @@ class Bitpanda(ExchangeInterface):
                 coin_id = entry['attributes'][id_key]
                 asset = asset_from_bitpanda(entry['attributes'][symbol_key])
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found unsupported/unknown Bitpanda asset {e.identifier}. '
-                    f' Not adding asset to mapping during first connection.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='first connection, so not adding asset to mapping',
                 )
                 continue
             except (DeserializationError, KeyError) as e:
@@ -272,7 +272,7 @@ class Bitpanda(ExchangeInterface):
                 amount = deserialize_asset_amount(entry['attributes']['amount_cryptocoin'])
                 price = deserialize_price(entry['attributes']['price'])
             else:
-                self.msg_aggregator.add_error('Found bitpanda trade with unknown trade type {trade_type}')  # noqa: E501
+                self.msg_aggregator.add_error(f'Found bitpanda trade with unknown trade type {trade_type}')  # noqa: E501
                 return None
 
             trade_id = entry['id']
@@ -487,9 +487,9 @@ class Bitpanda(ExchangeInterface):
                 amount = deserialize_asset_amount(entry['attributes']['balance'])
                 asset = asset_from_bitpanda(entry['attributes'][symbol_key])
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found unsupported/unknown Bitpanda asset {e.identifier}. '
-                    f' Ignoring its balance query.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='balance query',
                 )
                 continue
             except (DeserializationError, KeyError) as e:
@@ -511,7 +511,7 @@ class Bitpanda(ExchangeInterface):
                 continue
 
             try:
-                usd_price = Inquirer().find_usd_price(asset=asset)
+                usd_price = Inquirer.find_usd_price(asset=asset)
             except RemoteError as e:
                 self.msg_aggregator.add_error(
                     f'Error processing Bitpanda balance entry due to inability to '

@@ -1,53 +1,46 @@
-import { type MaybeRef } from '@vueuse/core';
 import { Routes } from '@/router/routes';
 import { isBlockchain } from '@/types/blockchain/chains';
-import {
-  type TradeLocation,
-  type TradeLocationData
-} from '@/types/history/trade/location';
+import type { MaybeRef } from '@vueuse/core';
+import type { TradeLocationData } from '@/types/history/trade/location';
 
 export const useLocations = createSharedComposable(() => {
   const { tradeLocations } = storeToRefs(useLocationStore());
 
-  const exchangeName = (location: MaybeRef<TradeLocation>): string => {
-    const exchange = get(tradeLocations).find(
-      tl => tl.identifier === get(location)
-    );
+  const exchangeName = (location: MaybeRef<string>): string => {
+    const exchange = get(tradeLocations).find(tl => tl.identifier === get(location));
 
-    assert(!!exchange, 'location should not be falsy');
-    return exchange.name;
+    return exchange?.name ?? '';
   };
 
-  const { getChainName, getChainImageUrl } = useSupportedChains();
+  const { getChainName, getChainImageUrl, getChainAccountType } = useSupportedChains();
 
-  const locationData = (
-    identifier: MaybeRef<string>
-  ): ComputedRef<TradeLocationData | null> =>
-    computed(() => {
-      const id = get(identifier);
-      const blockchainId = id.split(' ').join('_');
+  const locationData = (identifier: MaybeRef<string | null>): ComputedRef<TradeLocationData | null> => computed(() => {
+    const id = get(identifier);
+    if (!id)
+      return null;
 
-      if (isBlockchain(blockchainId)) {
-        return {
-          name: get(getChainName(blockchainId)),
-          identifier: blockchainId,
-          image: get(getChainImageUrl(blockchainId)),
-          detailPath: `${Routes.ACCOUNTS_BALANCES_BLOCKCHAIN}#blockchain-balances-${id}`
-        };
-      }
+    const blockchainId = id.split(' ').join('_');
 
-      const locations = get(tradeLocations);
-      return locations.find(location => location.identifier === id) ?? null;
-    });
+    if (isBlockchain(blockchainId)) {
+      const type = blockchainId === Blockchain.ETH2 ? 'validators' : getChainAccountType(blockchainId);
+      return {
+        name: get(getChainName(blockchainId)),
+        identifier: blockchainId,
+        image: get(getChainImageUrl(blockchainId)),
+        detailPath: `${Routes.ACCOUNTS_BALANCES_BLOCKCHAIN}/${type}`,
+      };
+    }
 
-  const getLocationData = (
-    identifier: TradeLocation
-  ): TradeLocationData | null => get(locationData(identifier));
+    const locations = get(tradeLocations);
+    return locations.find(location => location.identifier === id) ?? null;
+  });
+
+  const getLocationData = (identifier: string): TradeLocationData | null => get(locationData(identifier));
 
   return {
     tradeLocations,
     exchangeName,
     getLocationData,
-    locationData
+    locationData,
   };
 });

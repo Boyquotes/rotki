@@ -1,7 +1,7 @@
 export const KEY_BACKEND_URL = 'rotki.backend_url';
 
 export const KEY_BACKEND_URL_SESSION_ONLY = 'rotki.backend_url_session';
-const KEY_LAST_LOGIN = 'rotki.last_login' as const;
+const KEY_LAST_LOGIN = 'rotki.last_login';
 
 export interface BackendSettings {
   readonly url: string;
@@ -15,20 +15,17 @@ export function deleteBackendUrl(): void {
 
 export function saveBackendUrl({ sessionOnly, url }: BackendSettings): void {
   localStorage.setItem(KEY_BACKEND_URL, url);
-  if (sessionOnly) {
+  if (sessionOnly)
     localStorage.setItem(KEY_BACKEND_URL_SESSION_ONLY, `${true}`);
-  } else {
-    localStorage.removeItem(KEY_BACKEND_URL_SESSION_ONLY);
-  }
+  else localStorage.removeItem(KEY_BACKEND_URL_SESSION_ONLY);
 }
 
 export function getBackendUrl(): BackendSettings {
-  const sessionOnly =
-    !!localStorage.getItem(KEY_BACKEND_URL_SESSION_ONLY) ?? false;
+  const sessionOnly = !!localStorage.getItem(KEY_BACKEND_URL_SESSION_ONLY) || false;
   const url = localStorage.getItem(KEY_BACKEND_URL) ?? '';
   return {
     url,
-    sessionOnly
+    sessionOnly,
   };
 }
 
@@ -37,9 +34,7 @@ export function lastLogin(): string {
 }
 
 export function setLastLogin(username: string): void {
-  if (!username) {
+  if (!username)
     localStorage.removeItem(KEY_LAST_LOGIN);
-  } else {
-    localStorage.setItem(KEY_LAST_LOGIN, username);
-  }
+  else localStorage.setItem(KEY_LAST_LOGIN, username);
 }

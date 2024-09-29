@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
 import argparse
+import sys
 from http import HTTPStatus
 
 import requests
 
-ALL_DEVS = '735068019440615516'
+ALL_DEVS = '1105142033590526052'
 BACKEND_DEVS = '983289520000737330'
 
 
@@ -48,9 +49,9 @@ def main() -> None:
         'content': msg,
     }
 
-    response = requests.post(url=url, data=data)
+    response = requests.post(url=url, data=data, timeout=30)
     if response.status_code != HTTPStatus.OK:
-        exit(1)
+        sys.exit(1)
 
 
 if __name__ == '__main__':

@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { type ComputedRef } from 'vue';
-import { type AssetInfoWithId } from '@/types/asset';
-import { getAddressFromEvmIdentifier } from '@/utils/assets';
+import type { StyleValue } from 'vue';
+import type { AssetInfoWithId } from '@/types/asset';
 
 const props = withDefaults(
   defineProps<{
     asset: string;
-    assetStyled?: Record<string, unknown>;
+    assetStyled?: StyleValue;
     opensDetails?: boolean;
     hideName?: boolean;
     dense?: boolean;
@@ -21,19 +20,22 @@ const props = withDefaults(
     dense: false,
     enableAssociation: true,
     isCollectionParent: false,
-    link: false
-  }
+    link: false,
+  },
 );
 
-const { asset, enableAssociation, isCollectionParent } = toRefs(props);
+const { asset } = toRefs(props);
 const { assetInfo } = useAssetInfoRetrieval();
 
-const assetDetails = assetInfo(asset, enableAssociation, isCollectionParent);
+const assetDetails = assetInfo(asset, computed(() => ({
+  associated: props.enableAssociation,
+  collectionParent: props.isCollectionParent,
+})));
 const address = reactify(getAddressFromEvmIdentifier)(asset);
 
-const currentAsset: ComputedRef<AssetInfoWithId> = computed(() => ({
+const currentAsset = computed<AssetInfoWithId>(() => ({
   ...get(assetDetails),
-  identifier: get(asset)
+  identifier: get(asset),
 }));
 </script>
 

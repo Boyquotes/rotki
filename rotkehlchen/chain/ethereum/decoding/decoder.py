@@ -1,40 +1,26 @@
 import logging
 from typing import TYPE_CHECKING
 
-from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.assets.asset import EvmToken
-from rotkehlchen.chain.ethereum.abi import decode_event_data_abi_str
+from rotkehlchen.chain.ethereum.airdrops import AIRDROP_IDENTIFIER_KEY
 from rotkehlchen.chain.ethereum.constants import CPT_KRAKEN
+from rotkehlchen.chain.evm.constants import MERKLE_CLAIM
 from rotkehlchen.chain.evm.decoding.base import BaseDecoderToolsWithDSProxy
 from rotkehlchen.chain.evm.decoding.decoder import EVMTransactionDecoderWithDSProxy
 from rotkehlchen.chain.evm.decoding.structures import (
     DEFAULT_DECODING_OUTPUT,
-    FAILED_ENRICHMENT_OUTPUT,
     ActionItem,
     DecodingOutput,
-    EnricherContext,
-    TransferEnrichmentOutput,
 )
 from rotkehlchen.chain.evm.decoding.types import CounterpartyDetails
 from rotkehlchen.chain.evm.structures import EvmTxReceiptLog
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants.assets import A_1INCH, A_ETH, A_GTC
-from rotkehlchen.errors.asset import UnknownAsset, WrongAssetType
-from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import ChecksumEvmAddress, EvmTransaction
 
-from .constants import (
-    CPT_GNOSIS_CHAIN,
-    ETHADDRESS_TO_KNOWN_NAME,
-    GNOSIS_CHAIN_BRIDGE_RECEIVE,
-    GNOSIS_CPT_DETAILS,
-    GOVERNORALPHA_PROPOSE,
-    GOVERNORALPHA_PROPOSE_ABI,
-    GTC_CLAIM,
-    ONEINCH_CLAIM,
-)
+from .constants import ETHADDRESS_TO_KNOWN_NAME, GNOSIS_CPT_DETAILS, GTC_CLAIM
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
@@ -60,7 +46,6 @@ class EthereumTransactionDecoder(EVMTransactionDecoderWithDSProxy):
             transactions=transactions,
             value_asset=A_ETH.resolve_to_asset_with_oracles(),
             event_rules=[  # rules to try for all tx receipt logs decoding
-                self._maybe_decode_governance,
                 self._maybe_enrich_transfers,
             ],
             misc_counterparties=[
@@ -93,102 +78,24 @@ class EthereumTransactionDecoder(EVMTransactionDecoderWithDSProxy):
                 if event.asset == A_GTC and event.event_type == HistoryEventType.RECEIVE:
                     event.event_subtype = HistoryEventSubType.AIRDROP
                     event.notes = f'Claim {event.balance.amount} GTC from the GTC airdrop'
+                    event.extra_data = {AIRDROP_IDENTIFIER_KEY: 'gitcoin'}
             return DEFAULT_DECODING_OUTPUT
 
-        if tx_log.topics[0] == ONEINCH_CLAIM and tx_log.address == '0xE295aD71242373C37C5FdA7B57F26f9eA1088AFe':  # noqa: E501
+        if tx_log.topics[0] == MERKLE_CLAIM and tx_log.address == '0xE295aD71242373C37C5FdA7B57F26f9eA1088AFe':  # noqa: E501
             for event in decoded_events:
                 if event.asset == A_1INCH and event.event_type == HistoryEventType.RECEIVE:
                     event.event_subtype = HistoryEventSubType.AIRDROP
                     event.notes = f'Claim {event.balance.amount} 1INCH from the 1INCH airdrop'
+                    event.extra_data = {AIRDROP_IDENTIFIER_KEY: '1inch'}
             return DEFAULT_DECODING_OUTPUT
-
-        if tx_log.topics[0] == GNOSIS_CHAIN_BRIDGE_RECEIVE and tx_log.address == '0x88ad09518695c6c3712AC10a214bE5109a655671':  # noqa: E501
-            for event in decoded_events:
-                if event.event_type == HistoryEventType.RECEIVE:
-                    try:
-                        crypto_asset = event.asset.resolve_to_crypto_asset()
-                    except (UnknownAsset, WrongAssetType):
-                        next(iter(self.decoders.values())).notify_user(
-                            event=event,
-                            counterparty=CPT_GNOSIS_CHAIN,
-                        )
-                        continue
-
-                    # user bridged from gnosis chain
-                    event.event_type = HistoryEventType.WITHDRAWAL
-                    event.event_subtype = HistoryEventSubType.BRIDGE
-                    event.counterparty = CPT_GNOSIS_CHAIN
-                    event.notes = (
-                        f'Bridge {event.balance.amount} {crypto_asset.symbol} from gnosis chain'
-                    )
-
-        return DEFAULT_DECODING_OUTPUT
-
-    def _maybe_decode_governance(
-            self,
-            token: EvmToken | None,  # pylint: disable=unused-argument
-            tx_log: EvmTxReceiptLog,
-            transaction: EvmTransaction,
-            decoded_events: list['EvmEvent'],  # pylint: disable=unused-argument
-            action_items: list[ActionItem],  # pylint: disable=unused-argument
-            all_logs: list[EvmTxReceiptLog],  # pylint: disable=unused-argument
-    ) -> DecodingOutput:
-        if tx_log.topics[0] == GOVERNORALPHA_PROPOSE:
-            if tx_log.address == '0xDbD27635A534A3d3169Ef0498beB56Fb9c937489':
-                governance_name = 'Gitcoin'
-            else:
-                governance_name = tx_log.address
-
-            try:
-                _, decoded_data = decode_event_data_abi_str(tx_log, GOVERNORALPHA_PROPOSE_ABI)
-            except DeserializationError as e:
-                log.debug(f'Failed to decode governor alpha event due to {e!s}')
-                return DEFAULT_DECODING_OUTPUT
-
-            proposal_id = decoded_data[0]
-            proposal_text = decoded_data[8]
-            notes = f'Create {governance_name} proposal {proposal_id}. {proposal_text}'
-            event = self.base.make_event_from_transaction(
-                transaction=transaction,
-                tx_log=tx_log,
-                event_type=HistoryEventType.INFORMATIONAL,
-                event_subtype=HistoryEventSubType.GOVERNANCE,
-                asset=A_ETH,
-                balance=Balance(),
-                location_label=transaction.from_address,
-                notes=notes,
-                address=tx_log.address,
-                counterparty=governance_name,
-            )
-            return DecodingOutput(event=event)
 
         return DEFAULT_DECODING_OUTPUT
 
     # -- methods that need to be implemented by child classes --
 
-    def _enrich_protocol_tranfers(self, context: EnricherContext) -> TransferEnrichmentOutput:
-        for enrich_call in self.rules.token_enricher_rules:
-            try:
-                transfer_enrich: TransferEnrichmentOutput = enrich_call(context)
-            except (UnknownAsset, WrongAssetType) as e:
-                log.error(
-                    f'Failed to enrich transfer due to unknown asset '
-                    f'{context.event.asset}. {e!s}',
-                )
-                # Don't try other rules since all of them will fail to resolve the asset
-                return FAILED_ENRICHMENT_OUTPUT
-
-            if transfer_enrich != FAILED_ENRICHMENT_OUTPUT:
-                return transfer_enrich
-
-        return FAILED_ENRICHMENT_OUTPUT
-
     @staticmethod
     def _is_non_conformant_erc721(address: ChecksumEvmAddress) -> bool:
-        return address in (
-            # Cryptovoxels
-            string_to_evm_address('0x4243a8413A77Eb559c6f8eAFfA63F46019056d08'),
-        )
+        return address == string_to_evm_address('0x4243a8413A77Eb559c6f8eAFfA63F46019056d08')
 
     @staticmethod
     def _address_is_exchange(address: ChecksumEvmAddress) -> str | None:

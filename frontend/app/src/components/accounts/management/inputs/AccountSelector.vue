@@ -1,46 +1,45 @@
 <script setup lang="ts">
-import { type Blockchain } from '@rotki/common/lib/blockchain';
-import Fragment from '@/components/helper/Fragment';
 import { isBtcChain } from '@/types/blockchain/chains';
-import { type InputMode } from '@/types/input-mode';
+import type { InputMode } from '@/types/input-mode';
 
 const props = defineProps<{
-  blockchain: Blockchain;
+  chain: string;
   inputMode: InputMode;
+  editMode: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: 'update:blockchain', selection: Blockchain): void;
+  (e: 'update:chain', selection: string): void;
   (e: 'update:input-mode', mode: InputMode): void;
 }>();
 
-const blockchain = toRef(props, 'blockchain');
+const chain = toRef(props, 'chain');
 
 const { loading } = useAccountLoading();
-const { accountToEdit } = useAccountDialog();
-const { isEvm } = useSupportedChains();
-
-const isEvmChain = isEvm(blockchain);
 
 const showInputModeSelector = logicOr(
-  computed(() => isBtcChain(get(blockchain))),
-  isEvmChain
+  computed(() => isBtcChain(get(chain))),
 );
+
+function updateModelValue(value?: string) {
+  if (!value)
+    return;
+
+  emit('update:chain', value);
+}
 </script>
 
 <template>
-  <Fragment>
-    <ChainSelect
-      :disabled="loading || !!accountToEdit"
-      :model-value="blockchain"
-      @update:model-value="emit('update:blockchain', $event)"
-    />
+  <ChainSelect
+    :disabled="loading || editMode"
+    :model-value="chain"
+    @update:model-value="updateModelValue($event)"
+  />
 
-    <InputModeSelect
-      v-if="!accountToEdit && showInputModeSelector"
-      :input-mode="inputMode"
-      :blockchain="blockchain"
-      @update:input-mode="emit('update:input-mode', $event)"
-    />
-  </Fragment>
+  <InputModeSelect
+    v-if="!editMode && showInputModeSelector"
+    :input-mode="inputMode"
+    :blockchain="chain"
+    @update:input-mode="emit('update:input-mode', $event)"
+  />
 </template>

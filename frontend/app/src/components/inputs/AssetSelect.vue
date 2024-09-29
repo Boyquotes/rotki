@@ -1,9 +1,11 @@
-﻿<script setup lang="ts">
-import { type Ref, useListeners } from 'vue';
-import { type AssetInfoWithId } from '@/types/asset';
-import { getValidSelectorFromEvmAddress } from '@/utils/assets';
-import { transformCase } from '@/utils/text';
-import { type NftAsset } from '@/types/nfts';
+<script setup lang="ts">
+import { CanceledError } from 'axios';
+import type { AssetInfoWithId } from '@/types/asset';
+import type { NftAsset } from '@/types/nfts';
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 const props = withDefaults(
   defineProps<{
@@ -13,15 +15,14 @@ const props = withDefaults(
     successMessages?: string;
     errorMessages?: string[];
     label?: string;
-    value?: string;
     disabled?: boolean;
     outlined?: boolean;
     clearable?: boolean;
-    persistentHint?: boolean;
     required?: boolean;
     showIgnored?: boolean;
     hideDetails?: boolean;
     includeNfts?: boolean;
+    asset?: AssetInfoWithId | NftAsset;
   }>(),
   {
     items: () => [],
@@ -30,43 +31,39 @@ const props = withDefaults(
     successMessages: '',
     errorMessages: () => [],
     label: 'Asset',
-    value: '',
     disabled: false,
     outlined: false,
     clearable: false,
-    persistentHint: false,
     required: false,
     showIgnored: false,
     hideDetails: false,
-    includeNfts: false
-  }
+    includeNfts: false,
+    asset: undefined,
+  },
 );
 
-const emit = defineEmits<{ (e: 'input', value: string): void }>();
+const emit = defineEmits<{ (e: 'update:asset', value?: AssetInfoWithId | NftAsset): void }>();
 
-const { items, showIgnored, excludes, errorMessages, value, includeNfts } =
-  toRefs(props);
+const { items, showIgnored, excludes, errorMessages, includeNfts } = toRefs(props);
 const { isAssetIgnored } = useIgnoredAssetsStore();
 
-const input = (value: string) => {
-  emit('input', value || '');
-};
+const modelValue = defineModel<string | undefined>({ required: true });
 
-const autoCompleteInput = ref(null);
 const search = ref<string>('');
-const assets: Ref<(AssetInfoWithId | NftAsset)[]> = ref([]);
+const assets = ref<(AssetInfoWithId | NftAsset)[]>([]);
 const error = ref('');
 const loading = ref(false);
+let pending: AbortController | null = null;
 
 const { assetSearch, assetMapping } = useAssetInfoApi();
 const { t } = useI18n();
 
 const errors = computed(() => {
-  const messages = get(errorMessages);
+  const messages = [...get(errorMessages)];
   const errorMessage = get(error);
-  if (errorMessage) {
-    messages.push(errorMessage);
-  }
+  if (errorMessage)
+    messages.unshift(errorMessage);
+
   return messages;
 });
 
@@ -76,138 +73,158 @@ const visibleAssets = computed<AssetInfoWithId[]>(() => {
   const knownAssets = get(assets);
 
   const includeIgnored = get(showIgnored);
-  return knownAssets.filter((asset: AssetInfoWithId) => {
-    const unIgnored = includeIgnored || !get(isAssetIgnored(asset.identifier));
+  const filtered = knownAssets.filter(({ identifier }: AssetInfoWithId) => {
+    const unIgnored = includeIgnored || !get(isAssetIgnored(identifier));
 
-    const included =
-      itemsVal && itemsVal.length > 0
-        ? itemsVal.includes(asset.identifier)
-        : true;
+    const included = itemsVal && itemsVal.length > 0 ? itemsVal.includes(identifier) : true;
 
-    const excluded =
-      excludesVal && excludesVal.length > 0
-        ? excludesVal.includes(asset.identifier)
+    const excluded
+      = excludesVal && excludesVal.length > 0
+        ? excludesVal.some(excludedId => identifier.toLowerCase() === excludedId?.toLowerCase())
         : false;
 
-    return !!asset.identifier && unIgnored && included && !excluded;
+    return !!identifier && unIgnored && included && !excluded;
   });
+
+  return uniqueObjects<AssetInfoWithId>(filtered, item => item.identifier);
 });
 
-const assetText = (asset: AssetInfoWithId): string =>
-  `${asset.symbol} ${asset.name}`;
-
-const blur = () => {
-  useTimeoutFn(() => {
-    set(search, '');
-  }, 200);
-};
-
-const searchAssets = async (
-  keyword: string,
-  signal: AbortSignal
-): Promise<void> => {
+async function searchAssets(keyword: string, signal: AbortSignal): Promise<void> {
+  set(loading, true);
   try {
-    set(assets, await assetSearch(keyword, 50, get(includeNfts), signal));
-  } catch (e: any) {
-    set(error, e.message);
-  }
-};
+    const fetchedAssets = await assetSearch({
+      value: keyword,
+      limit: 50,
+      searchNfts: get(includeNfts),
+      signal,
+    });
+    if (get(modelValue))
+      await retainSelectedValueInOptions(fetchedAssets);
+    else set(assets, fetchedAssets);
 
-let pending: AbortController | null = null;
-
-watch(search, search => {
-  if (search) {
-    set(loading, true);
-  } else {
+    pending = null;
     set(loading, false);
   }
+  catch (error_: any) {
+    if (!(error_ instanceof CanceledError)) {
+      set(loading, false);
+      set(error, error_.message);
+    }
+  }
+}
+
+function getVisibleAsset(identifier: string) {
+  return get(visibleAssets)?.find(asset => asset.identifier === identifier);
+}
+
+function onUpdateModelValue(value: string) {
+  set(modelValue, value);
+  emit('update:asset', getVisibleAsset(value));
+}
+
+watch(search, (search) => {
+  if (search)
+    set(loading, true);
+  else if (!pending)
+    set(loading, false);
 });
 
-watchThrottled(
+watchDebounced(
   search,
-  async search => {
-    if (!search) {
-      return;
-    }
+  async (search) => {
+    if (!search)
+      return set(loading, false);
+
     if (pending) {
       pending.abort();
       pending = null;
     }
     set(error, '');
-    set(loading, true);
-    const controller = new AbortController();
-    pending = controller;
-    await searchAssets(search, controller.signal);
-    set(loading, false);
+    pending = new AbortController();
+    await searchAssets(search, pending.signal);
   },
   {
-    throttle: 800
-  }
+    debounce: 800,
+  },
 );
 
-const checkValue = async () => {
-  const val = get(value);
-  if (!val) {
-    return;
+async function retainSelectedValueInOptions(newAssets: (AssetInfoWithId | NftAsset)[]) {
+  try {
+    const val = get(modelValue);
+    assert(val);
+    const mapping = await assetMapping([val]);
+    set(assets, [
+      ...newAssets,
+      {
+        identifier: val,
+        ...mapping.assets[transformCase(val, true)],
+      },
+    ]);
   }
-  const mapping = await assetMapping([val]);
-  set(assets, [
-    ...get(assets),
-    {
-      identifier: val,
-      ...mapping.assets[transformCase(val, true)]
-    }
-  ]);
-};
+  catch (error_: any) {
+    set(loading, false);
+    set(error, error_.message);
+  }
+}
+
+async function checkValue() {
+  if (!get(modelValue))
+    return;
+
+  await retainSelectedValueInOptions(get(assets));
+}
 
 onMounted(async () => {
   await checkValue();
 });
 
-watch(value, async () => {
+watch(modelValue, async () => {
   await checkValue();
 });
 
-const listeners = useListeners();
+watch(visibleAssets, () => {
+  const identifier = get(modelValue);
+  if (identifier && !getVisibleAsset(identifier))
+    onUpdateModelValue('');
+});
 </script>
 
 <template>
-  <VAutocomplete
-    ref="autoCompleteInput"
-    :value="value"
+  <RuiAutoComplete
+    v-model="modelValue"
+    v-model:search-input="search"
     :disabled="disabled"
-    :items="visibleAssets"
-    class="asset-select"
+    :options="visibleAssets"
+    class="asset-select w-full [&_.group]:py-1.5"
+    menu-class="!min-w-full"
     :hint="hint"
     :label="label"
     :clearable="clearable"
-    :persistent-hint="persistentHint"
     :required="required"
     :success-messages="successMessages"
     :error-messages="errors"
-    item-value="identifier"
-    :search-input.sync="search"
-    :item-text="assetText"
+    key-attr="identifier"
+    text-attr="identifier"
     :hide-details="hideDetails"
-    :hide-no-data="loading || !search"
+    :hide-no-data="loading || !search || !!error"
     auto-select-first
     :loading="loading"
-    :menu-props="{ closeOnContentClick: true }"
-    :outlined="outlined"
+    :variant="outlined ? 'outlined' : 'default'"
+    :item-height="60"
+    v-bind="$attrs"
     no-filter
-    :class="outlined ? 'asset-select--outlined' : null"
-    v-on="listeners"
-    @input="input($event)"
-    @blur="blur()"
   >
     <template #selection="{ item }">
       <template v-if="item && item.identifier">
-        <div v-if="item.assetType === 'nft'" class="overflow-hidden">
-          <NftDetails :identifier="item.identifier" size="40px" />
-        </div>
+        <NftDetails
+          v-if="item.assetType === 'nft'"
+          :identifier="item.identifier"
+          size="36px"
+          class="overflow-hidden text-sm -my-2"
+        />
         <AssetDetailsBase
           v-else
-          class="asset-select__details ml-2"
+          class="py-0 pl-1"
           :asset="item"
         />
       </template>
@@ -216,122 +233,26 @@ const listeners = useListeners();
       <NftDetails
         v-if="item.assetType === 'nft'"
         :identifier="item.identifier"
-        size="40px"
+        size="36px"
+        class="overflow-hidden text-sm -my-2"
       />
-      <template v-else>
-        <div class="pr-4">
-          <VImg
-            v-if="item.imageUrl"
-            width="40px"
-            height="40px"
-            contain
-            :src="item.imageUrl"
-          />
-          <AssetIcon v-else size="40px" :identifier="item.identifier" />
-        </div>
-        <VListItemContent
-          :id="`asset-${getValidSelectorFromEvmAddress(
-            item.identifier.toLocaleLowerCase()
-          )}`"
-        >
-          <template v-if="!item.isCustomAsset">
-            <VListItemTitle class="font-medium">
-              {{ item.symbol }}
-            </VListItemTitle>
-            <VListItemSubtitle>{{ item.name }}</VListItemSubtitle>
-          </template>
-          <template v-else>
-            <VListItemTitle class="font-medium">
-              {{ item.name }}
-            </VListItemTitle>
-            <VListItemSubtitle>
-              {{ item.customAssetType }}
-            </VListItemSubtitle>
-          </template>
-        </VListItemContent>
-      </template>
+      <AssetDetailsBase
+        v-else
+        :id="`asset-${getValidSelectorFromEvmAddress(item.identifier.toLocaleLowerCase())}`"
+        class="py-0 -my-1"
+        :asset="item"
+      />
     </template>
     <template #no-data>
-      <div data-cy="no_assets" class="px-4 py-2">
+      <div
+        data-cy="no_assets"
+        class="p-4"
+      >
         {{ t('asset_select.no_results') }}
       </div>
     </template>
-    <template #append>
-      <div v-if="loading" class="h-full flex items-center">
-        <VProgressCircular
-          class="asset-select__loading"
-          color="primary"
-          indeterminate
-          width="3"
-          size="30"
-        />
-      </div>
-    </template>
-    <template #prepend>
+    <template #selection.prepend>
       <slot name="prepend" />
     </template>
-  </VAutocomplete>
+  </RuiAutoComplete>
 </template>
-
-<style scoped lang="scss">
-.asset-select {
-  &__details {
-    padding-top: 4px;
-    padding-bottom: 4px;
-  }
-
-  &__loading {
-    margin-top: -2px;
-  }
-
-  &--outlined {
-    /* stylelint-disable selector-class-pattern,selector-nested-pattern */
-
-    :deep(.v-select__slot) {
-      /* stylelint-enable selector-class-pattern,selector-nested-pattern */
-
-      .v-input {
-        &__icon {
-          &--append {
-            i {
-              bottom: 10px;
-            }
-          }
-
-          &--clear {
-            button {
-              bottom: 10px;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  /* stylelint-disable selector-class-pattern,selector-nested-pattern */
-
-  :deep(.v-select__slot) {
-    /* stylelint-enable selector-class-pattern,selector-nested-pattern */
-    height: 56px;
-    margin-top: -2px;
-
-    .v-label {
-      top: 20px;
-    }
-
-    .v-input {
-      &__icon {
-        padding-top: 20px;
-      }
-    }
-
-    .v-select {
-      &__selections {
-        margin-top: 4px;
-        display: flex;
-        flex-flow: nowrap;
-      }
-    }
-  }
-}
-</style>

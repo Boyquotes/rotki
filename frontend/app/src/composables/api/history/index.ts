@@ -1,48 +1,36 @@
-import { type ActionResult } from '@rotki/common/lib/data';
 import { api } from '@/services/rotkehlchen-api';
-import {
-  handleResponse,
-  validStatus,
-  validWithSessionStatus
-} from '@/services/utils';
-import { type TradeLocation } from '@/types/history/trade/location';
+import { handleResponse, validStatus, validWithSessionStatus } from '@/services/utils';
 import { ReportProgress } from '@/types/reports';
-import { type ActionDataEntry } from '@/types/action';
+import type { ActionResult } from '@rotki/common';
+import type { AllLocationResponse } from '@/types/location';
 
-interface AllLocationResponse {
-  locations: Record<string, Omit<ActionDataEntry, 'identifier'>>;
+interface UseHistoryApiReturn {
+  getProgress: () => Promise<ReportProgress>;
+  fetchAssociatedLocations: () => Promise<string[]>;
+  fetchAllLocations: () => Promise<AllLocationResponse>;
 }
 
-export const useHistoryApi = () => {
+export function useHistoryApi(): UseHistoryApiReturn {
   const getProgress = async (): Promise<ReportProgress> => {
-    const response = await api.instance.get<ActionResult<ReportProgress>>(
-      `/history/status`,
-      {
-        validateStatus: validWithSessionStatus
-      }
-    );
+    const response = await api.instance.get<ActionResult<ReportProgress>>(`/history/status`, {
+      validateStatus: validWithSessionStatus,
+    });
     const data = handleResponse(response);
     return ReportProgress.parse(data);
   };
 
-  const fetchAssociatedLocations = async (): Promise<TradeLocation[]> => {
-    const response = await api.instance.get<ActionResult<TradeLocation[]>>(
-      '/locations/associated',
-      {
-        validateStatus: validStatus
-      }
-    );
+  const fetchAssociatedLocations = async (): Promise<string[]> => {
+    const response = await api.instance.get<ActionResult<string[]>>('/locations/associated', {
+      validateStatus: validStatus,
+    });
 
     return handleResponse(response);
   };
 
   const fetchAllLocations = async (): Promise<AllLocationResponse> => {
-    const response = await api.instance.get<ActionResult<AllLocationResponse>>(
-      '/locations/all',
-      {
-        validateStatus: validStatus
-      }
-    );
+    const response = await api.instance.get<ActionResult<AllLocationResponse>>('/locations/all', {
+      validateStatus: validStatus,
+    });
 
     return handleResponse(response);
   };
@@ -50,6 +38,6 @@ export const useHistoryApi = () => {
   return {
     getProgress,
     fetchAssociatedLocations,
-    fetchAllLocations
+    fetchAllLocations,
   };
-};
+}

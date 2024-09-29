@@ -1,22 +1,22 @@
-import { type Wrapper, mount } from '@vue/test-utils';
+import { type VueWrapper, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import Vuetify from 'vuetify';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import ServiceKey from '@/components/settings/api-keys/ServiceKey.vue';
 
-describe('ServiceKey.vue', () => {
-  let wrapper: Wrapper<any>;
+describe('serviceKey.vue', () => {
+  let wrapper: VueWrapper<InstanceType<typeof ServiceKey>>;
 
-  function createWrapper(): Wrapper<any> {
-    const vuetify = new Vuetify();
+  function createWrapper(): VueWrapper<InstanceType<typeof ServiceKey>> {
     const pinia = createPinia();
     setActivePinia(pinia);
     return mount(ServiceKey, {
-      pinia,
-      vuetify,
-      propsData: {
+      global: {
+        plugins: [pinia],
+      },
+      props: {
         apiKey: '',
-        name: 'etherscan'
-      }
+        name: 'etherscan',
+      },
     });
   }
 
@@ -24,18 +24,26 @@ describe('ServiceKey.vue', () => {
     wrapper = createWrapper();
   });
 
-  test('component leaves edit mode when updated with non-empty value', async () => {
+  afterEach(() => {
+    wrapper.unmount();
+  });
+
+  it('component leaves edit mode when updated with non-empty value', async () => {
     expect.assertions(2);
-    await wrapper.vm.$nextTick();
-    expect(
-      wrapper.find('[data-cy=service-key__api-key]').attributes('disabled')
-    ).toBeUndefined();
+    await nextTick();
+    expect(wrapper.find('[data-cy=service-key__api-key] input').attributes()).toMatchObject(
+      expect.not.objectContaining({
+        disabled: '',
+      }),
+    );
     await wrapper.setProps({
-      apiKey: '1234'
+      apiKey: '1234',
     });
-    await wrapper.vm.$nextTick();
-    expect(
-      wrapper.find('[data-cy=service-key__api-key]').attributes('disabled')
-    ).toBe('disabled');
+    await nextTick();
+    expect(wrapper.find('[data-cy=service-key__api-key] input').attributes()).toMatchObject(
+      expect.objectContaining({
+        disabled: '',
+      }),
+    );
   });
 });

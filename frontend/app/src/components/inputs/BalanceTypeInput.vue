@@ -1,33 +1,33 @@
 <script setup lang="ts">
 import { BalanceType } from '@/types/balances';
 
-defineProps<{ value: BalanceType }>();
+defineOptions({
+  inheritAttrs: false,
+});
 
-const emit = defineEmits<{ (e: 'input', value: BalanceType): void }>();
+const model = defineModel<BalanceType>({ required: true });
 
 const { t } = useI18n();
+
 const balanceTypes = computed(() => [
   {
-    value: BalanceType.ASSET,
-    text: t('common.asset')
+    key: BalanceType.ASSET,
+    label: t('common.asset'),
   },
   {
-    value: BalanceType.LIABILITY,
-    text: t('manual_balances_form.type.liability')
-  }
+    key: BalanceType.LIABILITY,
+    label: t('manual_balances_form.type.liability'),
+  },
 ]);
-
-const input = (value: BalanceType) => {
-  emit('input', value);
-};
 </script>
 
 <template>
-  <VSelect
-    :value="value"
-    :items="balanceTypes"
+  <RuiMenuSelect
+    v-model="model"
+    :options="balanceTypes"
     v-bind="$attrs"
-    outlined
-    @input="input($event)"
+    variant="outlined"
+    key-attr="key"
+    text-attr="label"
   />
 </template>

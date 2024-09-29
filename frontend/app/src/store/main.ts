@@ -1,22 +1,22 @@
 import { api } from '@/services/rotkehlchen-api';
-import { type Nullable } from '@/types';
-import { type LogLevel } from '@/utils/log-level';
-import { type Version } from '@/types/action';
-import { type DefaultBackendArguments } from '@/types/backend';
+import type { Nullable } from '@rotki/common';
+import type { LogLevel } from '@shared/log-level';
+import type { Version } from '@/types/action';
+import type { DefaultBackendArguments } from '@/types/backend';
 
 let intervalId: any = null;
 
 export const useMainStore = defineStore('main', () => {
-  const version: Ref<Version> = ref(defaultVersion());
-  const connected: Ref<boolean> = ref(false);
-  const connectionFailure: Ref<boolean> = ref(false);
-  const dataDirectory: Ref<string> = ref('');
-  const logLevel: Ref<LogLevel> = ref(getDefaultLogLevel());
-  const dockerRiskAccepted: Ref<boolean> = ref(true);
-  const defaultBackendArguments: Ref<DefaultBackendArguments> = ref({
+  const version = ref<Version>(defaultVersion());
+  const connected = ref<boolean>(false);
+  const connectionFailure = ref<boolean>(false);
+  const dataDirectory = ref<string>('');
+  const logLevel = ref<LogLevel>(getDefaultLogLevel());
+  const dockerRiskAccepted = ref<boolean>(true);
+  const defaultBackendArguments = ref<DefaultBackendArguments>({
     maxLogfilesNum: 0,
     maxSizeInMbAllLogs: 0,
-    sqliteInstructions: 0
+    sqliteInstructions: 0,
   });
 
   const { info, ping } = useInfoApi();
@@ -29,16 +29,16 @@ export const useMainStore = defineStore('main', () => {
   const appVersion = computed(() => {
     const { version: appVersion } = get(version);
     const indexOfDev = appVersion.indexOf('dev');
-    return indexOfDev > 0
-      ? appVersion.slice(0, Math.max(0, indexOfDev + 3))
-      : appVersion;
+    return indexOfDev > 0 ? appVersion.slice(0, Math.max(0, indexOfDev + 3)) : appVersion;
   });
 
-  const isDevelop = computed(() => {
+  const isDevelop = computed<boolean>(() => {
+    const dev = checkIfDevelopment();
+    if (dev)
+      return true;
+
     const { version: appVersion } = get(version);
-    return (
-      appVersion.includes('dev') || get(dataDirectory).includes('develop_data')
-    );
+    return appVersion.includes('dev') || get(dataDirectory).includes('develop_data');
   });
 
   const getVersion = async (): Promise<void> => {
@@ -47,7 +47,7 @@ export const useMainStore = defineStore('main', () => {
       set(version, {
         version: appVersion.ourVersion || '',
         latestVersion: appVersion.latestVersion || '',
-        downloadUrl: appVersion.downloadUrl || ''
+        downloadUrl: appVersion.downloadUrl || '',
       });
     }
   };
@@ -57,7 +57,7 @@ export const useMainStore = defineStore('main', () => {
       dataDirectory: appDataDirectory,
       logLevel: level,
       acceptDockerRisk,
-      backendDefaultArguments
+      backendDefaultArguments,
     } = await info(false);
 
     set(dataDirectory, appDataDirectory);
@@ -67,20 +67,19 @@ export const useMainStore = defineStore('main', () => {
     set(defaultBackendArguments, backendDefaultArguments);
   };
 
-  const connect = async (payload?: string | null): Promise<void> => {
+  const connect = (payload?: string | null): void => {
     let count = 0;
-    if (intervalId) {
+    if (intervalId)
       clearInterval(intervalId);
-    }
 
     const updateApi = (payload?: Nullable<string>): void => {
       const interopBackendUrl = window.interop?.serverUrl();
       let backendUrl = api.defaultServerUrl;
-      if (payload) {
+      if (payload)
         backendUrl = payload;
-      } else if (interopBackendUrl) {
+      else if (interopBackendUrl)
         backendUrl = interopBackendUrl;
-      }
+
       api.setup(backendUrl);
     };
 
@@ -96,9 +95,11 @@ export const useMainStore = defineStore('main', () => {
           await getInfo();
           await getVersion();
         }
-      } catch (e: any) {
-        logger.error(e);
-      } finally {
+      }
+      catch (error: any) {
+        logger.error(error);
+      }
+      finally {
         count++;
         if (count > 20) {
           clearInterval(intervalId);
@@ -106,7 +107,7 @@ export const useMainStore = defineStore('main', () => {
         }
       }
     };
-    intervalId = setInterval(attemptConnect, 2000);
+    intervalId = setInterval(() => startPromise(attemptConnect()), 2000);
     set(connectionFailure, false);
   };
 
@@ -132,16 +133,17 @@ export const useMainStore = defineStore('main', () => {
     getVersion,
     getInfo,
     setConnected,
-    setConnectionFailure
+    setConnectionFailure,
   };
 });
 
-const defaultVersion = (): Version => ({
-  version: '',
-  latestVersion: '',
-  downloadUrl: ''
-});
-
-if (import.meta.hot) {
-  import.meta.hot.accept(acceptHMRUpdate(useMainStore, import.meta.hot));
+function defaultVersion(): Version {
+  return {
+    version: '',
+    latestVersion: '',
+    downloadUrl: '',
+  };
 }
+
+if (import.meta.hot)
+  import.meta.hot.accept(acceptHMRUpdate(useMainStore, import.meta.hot));

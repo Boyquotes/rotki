@@ -151,7 +151,9 @@ prices = {
             1539713117: FVal(178.615),
             1539713237: FVal(178.615),
             1539713238: FVal(178.615),
+            1566687695: FVal(178.615),
             1566726126: FVal('167.58'),
+            1569366095: FVal('161.59'),
             1569924574: FVal('161.59'),
             1607727600: FVal('449.68'),
             1607814000: FVal('469.82'),
@@ -167,6 +169,7 @@ prices = {
             1640493374: FVal(4072.51),
             1681343455: FVal('1746.99'),
             1685198279: FVal('1701.45'),
+            1691693607: FVal('1698.56'),
         },
         'USD': {
             1624798800: FVal(1983.33),
@@ -264,6 +267,11 @@ prices = {
             1628994441: FVal(0.9),
         },
     },
+    'XYZ': {  # custom asset used in test 'test_history_export_download_csv'
+        'EUR': {
+            1601040360: ONE,
+        },
+    },
 }
 
 
@@ -278,14 +286,14 @@ def check_result_of_history_creation_for_remote_errors(  # type: ignore[return] 
 def mock_exchange_responses(rotki: Rotkehlchen, remote_errors: bool):
     invalid_payload = '[{'
 
-    def mock_binance_api_queries(url, timeout):  # pylint: disable=unused-argument
+    def mock_binance_api_queries(url, params, *args, **kwargs):  # pylint: disable=unused-argument
         if remote_errors:
             payload = invalid_payload
         elif 'myTrades' in url:
             # Can't mock unknown assets in binance trade query since
             # only all known pairs are queried
             payload = '[]'
-            if 'symbol=ETHBTC' in url:
+            if params.get('symbol') == 'ETHBTC':
                 payload = """[{
                 "symbol": "ETHBTC",
                 "id": 1,
@@ -299,7 +307,7 @@ def mock_exchange_responses(rotki: Rotkehlchen, remote_errors: bool):
                 "isMaker": false,
                 "isBestMatch": true
                 }]"""
-            elif 'symbol=RDNETH' in url:
+            elif params.get('symbol') == 'RDNETH':
                 payload = """[{
                 "symbol": "RDNETH",
                 "id": 2,
@@ -318,7 +326,7 @@ def mock_exchange_responses(rotki: Rotkehlchen, remote_errors: bool):
                 'capital/withdraw' in url or
                 'fiat/orders' in url or
                 'fiat/payments' in url or
-                'lending/union/interestHistory' in url
+                'asset/get-funding-asset' in url
         ):
             payload = '[]'
         else:
@@ -405,66 +413,6 @@ def mock_exchange_responses(rotki: Rotkehlchen, remote_errors: bool):
             raise RuntimeError(
                 f'Poloniex test mock got unexpected/unmocked url {url}',
             )
-        return MockResponse(200, payload)
-
-    def mock_bittrex_api_queries(url, method, json):  # pylint: disable=unused-argument,redefined-outer-name
-        if remote_errors:
-            payload = invalid_payload
-        elif 'orders/closed' in url:
-            payload = """
-[{
-      "id": "fd97d393-e9b9-4dd1-9dbf-f288fc72a185",
-      "marketSymbol": "LTC-BTC",
-      "closedAt": "2017-05-01T15:00:00.00Z",
-      "direction": "BUY",
-      "type": "LIMIT",
-      "fillQuantity": 667.03644955,
-      "limit": 0.0000295,
-      "commission": 0.00004921
-    }, {
-      "id": "ad97d393-e9b9-4dd1-9dbf-f288fc72a185",
-      "marketSymbol": "LTC-ETH",
-      "closedAt": "2017-05-02T15:00:00.00Z",
-      "direction": "SELL",
-      "type": "LIMIT",
-      "fillQuantity": 667.03644955,
-      "commission": 0.00004921,
-      "limit": 0.0000295
-    }, {
-      "id": "ed97d393-e9b9-4dd1-9dbf-f288fc72a185",
-      "marketSymbol": "PTON-ETH",
-      "closedAt": "2017-05-02T15:00:00.00Z",
-      "direction": "SELL",
-      "type": "LIMIT",
-      "fillQuantity": 667.03644955,
-      "commission": 0.00004921,
-      "limit": 0.0000295
-    }, {
-      "id": "1d97d393-e9b9-4dd1-9dbf-f288fc72a185",
-      "marketSymbol": "IDONTEXIST-ETH",
-      "closedAt": "2017-05-02T15:00:00.00Z",
-      "direction": "SELL",
-      "type": "LIMIT",
-      "fillQuantity": 667.03644955,
-      "commission": 0.00004921,
-      "limit": 0.0000295
-    }, {
-      "id": "2d97d393-e9b9-4dd1-9dbf-f288fc72a185",
-      "marketSymbol": "%$#%$#%#$%",
-      "closedAt": "2017-05-02T15:00:00.00Z",
-      "direction": "BUY",
-      "type": "LIMIT",
-      "fillQuantity": 667.03644955,
-      "commission": 0.00004921,
-      "limit": 0.0000295
-}]
-"""
-        elif 'deposits/closed' in url or 'withdrawals/closed' in url:
-            # For now no deposits or withdrawals for bittrex in the big history test
-            payload = '[]'
-        else:
-            raise RuntimeError(f'Bittrex test mock got unexpected/unmocked url {url}')
-
         return MockResponse(200, payload)
 
     def mock_bitmex_api_queries(url, data):  # pylint: disable=unused-argument
@@ -558,19 +506,9 @@ def mock_exchange_responses(rotki: Rotkehlchen, remote_errors: bool):
     binance_patch = None
     if binance:
         binance_patch = patch.object(
-            binance.session,
-            'get',
+            target=binance.session,
+            attribute='request',
             side_effect=mock_binance_api_queries,
-        )
-
-    bittrex_objects = rotki.exchange_manager.connected_exchanges.get(Location.BITTREX, None)
-    bittrex = None if bittrex_objects is None else bittrex_objects[0]
-    bittrex_patch = None
-    if bittrex:
-        bittrex_patch = patch.object(
-            bittrex.session,
-            'request',
-            side_effect=mock_bittrex_api_queries,
         )
 
     bitmex_objects = rotki.exchange_manager.connected_exchanges.get(Location.BITMEX, None)
@@ -583,7 +521,7 @@ def mock_exchange_responses(rotki: Rotkehlchen, remote_errors: bool):
             side_effect=mock_bitmex_api_queries,
         )
 
-    return polo_patch, binance_patch, bittrex_patch, bitmex_patch
+    return polo_patch, binance_patch, bitmex_patch
 
 
 def assert_asset_movements(
@@ -765,7 +703,7 @@ def mock_history_processing(
 
         # TODO: terrible way to check. Figure out something better
         limited_range_test = False
-        expected_trades_num = 9
+        expected_trades_num = 7
         expected_margin_num = 1
         expected_asset_movements_num = 13
         if not limited_range_test:
@@ -773,11 +711,11 @@ def mock_history_processing(
             expected_asset_movements_num = 13
         if end_ts == 1539713238:
             limited_range_test = True
-            expected_trades_num = 8
+            expected_trades_num = 6
             expected_margin_num = 1
             expected_asset_movements_num = 12
         if end_ts == 1601040361:
-            expected_trades_num = 8
+            expected_trades_num = 6
 
         trades = [x for x in events if isinstance(x, Trade)]
         assert len(trades) == expected_trades_num, f'Expected {len(trades)} during history creation check from {start_ts} to {end_ts}'  # noqa: E501
@@ -954,7 +892,6 @@ def mock_etherscan_transaction_response(etherscan: Etherscan, remote_errors: boo
 class TradesTestSetup(NamedTuple):
     polo_patch: _patch
     binance_patch: _patch
-    bittrex_patch: _patch
     bitmex_patch: _patch
     accountant_patch: _patch
     etherscan_patch: _patch
@@ -982,7 +919,7 @@ def mock_history_processing_and_exchanges(
         remote_errors=remote_errors,
     )
 
-    polo_patch, binance_patch, bittrex_patch, bitmex_patch = mock_exchange_responses(
+    polo_patch, binance_patch, bitmex_patch = mock_exchange_responses(
         rotki,
         remote_errors,
     )
@@ -993,7 +930,6 @@ def mock_history_processing_and_exchanges(
     return TradesTestSetup(
         polo_patch=polo_patch,
         binance_patch=binance_patch,
-        bittrex_patch=bittrex_patch,
         bitmex_patch=bitmex_patch,
         accountant_patch=accountant_patch,
         etherscan_patch=etherscan_patch,
@@ -1151,6 +1087,8 @@ def maybe_mock_historical_price_queries(
 ) -> None:
     """If needed will make sure the historian's price queries are mocked"""
     if not should_mock_price_queries:
+        # ensure that no previous overwrite of the price historian affects the instance
+        historian.__dict__.pop('query_historical_price', None)
         return
 
     if dont_mock_price_for is None:

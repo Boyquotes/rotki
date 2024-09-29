@@ -1,34 +1,45 @@
 <script setup lang="ts">
-import { TimeUnit } from '@rotki/common/lib/settings';
-import {
-  TimeFramePeriod,
-  TimeFramePersist,
-  type TimeFrameSetting,
-  timeframes
-} from '@rotki/common/lib/settings/graphs';
+import { TimeFramePeriod, TimeFramePersist, type TimeFrameSetting, TimeUnit, timeframes } from '@rotki/common';
 import dayjs from 'dayjs';
 import { Section } from '@/types/status';
 
 const { t } = useI18n();
-const { currencySymbol, floatingPrecision } = storeToRefs(
-  useGeneralSettingsStore()
-);
+const { currencySymbol, floatingPrecision } = storeToRefs(useGeneralSettingsStore());
 const sessionStore = useSessionSettingsStore();
 const { update } = sessionStore;
 const { timeframe } = storeToRefs(sessionStore);
-const { premium } = storeToRefs(usePremiumStore());
+const premium = usePremium();
 const statistics = useStatisticsStore();
 const { fetchNetValue, getNetValue } = statistics;
 const { totalNetWorth } = storeToRefs(statistics);
 const frontendStore = useFrontendSettingsStore();
 const { visibleTimeframes } = storeToRefs(frontendStore);
 
-const { isLoading: isSectionLoading } = useStatusStore();
+const { shouldShowLoadingScreen, isLoading: isSectionLoading } = useStatusStore();
 
 const isLoading = logicOr(
-  isSectionLoading(Section.BLOCKCHAIN_ETH),
-  isSectionLoading(Section.BLOCKCHAIN_BTC)
+  shouldShowLoadingScreen(Section.BLOCKCHAIN),
+  isSectionLoading(Section.BLOCKCHAIN),
 );
+
+const adjustedTotalNetWorthFontSize = computed(() => {
+  const digits = get(totalNetWorth).toFormat(get(floatingPrecision)).replace(/\./g, '').replace(/,/g, '').length;
+
+  // this number adjusted visually
+  // when we use max floating precision (8), it won't overlap
+  return Math.min(1, 12 / digits);
+});
+
+const allTimeframes = computed(() =>
+  timeframes((unit, amount) => dayjs().subtract(amount, unit).startOf(TimeUnit.DAY).unix()),
+);
+
+const timeframeData = computed(() => {
+  const all = get(allTimeframes);
+  const selection = get(timeframe);
+  const startingDate = all[selection].startingDate();
+  return get(getNetValue(startingDate));
+});
 
 const startingValue = computed(() => {
   const data = get(timeframeData).data;
@@ -44,82 +55,53 @@ const startingValue = computed(() => {
   return start;
 });
 
-const adjustedTotalNetWorthFontSize = computed(() => {
-  const digits = get(totalNetWorth)
-    .toFormat(get(floatingPrecision))
-    .replace(/\./g, '')
-    .replace(/,/g, '').length;
-
-  // this number adjusted visually
-  // when we use max floating precision (8), it won't overlap
-  return Math.min(1, 12 / digits);
-});
-
-const allTimeframes = computed(() =>
-  timeframes((unit, amount) =>
-    dayjs().subtract(amount, unit).startOf(TimeUnit.DAY).unix()
-  )
-);
-
-const balanceDelta = computed(() =>
-  get(totalNetWorth).minus(get(startingValue))
-);
-
-const timeframeData = computed(() => {
-  const all = get(allTimeframes);
-  const selection = get(timeframe);
-  const startingDate = all[selection].startingDate();
-  return get(getNetValue(startingDate));
-});
+const balanceDelta = computed(() => get(totalNetWorth).minus(get(startingValue)));
 
 const percentage = computed(() => {
   const bigNumber = get(balanceDelta).div(get(startingValue)).multipliedBy(100);
-
   return bigNumber.isFinite() ? bigNumber.toFormat(2) : '-';
 });
 
 const indicator = computed(() => {
   const delta = get(balanceDelta);
-  if (delta.isNegative()) {
+  if (delta.isNegative())
     return 'arrow-down-line';
-  }
-  if (delta.isZero()) {
+
+  if (delta.isZero())
     return 'git-commit-line';
-  }
+
   return 'arrow-up-line';
 });
 
 const balanceClass = computed(() => {
   const delta = get(balanceDelta);
-  if (delta.isNegative()) {
+  if (delta.isNegative())
     return 'bg-rui-error-lighter';
-  }
-  if (delta.isZero()) {
+
+  if (delta.isZero())
     return 'bg-rui-grey-500';
-  }
+
   return 'bg-rui-success';
 });
 
-const setTimeframe = async (value: TimeFrameSetting) => {
+async function setTimeframe(value: TimeFrameSetting) {
   assert(value !== TimeFramePersist.REMEMBER);
   sessionStore.update({ timeframe: value });
   await frontendStore.updateSetting({ lastKnownTimeframe: value });
-};
+}
 
 const { logged } = storeToRefs(useSessionAuthStore());
 
 watch(premium, async () => {
-  if (get(logged)) {
+  if (get(logged))
     await fetchNetValue();
-  }
 });
 
 onMounted(() => {
   const isPremium = get(premium);
   const selectedTimeframe = get(timeframe);
-  if (!isPremium && !isPeriodAllowed(selectedTimeframe)) {
+  if (!isPremium && !isPeriodAllowed(selectedTimeframe))
     update({ timeframe: TimeFramePeriod.TWO_WEEKS });
-  }
 });
 
 const { showGraphRangeSelector } = storeToRefs(useFrontendSettingsStore());
@@ -127,8 +109,6 @@ const chartSectionHeight = computed<string>(() => {
   const height = 208 + (get(showGraphRangeSelector) ? 60 : 0);
   return `${height}px`;
 });
-
-const { dark } = useTheme();
 </script>
 
 <template>
@@ -148,14 +128,16 @@ const { dark } = useTheme();
             :value="totalNetWorth"
           />
         </div>
-        <div class="flex justify-center items-baseline">
-          <span v-if="isLoading" class="rounded-full overflow-hidden">
-            <VSkeletonLoader width="170" height="32" type="image" />
-          </span>
+        <div class="flex justify-center items-center">
+          <RuiSkeletonLoader
+            v-if="isLoading"
+            class="w-[10.625rem] h-8"
+            rounded="full"
+          />
           <span
             v-else
-            :class="[balanceClass, !dark ? 'white--text' : 'black--text']"
-            class="pa-1 px-3 flex flex-row rounded-full min-h-[2rem] min-w-[170px]"
+            :class="balanceClass"
+            class="py-1 px-3 flex flex-row rounded-full min-h-[2rem] min-w-[170px] text-white dark:text-rui-light-text"
           >
             <span>
               <RuiIcon :name="indicator" />
@@ -176,14 +158,12 @@ const { dark } = useTheme();
         </div>
         <TimeframeSelector
           class="pt-6"
-          :value="timeframe"
+          :model-value="timeframe"
           :visible-timeframes="visibleTimeframes"
-          @input="setTimeframe($event)"
+          @update:model-value="setTimeframe($event)"
         />
       </div>
-      <div
-        class="lg:col-span-7 flex justify-center items-center overall-balances__net-worth-chart"
-      >
+      <div class="lg:col-span-7 flex justify-center items-center overall-balances__net-worth-chart">
         <NetWorthChart
           v-if="!isLoading"
           :chart-data="timeframeData"
@@ -194,7 +174,11 @@ const { dark } = useTheme();
           v-else
           class="overall-balances__net-worth-chart__loader flex h-full flex flex-col text-center justify-center items-center"
         >
-          <RuiProgress circular variant="indeterminate" color="primary" />
+          <RuiProgress
+            circular
+            variant="indeterminate"
+            color="primary"
+          />
           <div class="pt-5 text-caption">
             {{ t('overall_balances.loading') }}
           </div>

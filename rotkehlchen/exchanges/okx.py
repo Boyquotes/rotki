@@ -68,10 +68,10 @@ class Okx(ExchangeInterface):
             api_key=api_key,
             secret=secret,
             database=database,
+            msg_aggregator=msg_aggregator,
         )
         self.passphrase = passphrase
         self.base_uri = 'https://www.okx.com/'
-        self.msg_aggregator = msg_aggregator
         self.session.headers.update({
             'OK-ACCESS-KEY': self.api_key,
             'OK-ACCESS-PASSPHRASE': self.passphrase,
@@ -82,7 +82,7 @@ class Okx(ExchangeInterface):
         if credentials.api_key is not None:
             self.session.headers.update({'OK-ACCESS-KEY': self.api_key})
         if credentials.passphrase is not None:
-            self.session.headers.update({'OK-ACCESS-PASSPHRASE': self.passphrase})
+            self.session.headers.update({'OK-ACCESS-PASSPHRASE': credentials.passphrase})
         return changed
 
     def _generate_signature(
@@ -152,7 +152,7 @@ class Okx(ExchangeInterface):
         if len(params) != 0:
             path += f'?{urlencode(params)}'
 
-        datestr = datetime.datetime.now(tz=datetime.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')  # noqa: E501
+        datestr = datetime.datetime.now(tz=datetime.UTC).isoformat(timespec='milliseconds').replace('+00:00', 'Z')  # noqa: E501
         signature = self._generate_signature(datestr, method, path, '')
         self.session.headers.update({
             'OK-ACCESS-TIMESTAMP': datestr,
@@ -251,9 +251,9 @@ class Okx(ExchangeInterface):
             try:
                 asset = asset_from_okx(okx_name=currency_data['ccy'])
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found {self.name} balance with unknown asset '
-                    f'{e.identifier}. Ignoring it.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='balance query',
                 )
                 continue
             except UnsupportedAsset as e:
@@ -264,7 +264,7 @@ class Okx(ExchangeInterface):
                 continue
 
             try:
-                usd_price = Inquirer().find_usd_price(asset=asset)
+                usd_price = Inquirer.find_usd_price(asset=asset)
             except RemoteError as e:
                 self.msg_aggregator.add_error(
                     f'Error processing {self.name} {asset.name} balance result due to inability '
@@ -273,7 +273,7 @@ class Okx(ExchangeInterface):
                 continue
 
             try:
-                amount = deserialize_asset_amount(currency_data['availBal'])
+                amount = deserialize_asset_amount(currency_data['availBal']) + deserialize_asset_amount(currency_data['frozenBal'])  # noqa: E501
             except DeserializationError as e:
                 self.msg_aggregator.add_error(
                     f'Error processing {self.name} {asset.name} balance result due to inability '
@@ -402,9 +402,9 @@ class Okx(ExchangeInterface):
             fee_asset = asset_from_okx(raw_trade['feeCcy'])
             link = raw_trade['ordId']
         except UnknownAsset as e:
-            self.msg_aggregator.add_warning(
-                f'Found {self.name} trade with unknown asset '
-                f'{e.identifier}. Ignoring it.',
+            self.send_unknown_asset_message(
+                asset_identifier=e.identifier,
+                details='trade',
             )
         except UnsupportedAsset as e:
             self.msg_aggregator.add_warning(
@@ -472,9 +472,9 @@ class Okx(ExchangeInterface):
                 link=tx_hash,
             )
         except UnknownAsset as e:
-            self.msg_aggregator.add_warning(
-                f'Found {self.name} deposit/withdrawal with unknown asset '
-                f'{e.identifier}. Ignoring it.',
+            self.send_unknown_asset_message(
+                asset_identifier=e.identifier,
+                details='deposit/withdrawal',
             )
         except UnsupportedAsset as e:
             self.msg_aggregator.add_warning(

@@ -12,7 +12,7 @@ from rotkehlchen.db.settings import ROTKEHLCHEN_DB_VERSION
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     assert_simple_ok_response,
 )
 from rotkehlchen.utils.misc import ts_now
@@ -36,10 +36,14 @@ def test_query_db_info(
         backup2.write_text(backup2_contents)
         (users_dir / username / '1633042045_rotkehlchen_db_v28.backup').touch()
 
+    if start_with_logged_in_user:
+        db = rotkehlchen_api_server.rest_api.rotkehlchen.data.db
+        db.conn.execute('PRAGMA wal_checkpoint;')  # flush the wal file
+
     response = requests.get(api_url_for(rotkehlchen_api_server, 'databaseinforesource'))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result) == 2
-    assert result['globaldb'] == {'globaldb_assets_version': 21, 'globaldb_schema_version': 6}
+    assert result['globaldb'] == {'globaldb_assets_version': 26, 'globaldb_schema_version': 9}
 
     if start_with_logged_in_user:
         userdb = result['userdb']
@@ -60,12 +64,12 @@ def test_create_download_delete_backup(
     """Test that creating, downloading and deleting a backup works fine"""
     start_ts = ts_now()
     response = requests.put(api_url_for(rotkehlchen_api_server, 'databasebackupsresource'))
-    filepath = Path(assert_proper_response_with_result(response))
+    filepath = Path(assert_proper_sync_response_with_result(response))
     assert filepath.exists()
     assert filepath.parent == data_dir / USERSDIR_NAME / username
 
     response = requests.get(api_url_for(rotkehlchen_api_server, 'databaseinforesource'))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     backups = result['userdb']['backups']
     assert len(backups) == 1
     assert backups[0]['time'] >= start_ts
@@ -95,7 +99,7 @@ def test_create_download_delete_backup(
     assert not filepath.exists()
     assert not second_filepath.exists()
     response = requests.get(api_url_for(rotkehlchen_api_server, 'databaseinforesource'))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     backups = result['userdb']['backups']
     assert len(backups) == 0
 
@@ -161,7 +165,7 @@ def test_delete_download_backup_errors(
     # test delete two files and only one exists
     undeletable_file.touch()
     response = requests.put(api_url_for(rotkehlchen_api_server, 'databasebackupsresource'))
-    filepath = Path(assert_proper_response_with_result(response))
+    filepath = Path(assert_proper_sync_response_with_result(response))
     response = requests.delete(
         api_url_for(
             rotkehlchen_api_server,

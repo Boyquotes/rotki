@@ -12,10 +12,13 @@ from rotkehlchen.accounting.constants import FREE_PNL_EVENTS_LIMIT, FREE_REPORTS
 from rotkehlchen.accounting.mixins.event import AccountingEventType
 from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.accounting.structures.types import ActionType
+from rotkehlchen.chain.ethereum.oracles.uniswap import UniswapV2Oracle, UniswapV3Oracle
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import A_BTC, A_DAI, A_EUR
 from rotkehlchen.db.history_events import DBHistoryEvents
+from rotkehlchen.errors.misc import AccountingError
 from rotkehlchen.exchanges.data_structures import Trade
+from rotkehlchen.externalapis.coingecko import Coingecko
 from rotkehlchen.externalapis.cryptocompare import Cryptocompare
 from rotkehlchen.externalapis.defillama import Defillama
 from rotkehlchen.fval import FVal
@@ -26,14 +29,16 @@ from rotkehlchen.history.types import HistoricalPriceOracle
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
+    assert_ok_async_response,
     assert_proper_response_with_result,
-    assert_simple_ok_response,
-    wait_for_async_task_with_result,
+    assert_proper_sync_response_with_result,
+    wait_for_async_task,
 )
 from rotkehlchen.tests.utils.constants import ETH_ADDRESS1, ETH_ADDRESS2, ETH_ADDRESS3
 from rotkehlchen.tests.utils.factories import make_evm_tx_hash
 from rotkehlchen.tests.utils.history import (
     assert_pnl_debug_import,
+    mock_etherscan_transaction_response,
     prepare_rotki_for_history_processing_test,
     prices,
 )
@@ -49,7 +54,7 @@ if TYPE_CHECKING:
 @pytest.mark.parametrize('have_decoders', [True])
 @pytest.mark.parametrize(
     'added_exchanges',
-    [(Location.BINANCE, Location.POLONIEX, Location.BITTREX, Location.BITMEX, Location.KRAKEN)],
+    [(Location.BINANCE, Location.POLONIEX, Location.BITMEX, Location.KRAKEN)],
 )
 @pytest.mark.parametrize('ethereum_accounts', [[ETH_ADDRESS1, ETH_ADDRESS2, ETH_ADDRESS3]])
 @pytest.mark.parametrize('mocked_price_queries', [prices])
@@ -62,7 +67,8 @@ if TYPE_CHECKING:
     {'include_fees_in_cost_basis': False},
 ])
 @pytest.mark.parametrize('initialize_accounting_rules', [True])
-def test_query_history(rotkehlchen_api_server_with_exchanges, start_ts, end_ts):
+@pytest.mark.parametrize('legacy_messages_via_websockets', [True])
+def test_query_history(rotkehlchen_api_server_with_exchanges, start_ts, end_ts, websocket_connection):  # noqa: E501
     """Test that the history processing REST API endpoint works. Similar to test_history.py
 
     Both a test for full and limited time range.
@@ -118,7 +124,7 @@ def test_query_history(rotkehlchen_api_server_with_exchanges, start_ts, end_ts):
     assert settings['include_fees_in_cost_basis'] == fees_in_cost_basis
 
     assert events_result['entries_limit'] == FREE_PNL_EVENTS_LIMIT
-    entries_length = 43 if start_ts == 0 else 40
+    entries_length = 37 if start_ts == 0 else 34
     assert events_result['entries_found'] == entries_length
     assert isinstance(events_result['entries'], list)
     # TODO: These events are not actually checked anywhere for correctness
@@ -126,25 +132,20 @@ def test_query_history(rotkehlchen_api_server_with_exchanges, start_ts, end_ts):
     #       they are assumed correct if the overview is correct
     assert len(events_result['entries']) == entries_length
 
-    # And now make sure that warnings have also been generated for the query of
+    # And now make sure that messages have also been generated for the query of
     # the unsupported/unknown assets
-    rotki = rotkehlchen_api_server_with_exchanges.rest_api.rotkehlchen
-    warnings = rotki.msg_aggregator.consume_warnings()
-    assert len(warnings) == 8
-    assert 'poloniex trade with unknown asset NOEXISTINGASSET' in warnings[0]
-    assert 'poloniex trade with unsupported asset BALLS' in warnings[1]
-    assert 'withdrawal of unknown poloniex asset IDONTEXIST' in warnings[2]
-    assert 'withdrawal of unsupported poloniex asset DIS' in warnings[3]
-    assert 'deposit of unknown poloniex asset IDONTEXIST' in warnings[4]
-    assert 'deposit of unsupported poloniex asset EBT' in warnings[5]
-    assert 'bittrex trade with unsupported asset PTON' in warnings[6]
-    assert 'bittrex trade with unknown asset IDONTEXIST' in warnings[7]
-
-    errors = rotki.msg_aggregator.consume_errors()
-    assert len(errors) == 3
-    assert 'bittrex trade with unprocessable pair %$#%$#%#$%' in errors[0]
-    assert 'Failed to read ledger event from kraken' in errors[1]
-    assert 'Failed to read ledger event from kraken ' in errors[2]
+    websocket_connection.wait_until_messages_num(num=8, timeout=10)
+    for expected_message in [
+        {'type': 'exchange_unknown_asset', 'data': {'location': 'poloniex', 'name': 'poloniex', 'identifier': 'NOEXISTINGASSET', 'details': 'trade'}},  # noqa: E501
+        {'type': 'legacy', 'data': {'verbosity': 'warning', 'value': 'Found poloniex trade with unsupported asset BALLS. Ignoring it.'}},  # noqa: E501
+        {'type': 'exchange_unknown_asset', 'data': {'location': 'poloniex', 'name': 'poloniex', 'identifier': 'IDONTEXIST', 'details': 'asset movement'}},  # noqa: E501
+        {'type': 'legacy', 'data': {'verbosity': 'warning', 'value': 'Found withdrawal of unsupported poloniex asset DIS. Ignoring it.'}},  # noqa: E501
+        {'type': 'exchange_unknown_asset', 'data': {'location': 'poloniex', 'name': 'poloniex', 'identifier': 'IDONTEXIST', 'details': 'asset movement'}},  # noqa: E501
+        {'type': 'legacy', 'data': {'verbosity': 'warning', 'value': 'Found deposit of unsupported poloniex asset EBT. Ignoring it.'}},  # noqa: E501
+        {'type': 'legacy', 'data': {'verbosity': 'error', 'value': "Failed to read ledger event from kraken {'refid': 'D3', 'time': 1408994442, 'type': 'deposit', 'subtype': '', 'aclass': 'currency', 'asset': 'IDONTEXISTEITHER', 'amount': '10', 'fee': '0', 'balance': '100'} due to Unknown asset IDONTEXISTEITHER provided."}},  # noqa: E501
+        {'type': 'legacy', 'data': {'verbosity': 'error', 'value': "Failed to read ledger event from kraken {'refid': 'W3', 'time': 1408994442, 'type': 'withdrawal', 'subtype': '', 'aclass': 'currency', 'asset': 'IDONTEXISTEITHER', 'amount': '-10', 'fee': '0.11', 'balance': '100'} due to Unknown asset IDONTEXISTEITHER provided."}},  # noqa: E501
+    ]:
+        assert expected_message == websocket_connection.pop_message()
 
     response = requests.get(
         api_url_for(
@@ -152,7 +153,7 @@ def test_query_history(rotkehlchen_api_server_with_exchanges, start_ts, end_ts):
             'historyactionableitemsresource',
         ),
     )
-    result = assert_proper_response_with_result(response=response, status_code=HTTPStatus.OK)
+    result = assert_proper_sync_response_with_result(response=response, status_code=HTTPStatus.OK)
     assert len(result['missing_acquisitions']) == 9 if fees_in_cost_basis is False else 8
     assert len(result['missing_prices']) == 0
     assert result['report_id'] == 1
@@ -161,7 +162,7 @@ def test_query_history(rotkehlchen_api_server_with_exchanges, start_ts, end_ts):
 @pytest.mark.parametrize('have_decoders', [True])
 @pytest.mark.parametrize(
     'added_exchanges',
-    [(Location.BINANCE, Location.POLONIEX, Location.BITTREX, Location.BITMEX, Location.KRAKEN)],
+    [(Location.BINANCE, Location.POLONIEX, Location.BITMEX, Location.KRAKEN)],
 )
 @pytest.mark.parametrize('ethereum_accounts', [[ETH_ADDRESS1, ETH_ADDRESS2, ETH_ADDRESS3]])
 @pytest.mark.parametrize('mocked_price_queries', [prices])
@@ -194,13 +195,47 @@ def test_query_history_remote_errors(rotkehlchen_api_server_with_exchanges):
     warnings = rotki.msg_aggregator.consume_warnings()
     assert len(warnings) == 0
     errors = rotki.msg_aggregator.consume_errors()
-    assert len(errors) == 11
-    assert all('kraken' in e for e in errors[:2])
-    assert 'Etherscan API request http://someurl.com returned invalid JSON response: [{' in errors[2]  # noqa: E501
+    assert len(errors) == 2
+    assert all('kraken' in e for e in errors)
     # The history processing is completely mocked away and omitted in this test.
     # because it is only for the history creation not its processing.
     # For history processing tests look at test_accounting.py and
     # test_accounting_events.py
+
+
+@pytest.mark.parametrize('have_decoders', [True])
+@pytest.mark.parametrize('ethereum_accounts', [[ETH_ADDRESS1]])
+@pytest.mark.parametrize('mocked_price_queries', [prices])
+def test_fatal_error_during_query_history(rotkehlchen_api_server: 'APIServer'):
+    """Test that an accounting error is propagated correctly to the api"""
+    rotki = rotkehlchen_api_server.rest_api.rotkehlchen
+    error_patch = patch(
+        'rotkehlchen.accounting.accountant.Accountant._process_event',
+        side_effect=AccountingError(message='mocked error'),
+    )
+    etherscan_patch = mock_etherscan_transaction_response(
+        etherscan=rotki.chains_aggregator.ethereum.node_inquirer.etherscan,
+        remote_errors=True,
+    )
+
+    with ExitStack() as stack:
+        stack.enter_context(error_patch)
+        stack.enter_context(etherscan_patch)
+
+        response = requests.get(
+            api_url_for(rotkehlchen_api_server, 'historyprocessingresource'),
+            json={'from_timestamp': 0, 'to_timestamp': 1, 'async_query': True},
+        )
+        task_id = assert_ok_async_response(response)
+        outcome = wait_for_async_task(
+            rotkehlchen_api_server,
+            task_id,
+        )
+        assert outcome == {
+            'result': 1,
+            'message': 'mocked error',
+            'status_code': HTTPStatus.CONFLICT,
+        }
 
 
 @pytest.mark.parametrize('have_decoders', [True])
@@ -276,7 +311,7 @@ def test_query_history_external_exchanges(rotkehlchen_api_server):
 @pytest.mark.parametrize('have_decoders', [True])
 @pytest.mark.parametrize(
     'added_exchanges',
-    [(Location.BINANCE, Location.POLONIEX, Location.BITTREX, Location.BITMEX, Location.KRAKEN)],
+    [(Location.BINANCE, Location.POLONIEX, Location.BITMEX, Location.KRAKEN)],
 )
 @pytest.mark.parametrize('ethereum_accounts', [[ETH_ADDRESS1, ETH_ADDRESS2, ETH_ADDRESS3]])
 @pytest.mark.parametrize('mocked_price_queries', [prices])
@@ -303,7 +338,7 @@ def test_query_pnl_report_events_pagination_filtering(
             report_id=report_id,
         ),
     )
-    events_result = assert_proper_response_with_result(response)
+    events_result = assert_proper_sync_response_with_result(response)
     master_events = events_result['entries']
 
     events = []
@@ -321,7 +356,7 @@ def test_query_pnl_report_events_pagination_filtering(
                 'ascending': [ascending_timestamp],
             },
         )
-        events_result = assert_proper_response_with_result(response)
+        events_result = assert_proper_sync_response_with_result(response)
         assert len(events_result['entries']) <= 10
         events.extend(events_result['entries'])
 
@@ -336,7 +371,7 @@ def test_query_pnl_report_events_pagination_filtering(
             assert x in reverse_master
             reverse_master.remove(x)
 
-    assert len(events) == 43
+    assert len(events) == 37
     for idx, x in enumerate(events):
         if idx == len(events) - 1:
             break
@@ -372,7 +407,7 @@ def test_history_debug_export(rotkehlchen_api_server: 'APIServer') -> None:
             'to_timestamp': now,
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert tuple(result.keys()) == expected_keys
     assert result['pnl_settings'] == {'from_timestamp': Timestamp(0), 'to_timestamp': now}
     assert result['ignored_events_ids'] == {'history_event': [tx_id]}
@@ -394,15 +429,11 @@ def test_history_debug_import(rotkehlchen_api_server):
                 'async_query': async_query,
             },
         )
-        if async_query is True:
-            result = wait_for_async_task_with_result(
-                server=rotkehlchen_api_server,
-                task_id=response.json()['result']['task_id'],
-            )
-            assert result is True
-
-        else:
-            assert_simple_ok_response(response)
+        assert assert_proper_response_with_result(
+            response=response,
+            rotkehlchen_api_server=rotkehlchen_api_server,
+            async_query=async_query,
+        )
     else:
         with open(str(filepath), encoding='utf8') as infile:
             response = requests.patch(
@@ -413,14 +444,11 @@ def test_history_debug_import(rotkehlchen_api_server):
                 files={'filepath': infile},
                 data={'async_query': async_query},
             )
-            if async_query is True:
-                result = wait_for_async_task_with_result(
-                    server=rotkehlchen_api_server,
-                    task_id=response.json()['result']['task_id'],
-                )
-                assert result is True
-            else:
-                assert_simple_ok_response(response)
+            assert assert_proper_response_with_result(
+                response=response,
+                rotkehlchen_api_server=rotkehlchen_api_server,
+                async_query=async_query,
+            )
     assert_pnl_debug_import(
         filepath=filepath,
         database=rotkehlchen_api_server.rest_api.rotkehlchen.data.db,
@@ -465,13 +493,14 @@ def test_missing_prices_in_pnl_report(rotkehlchen_api_server):
         db.add_history_event(write_cursor, event)
         rotki.data.db.add_trades(write_cursor, [trade])
 
-    coingecko = PriceHistorian._coingecko
-    PriceHistorian._PriceHistorian__instance = None
+    PriceHistorian.__instance = None
     price_historian = PriceHistorian(
-        data_directory=MagicMock(spec=Path),
+        data_directory=rotki.data.data_directory,
         cryptocompare=MagicMock(spec=Cryptocompare),
-        coingecko=coingecko,
+        coingecko=Coingecko(),
         defillama=MagicMock(spec=Defillama),
+        uniswapv2=MagicMock(spec=UniswapV2Oracle),
+        uniswapv3=MagicMock(spec=UniswapV3Oracle),
     )
     price_historian.set_oracles_order([HistoricalPriceOracle.COINGECKO])
     coingecko_api_calls = 0
@@ -481,7 +510,7 @@ def test_missing_prices_in_pnl_report(rotkehlchen_api_server):
         coingecko_api_calls += 1
         return MockResponse(HTTPStatus.TOO_MANY_REQUESTS, '{}')
 
-    coingecko_patch = patch.object(PriceHistorian()._coingecko.session, 'get', side_effect=mock_coingecko_return)  # noqa: E501
+    coingecko_patch = patch.object(price_historian._coingecko.session, 'get', side_effect=mock_coingecko_return)  # noqa: E501
     # create the PNL report
     with coingecko_patch:
         query_api_create_and_get_report(
@@ -498,7 +527,7 @@ def test_missing_prices_in_pnl_report(rotkehlchen_api_server):
             'historyactionableitemsresource',
         ),
     )
-    result = assert_proper_response_with_result(response=response, status_code=HTTPStatus.OK)
+    result = assert_proper_sync_response_with_result(response=response, status_code=HTTPStatus.OK)
     assert coingecko_api_calls == 2
     assert result['report_id'] == 1
     assert result['missing_prices'] == [{

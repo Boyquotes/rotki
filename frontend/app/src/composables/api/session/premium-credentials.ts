@@ -1,24 +1,21 @@
-import { type ActionResult } from '@rotki/common/lib/data';
-import {
-  handleResponse,
-  validAuthorizedStatus,
-  validStatus
-} from '@/services/utils';
+import { handleResponse, validAuthorizedStatus, validStatus } from '@/services/utils';
 import { api } from '@/services/rotkehlchen-api';
+import type { ActionResult } from '@rotki/common';
 
-export const usePremiumCredentialsApi = () => {
-  const setPremiumCredentials = async (
-    username: string,
-    apiKey: string,
-    apiSecret: string
-  ): Promise<true> => {
+interface UsePremiumCredentialsApiReturn {
+  setPremiumCredentials: (username: string, apiKey: string, apiSecret: string) => Promise<true>;
+  deletePremiumCredentials: () => Promise<true>;
+}
+
+export function usePremiumCredentialsApi(): UsePremiumCredentialsApiReturn {
+  const setPremiumCredentials = async (username: string, apiKey: string, apiSecret: string): Promise<true> => {
     const response = await api.instance.patch<ActionResult<true>>(
       `/users/${username}`,
       {
         premium_api_key: apiKey,
-        premium_api_secret: apiSecret
+        premium_api_secret: apiSecret,
       },
-      { validateStatus: validAuthorizedStatus }
+      { validateStatus: validAuthorizedStatus },
     );
 
     return handleResponse(response);
@@ -26,7 +23,7 @@ export const usePremiumCredentialsApi = () => {
 
   const deletePremiumCredentials = async (): Promise<true> => {
     const response = await api.instance.delete<ActionResult<true>>('/premium', {
-      validateStatus: validStatus
+      validateStatus: validStatus,
     });
 
     return handleResponse(response);
@@ -34,6 +31,6 @@ export const usePremiumCredentialsApi = () => {
 
   return {
     setPremiumCredentials,
-    deletePremiumCredentials
+    deletePremiumCredentials,
   };
-};
+}

@@ -7,14 +7,18 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import gevent
 import pytest
 import requests
 from pysqlcipher3 import dbapi2 as sqlcipher
 
 from rotkehlchen.api.server import APIServer
 from rotkehlchen.constants.misc import USERDB_NAME, USERSDIR_NAME
+from rotkehlchen.db.cache import DBCacheStatic
 from rotkehlchen.db.drivers.gevent import DBConnection, DBConnectionType
 from rotkehlchen.db.settings import ROTKEHLCHEN_DB_VERSION, DBSettings
+from rotkehlchen.history.price import PriceHistorian
+from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.premium.premium import PremiumCredentials
 from rotkehlchen.tests.fixtures.rotkehlchen import patch_no_op_unlock
 from rotkehlchen.tests.utils.api import (
@@ -22,7 +26,7 @@ from rotkehlchen.tests.utils.api import (
     assert_error_async_response,
     assert_error_response,
     assert_ok_async_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     assert_simple_ok_response,
     wait_for_async_task,
     wait_for_async_task_with_result,
@@ -45,6 +49,8 @@ def check_proper_unlock_result(
     assert response_data['settings']['version'] == ROTKEHLCHEN_DB_VERSION
     for setting in dataclasses.fields(DBSettings):
         assert setting.name in response_data['settings']
+    assert DBCacheStatic.LAST_DATA_UPLOAD_TS.value in response_data['settings']
+    assert DBCacheStatic.LAST_BALANCE_SAVE.value in response_data['settings']
 
     if settings_to_check is not None:
         for setting_to_check, value in settings_to_check.items():
@@ -56,7 +62,7 @@ def check_user_status(api_server: APIServer) -> dict[str, str]:
     response = requests.get(
         api_url_for(api_server, 'usersresource'),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     return result
 
 
@@ -67,7 +73,7 @@ def test_loggedin_user_querying(rotkehlchen_api_server: APIServer, username: str
     user_dir.mkdir(exist_ok=True)
     (user_dir / USERDB_NAME).touch()
     response = requests.get(api_url_for(rotkehlchen_api_server, 'usersresource'))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result[username] == 'loggedin'
     assert result['another_user'] == 'loggedout'
     assert len(result) == 2
@@ -89,7 +95,7 @@ def test_not_loggedin_user_querying(
     (user_dir / USERDB_NAME).touch()
 
     response = requests.get(api_url_for(rotkehlchen_api_server, 'usersresource'))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result[username] == 'loggedout'
     assert result['another_user'] == 'loggedout'
     assert len(result) == 2
@@ -114,13 +120,13 @@ def test_user_creation(rotkehlchen_api_server, data_dir):
                 outcome = wait_for_async_task(rotkehlchen_api_server, task_id)
                 result = outcome['result']
             else:
-                result = assert_proper_response_with_result(response)
+                result = assert_proper_sync_response_with_result(response)
 
         check_proper_unlock_result(result, {'submit_usage_analytics': True})
 
         # Query users and make sure the new user is logged in
         response = requests.get(api_url_for(rotkehlchen_api_server, 'usersresource'))
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert result[username] == 'loggedin'
         assert len(result) == idx + 1
 
@@ -152,12 +158,12 @@ def test_user_creation_with_no_analytics(rotkehlchen_api_server, data_dir):
     with ExitStack() as stack:
         patch_no_op_unlock(rotki, stack, should_mock_settings=False)
         response = requests.put(api_url_for(rotkehlchen_api_server, 'usersresource'), json=data)
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         check_proper_unlock_result(result, {'submit_usage_analytics': False})
 
     # Query users and make sure the new user is logged in
     response = requests.get(api_url_for(rotkehlchen_api_server, 'usersresource'))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result[username] == 'loggedin'
     assert len(result) == 1
 
@@ -218,12 +224,12 @@ def test_user_creation_with_premium_credentials(rotkehlchen_api_server, data_dir
     with patched_premium_at_start, ExitStack() as stack:
         patch_no_op_unlock(rotki, stack)
         response = requests.put(api_url_for(rotkehlchen_api_server, 'usersresource'), json=data)
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     check_proper_unlock_result(result)
 
     # Query users and make sure the new user is logged in
     response = requests.get(api_url_for(rotkehlchen_api_server, 'usersresource'))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result[username] == 'loggedin'
     assert len(result) == 1
 
@@ -302,12 +308,12 @@ def test_user_creation_with_invalid_premium_credentials(rotkehlchen_api_server, 
     with ExitStack() as stack:
         patch_no_op_unlock(rotki, stack)
         response = requests.put(api_url_for(rotkehlchen_api_server, 'usersresource'), json=data)
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     check_proper_unlock_result(result)
 
     # Query users and make sure the new user is logged in
     response = requests.get(api_url_for(rotkehlchen_api_server, 'usersresource'))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result[username] == 'loggedin'
     assert len(result) == 2
 
@@ -549,7 +555,11 @@ def test_user_password_change(rotkehlchen_api_server, username, db_password):
     assert users_data[username] == 'loggedin'
 
 
-def test_user_logout(rotkehlchen_api_server, username, db_password):
+def test_user_logout(
+        rotkehlchen_api_server: 'APIServer',
+        username: str,
+        db_password: str,
+):
     """Test that user logout works succesfully and that common errors are handled"""
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
 
@@ -566,6 +576,23 @@ def test_user_logout(rotkehlchen_api_server, username, db_password):
     )
     assert rotki.user_is_logged_in is True
 
+    # Run some async task
+    with mock.patch.object(
+        target=rotkehlchen_api_server.rest_api.rotkehlchen,
+        attribute='query_balances',
+        side_effect=lambda *args, **kwargs: gevent.sleep(10),
+    ):
+        response = requests.get(
+            api_url_for(rotkehlchen_api_server, 'allbalancesresource', name=username),
+            json={'async_query': True},
+        )
+        task_id = assert_ok_async_response(response)
+
+    response = requests.get(
+        api_url_for(rotkehlchen_api_server, 'specific_async_tasks_resource', task_id=task_id),
+    )
+    assert response.json()['result']['status'] == 'pending'
+
     # Logout of the active user
     assert rotki.data.db.password == db_password
     data = {'action': 'logout'}
@@ -575,7 +602,16 @@ def test_user_logout(rotkehlchen_api_server, username, db_password):
     )
     assert_simple_ok_response(response)
     assert rotki.user_is_logged_in is False
-    assert rotki.data.db.password == ''
+    assert rotki.data.db.password == ''  # type: ignore  # TODO: mypy for some reason says that this statement is unreachable. Not sure why.
+
+    # Check that task isn't pending anymore
+    assert requests.get(
+        api_url_for(rotkehlchen_api_server, 'specific_async_tasks_resource', task_id=task_id),
+    ).json()['result']['status'] == 'not-found'
+    assert Inquirer._uniswapv2 is None
+    assert Inquirer._uniswapv3 is None
+    with pytest.raises(AssertionError):
+        PriceHistorian()  # raises error because we don't have any instance and we aren't providing the init arguments here.  # noqa: E501
 
     # Now try to log out of the same user again
     response = requests.patch(
@@ -585,7 +621,7 @@ def test_user_logout(rotkehlchen_api_server, username, db_password):
     assert_error_response(
         response=response,
         contained_in_msg='No user is currently logged in',
-        status_code=HTTPStatus.CONFLICT,
+        status_code=HTTPStatus.UNAUTHORIZED,
     )
     assert rotki.user_is_logged_in is False
 
@@ -950,7 +986,7 @@ def test_user_set_premium_credentials_errors(rotkehlchen_api_server: APIServer, 
     assert_error_response(
         response=response,
         contained_in_msg='rotki API key was rejected by server',
-        status_code=HTTPStatus.UNAUTHORIZED,
+        status_code=HTTPStatus.FORBIDDEN,
     )
 
 

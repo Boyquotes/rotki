@@ -2,12 +2,12 @@ import warnings as test_warnings
 from unittest.mock import patch
 
 from rotkehlchen.assets.asset import Asset
-from rotkehlchen.assets.converters import UNSUPPORTED_ICONOMI_ASSETS, asset_from_iconomi
-from rotkehlchen.assets.exchanges_mappings.iconomi import WORLD_TO_ICONOMI
+from rotkehlchen.assets.converters import asset_from_iconomi
 from rotkehlchen.constants.assets import A_ETH, A_EUR, A_REP
 from rotkehlchen.errors.asset import UnknownAsset
 from rotkehlchen.exchanges.iconomi import Iconomi
 from rotkehlchen.fval import FVal
+from rotkehlchen.tests.utils.exchanges import get_exchange_asset_symbols
 from rotkehlchen.tests.utils.factories import make_api_key, make_api_secret
 from rotkehlchen.tests.utils.mock import MockResponse
 from rotkehlchen.types import Location, TradeType
@@ -96,10 +96,11 @@ def test_query_trade_history(function_scope_iconomi):
 def test_iconomi_assets_are_known(
         database,
         inquirer,  # pylint: disable=unused-argument
+        globaldb,
 ):
-    unsupported_assets = set(UNSUPPORTED_ICONOMI_ASSETS)
-    common_items = unsupported_assets.intersection(set(WORLD_TO_ICONOMI.values()))
-    assert not common_items, f'Iconomi assets {common_items} should not be unsupported'
+    for asset in get_exchange_asset_symbols(Location.ICONOMI):
+        assert globaldb.is_asset_symbol_unsupported(Location.ICONOMI, asset) is False, f'Iconomi assets {asset} should not be unsupported'  # noqa: E501
+
     # use a real Iconomi instance so that we always get the latest data
     iconomi = Iconomi(
         name='iconomi1',

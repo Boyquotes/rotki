@@ -1,11 +1,10 @@
-import { rest } from 'msw';
+import process from 'node:process';
+import { HttpResponse, http } from 'msw';
 import historyTypeMappings from '../../fixtures/history-type-mappings.json';
 
 const backendUrl = process.env.VITE_BACKEND_URL;
 
-export default [
-  rest.get(
-    `${backendUrl}/api/1/history/events/type_mappings`,
-    (req, res, ctx) => res(ctx.status(200), ctx.json(historyTypeMappings))
-  )
+export const historyTypeMappingHandlers = [
+  http.get(`${backendUrl}/api/1/history/events/type_mappings`, () =>
+    HttpResponse.json(historyTypeMappings, { status: 200 })),
 ];

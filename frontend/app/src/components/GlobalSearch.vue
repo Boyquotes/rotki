@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { type AssetBalanceWithPrice, type BigNumber } from '@rotki/common';
-import { type Ref } from 'vue';
 import { useAppRoutes } from '@/router/routes';
-import { type Exchange } from '@/types/exchanges';
-import { type TradeLocationData } from '@/types/history/trade/location';
+import type { RuiIcons } from '@rotki/ui-library';
+import type { AssetBalanceWithPrice, BigNumber } from '@rotki/common';
+import type { Exchange } from '@/types/exchanges';
+import type { TradeLocationData } from '@/types/history/trade/location';
+import type { RouteLocationRaw } from 'vue-router';
 
 interface SearchItem {
   value: number;
@@ -13,9 +14,9 @@ interface SearchItem {
   location?: TradeLocationData;
   price?: BigNumber;
   total?: BigNumber;
-  icon?: string;
+  icon?: RuiIcons;
   image?: string;
-  route?: string;
+  route?: RouteLocationRaw;
   action?: () => void;
   matchedPoints?: number;
 }
@@ -29,10 +30,10 @@ const open = ref<boolean>(false);
 const isMac = ref<boolean>(false);
 
 const input = ref<any>(null);
-const selected = ref<number | string>('');
+const selected = ref<number>();
 const search = ref<string>('');
 const loading = ref(false);
-const visibleItems: Ref<SearchItem[]> = ref([]);
+const visibleItems = ref<SearchItem[]>([]);
 
 const modifier = computed<string>(() => (get(isMac) ? 'Cmd' : 'Ctrl'));
 const key = '/';
@@ -44,10 +45,9 @@ const { connectedExchanges } = storeToRefs(useExchangesStore());
 const { balances } = useAggregatedBalances();
 const { balancesByLocation } = useBalancesBreakdown();
 const { getLocationData } = useLocations();
-const { assetSearch } = useAssetInfoApi();
-const { dark } = useTheme();
+const { assetSearch } = useAssetInfoRetrieval();
 
-const getItemText = (item: SearchItemWithoutValue): string => {
+function getItemText(item: SearchItemWithoutValue): string {
   const text = item.texts ? item.texts.join(' ') : item.text;
   return (
     text
@@ -55,419 +55,375 @@ const getItemText = (item: SearchItemWithoutValue): string => {
       .replace(/\s+/g, ' ')
       .trim() ?? ''
   );
-};
+}
 
-const filterItems = (
-  items: SearchItemWithoutValue[],
-  keyword: string
-): SearchItemWithoutValue[] =>
-  items
-    .filter(item => {
-      let matchedPoints = 0;
-      for (const word of keyword.trim().split(' ')) {
-        const indexOf = getItemText(item).toLowerCase().indexOf(word);
-        if (indexOf > -1) {
-          matchedPoints++;
-        }
-        if (indexOf === 0) {
+function filterItems(items: SearchItemWithoutValue[], keyword: string): SearchItemWithoutValue[] {
+  const splittedKeyword = keyword.split(' ');
+  return items.filter((item) => {
+    let matchedPoints = 0;
+    for (const word of splittedKeyword) {
+      const indexOf = getItemText(item).toLowerCase().indexOf(word);
+      if (indexOf > -1) {
+        matchedPoints++;
+        if (indexOf === 0)
           matchedPoints += 0.5;
-        }
       }
-      item.matchedPoints = matchedPoints;
-      return matchedPoints > 0;
-    })
-    .sort((a, b) => (b.matchedPoints ?? 0) - (a.matchedPoints ?? 0));
+    }
+    item.matchedPoints = matchedPoints;
+    return matchedPoints > 0;
+  });
+}
 
-const getRoutes = (keyword: string): SearchItemWithoutValue[] => {
+function getRoutes(keyword: string): SearchItemWithoutValue[] {
   const routeItems: SearchItemWithoutValue[] = [
     { ...Routes.DASHBOARD },
     {
       ...Routes.ACCOUNTS_BALANCES_BLOCKCHAIN,
-      texts: [
-        Routes.ACCOUNTS_BALANCES.text,
-        Routes.ACCOUNTS_BALANCES_BLOCKCHAIN.text
-      ]
+      texts: [Routes.ACCOUNTS_BALANCES.text, Routes.ACCOUNTS_BALANCES_BLOCKCHAIN.text],
     },
     {
       ...Routes.ACCOUNTS_BALANCES_EXCHANGE,
-      texts: [
-        Routes.ACCOUNTS_BALANCES.text,
-        Routes.ACCOUNTS_BALANCES_EXCHANGE.text
-      ]
+      texts: [Routes.ACCOUNTS_BALANCES.text, Routes.ACCOUNTS_BALANCES_EXCHANGE.text],
     },
     {
       ...Routes.ACCOUNTS_BALANCES_MANUAL,
-      texts: [
-        Routes.ACCOUNTS_BALANCES.text,
-        Routes.ACCOUNTS_BALANCES_MANUAL.text
-      ]
+      texts: [Routes.ACCOUNTS_BALANCES.text, Routes.ACCOUNTS_BALANCES_MANUAL.text],
     },
     {
       ...Routes.ACCOUNTS_BALANCES_NON_FUNGIBLE,
-      texts: [
-        Routes.ACCOUNTS_BALANCES.text,
-        Routes.ACCOUNTS_BALANCES_NON_FUNGIBLE.text
-      ]
+      texts: [Routes.ACCOUNTS_BALANCES.text, Routes.ACCOUNTS_BALANCES_NON_FUNGIBLE.text],
     },
     { ...Routes.NFTS },
     {
       ...Routes.HISTORY_TRADES,
-      texts: [Routes.HISTORY.text, Routes.HISTORY_TRADES.text]
+      texts: [Routes.HISTORY.text, Routes.HISTORY_TRADES.text],
     },
     {
       ...Routes.HISTORY_DEPOSITS_WITHDRAWALS,
-      texts: [Routes.HISTORY.text, Routes.HISTORY_DEPOSITS_WITHDRAWALS.text]
+      texts: [Routes.HISTORY.text, Routes.HISTORY_DEPOSITS_WITHDRAWALS.text],
     },
     {
       ...Routes.HISTORY_EVENTS,
-      texts: [Routes.HISTORY.text, Routes.HISTORY_EVENTS.text]
+      texts: [Routes.HISTORY.text, Routes.HISTORY_EVENTS.text],
     },
     {
       ...Routes.DEFI_OVERVIEW,
-      texts: [Routes.DEFI.text, Routes.DEFI_OVERVIEW.text]
+      texts: [Routes.DEFI.text, Routes.DEFI_OVERVIEW.text],
     },
     {
       ...Routes.DEFI_DEPOSITS_PROTOCOLS,
-      texts: [
-        Routes.DEFI.text,
-        Routes.DEFI_DEPOSITS.text,
-        Routes.DEFI_DEPOSITS_PROTOCOLS.text
-      ]
+      texts: [Routes.DEFI.text, Routes.DEFI_DEPOSITS.text, Routes.DEFI_DEPOSITS_PROTOCOLS.text],
     },
     {
-      ...Routes.DEFI_DEPOSITS_LIQUIDITY_UNISWAP_V2,
-      texts: [
-        Routes.DEFI.text,
-        Routes.DEFI_DEPOSITS.text,
-        Routes.DEFI_DEPOSITS_LIQUIDITY.text,
-        Routes.DEFI_DEPOSITS_LIQUIDITY_UNISWAP_V2.text
-      ]
-    },
-    {
-      ...Routes.DEFI_DEPOSITS_LIQUIDITY_UNISWAP_V3,
-      texts: [
-        Routes.DEFI.text,
-        Routes.DEFI_DEPOSITS.text,
-        Routes.DEFI_DEPOSITS_LIQUIDITY.text,
-        Routes.DEFI_DEPOSITS_LIQUIDITY_UNISWAP_V3.text
-      ]
-    },
-    {
-      ...Routes.DEFI_DEPOSITS_LIQUIDITY_BALANCER,
-      texts: [
-        Routes.DEFI.text,
-        Routes.DEFI_DEPOSITS.text,
-        Routes.DEFI_DEPOSITS_LIQUIDITY.text,
-        Routes.DEFI_DEPOSITS_LIQUIDITY_BALANCER.text
-      ]
-    },
-    {
-      ...Routes.DEFI_DEPOSITS_LIQUIDITY_SUSHISWAP,
-      texts: [
-        Routes.DEFI.text,
-        Routes.DEFI_DEPOSITS.text,
-        Routes.DEFI_DEPOSITS_LIQUIDITY.text,
-        Routes.DEFI_DEPOSITS_LIQUIDITY_SUSHISWAP.text
-      ]
+      ...Routes.DEFI_DEPOSITS_LIQUIDITY,
+      texts: [Routes.DEFI.text, Routes.DEFI_DEPOSITS.text, Routes.DEFI_DEPOSITS_LIQUIDITY.text],
     },
     {
       ...Routes.DEFI_LIABILITIES,
-      texts: [Routes.DEFI.text, Routes.DEFI_LIABILITIES.text]
+      texts: [Routes.DEFI.text, Routes.DEFI_LIABILITIES.text],
     },
     {
       ...Routes.DEFI_AIRDROPS,
-      texts: [Routes.DEFI.text, Routes.DEFI_AIRDROPS.text]
+      texts: [Routes.DEFI.text, Routes.DEFI_AIRDROPS.text],
     },
     { ...Routes.STATISTICS },
     { ...Routes.STAKING },
     { ...Routes.PROFIT_LOSS_REPORTS },
     {
       ...Routes.ASSET_MANAGER_MANAGED,
-      texts: [Routes.ASSET_MANAGER.text, Routes.ASSET_MANAGER_MANAGED.text]
+      texts: [Routes.ASSET_MANAGER.text, Routes.ASSET_MANAGER_MANAGED.text],
     },
     {
       ...Routes.ASSET_MANAGER_CUSTOM,
-      texts: [Routes.ASSET_MANAGER.text, Routes.ASSET_MANAGER_CUSTOM.text]
+      texts: [Routes.ASSET_MANAGER.text, Routes.ASSET_MANAGER_CUSTOM.text],
     },
     {
       ...Routes.ASSET_MANAGER_NEWLY_DETECTED,
-      texts: [
-        Routes.ASSET_MANAGER.text,
-        Routes.ASSET_MANAGER_NEWLY_DETECTED.text
-      ]
+      texts: [Routes.ASSET_MANAGER.text, Routes.ASSET_MANAGER_NEWLY_DETECTED.text],
     },
     {
       ...Routes.PRICE_MANAGER_LATEST,
-      texts: [Routes.PRICE_MANAGER.text, Routes.PRICE_MANAGER_LATEST.text]
+      texts: [Routes.PRICE_MANAGER.text, Routes.PRICE_MANAGER_LATEST.text],
     },
     {
       ...Routes.PRICE_MANAGER_HISTORIC,
-      texts: [Routes.PRICE_MANAGER.text, Routes.PRICE_MANAGER_HISTORIC.text]
+      texts: [Routes.PRICE_MANAGER.text, Routes.PRICE_MANAGER_HISTORIC.text],
     },
     { ...Routes.ADDRESS_BOOK_MANAGER },
     {
       ...Routes.API_KEYS_ROTKI_PREMIUM,
-      texts: [Routes.API_KEYS.text, Routes.API_KEYS_ROTKI_PREMIUM.text]
+      texts: [Routes.API_KEYS.text, Routes.API_KEYS_ROTKI_PREMIUM.text],
     },
     {
       ...Routes.API_KEYS_EXCHANGES,
-      texts: [Routes.API_KEYS.text, Routes.API_KEYS_EXCHANGES.text]
+      texts: [Routes.API_KEYS.text, Routes.API_KEYS_EXCHANGES.text],
     },
     {
       ...Routes.API_KEYS_EXTERNAL_SERVICES,
-      texts: [Routes.API_KEYS.text, Routes.API_KEYS_EXTERNAL_SERVICES.text]
+      texts: [Routes.API_KEYS.text, Routes.API_KEYS_EXTERNAL_SERVICES.text],
     },
     { ...Routes.IMPORT },
     {
       ...Routes.SETTINGS_GENERAL,
-      texts: [Routes.SETTINGS.text, Routes.SETTINGS_GENERAL.text]
+      texts: [Routes.SETTINGS.text, Routes.SETTINGS_GENERAL.text],
     },
     {
       ...Routes.SETTINGS_ACCOUNTING,
-      texts: [Routes.SETTINGS.text, Routes.SETTINGS_ACCOUNTING.text]
+      texts: [Routes.SETTINGS.text, Routes.SETTINGS_ACCOUNTING.text],
     },
     {
       ...Routes.SETTINGS_DATA_SECURITY,
-      texts: [Routes.SETTINGS.text, Routes.SETTINGS_DATA_SECURITY.text]
+      texts: [Routes.SETTINGS.text, Routes.SETTINGS_DATA_SECURITY.text],
     },
     {
       ...Routes.SETTINGS_MODULES,
-      texts: [Routes.SETTINGS.text, Routes.SETTINGS_MODULES.text]
-    }
+      texts: [Routes.SETTINGS.text, Routes.SETTINGS_MODULES.text],
+    },
+    {
+      ...Routes.CALENDAR,
+    },
   ];
 
   return filterItems(routeItems, keyword);
-};
+}
 
-const getExchanges = (keyword: string): SearchItemWithoutValue[] => {
+function getExchanges(keyword: string): SearchItemWithoutValue[] {
   const exchanges = get(connectedExchanges);
-  const exchangeItems: SearchItemWithoutValue[] = exchanges.map(
-    (exchange: Exchange) => {
-      const identifier = exchange.location;
-      const name = exchange.name;
+  const exchangeItems: SearchItemWithoutValue[] = exchanges.map((exchange: Exchange) => {
+    const identifier = exchange.location;
+    const name = exchange.name;
 
-      return {
-        location: getLocationData(identifier) ?? undefined,
-        route: `${Routes.ACCOUNTS_BALANCES_EXCHANGE.route}/${identifier}`,
-        texts: [
-          Routes.ACCOUNTS_BALANCES.text,
-          Routes.ACCOUNTS_BALANCES_EXCHANGE.text,
-          name
-        ]
-      };
-    }
-  );
+    return {
+      location: getLocationData(identifier) ?? undefined,
+      route: `${Routes.ACCOUNTS_BALANCES_EXCHANGE.route}/${identifier}`,
+      texts: [Routes.ACCOUNTS_BALANCES.text, Routes.ACCOUNTS_BALANCES_EXCHANGE.text, name],
+    };
+  });
 
   return filterItems(exchangeItems, keyword);
-};
+}
 
-const getActions = (keyword: string): SearchItemWithoutValue[] => {
+function getActions(keyword: string): SearchItemWithoutValue[] {
   const actionItems: SearchItemWithoutValue[] = [
     {
-      text: t('exchange_settings.dialog.add.title').toString(),
-      route: `${Routes.API_KEYS_EXCHANGES.route}?add=true`
+      text: t('exchange_settings.dialog.add.title'),
+      route: `${Routes.API_KEYS_EXCHANGES.route}?add=true`,
     },
     {
-      text: t('blockchain_balances.form_dialog.add_title').toString(),
-      route: `${Routes.ACCOUNTS_BALANCES_BLOCKCHAIN.route}?add=true`
+      text: t('blockchain_balances.form_dialog.add_title'),
+      route: `${Routes.ACCOUNTS_BALANCES_BLOCKCHAIN.route}?add=true`,
     },
     {
-      text: t('manual_balances.dialog.add.title').toString(),
-      route: `${Routes.ACCOUNTS_BALANCES_MANUAL.route}?add=true`
+      text: t('manual_balances.dialog.add.title'),
+      route: `${Routes.ACCOUNTS_BALANCES_MANUAL.route}?add=true`,
     },
     {
-      text: t('closed_trades.dialog.add.title').toString(),
-      route: `${Routes.HISTORY_TRADES.route}?add=true`
+      text: t('closed_trades.dialog.add.title'),
+      route: `${Routes.HISTORY_TRADES.route}?add=true`,
     },
     {
-      text: t('asset_management.add_title').toString(),
-      route: `${Routes.ASSET_MANAGER.route}?add=true`
+      text: t('asset_management.add_title'),
+      route: `${Routes.ASSET_MANAGER.route}?add=true`,
     },
     {
-      text: t('price_management.latest.add_title').toString(),
-      route: `${Routes.PRICE_MANAGER_LATEST.route}?add=true`
+      text: t('price_management.latest.add_title'),
+      route: `${Routes.PRICE_MANAGER_LATEST.route}?add=true`,
     },
     {
-      text: t('price_management.historic.add_title').toString(),
-      route: `${Routes.PRICE_MANAGER_HISTORIC.route}?add=true`
-    }
+      text: t('price_management.historic.add_title'),
+      route: `${Routes.PRICE_MANAGER_HISTORIC.route}?add=true`,
+    },
   ].map(item => ({ ...item, icon: 'add-circle-line' }));
 
   return filterItems(actionItems, keyword);
-};
+}
 
-const getAssets = async (
-  keyword: string
-): Promise<SearchItemWithoutValue[]> => {
-  try {
-    const matches = await assetSearch(keyword, 5);
-    const assetBalances = get(balances()) as AssetBalanceWithPrice[];
-    const map: Record<string, string> = {};
-    for (const match of matches) {
-      map[match.identifier] = match.symbol ?? match.name ?? '';
-    }
-    const ids = matches.map(({ identifier }) => identifier);
+async function getAssets(keyword: string): Promise<SearchItemWithoutValue[]> {
+  const matches = await assetSearch({
+    value: keyword,
+    limit: 5,
+  });
+  const assetBalances = get(balances()) as AssetBalanceWithPrice[];
+  const map: Record<string, string> = {};
+  for (const match of matches) map[match.identifier] = match.symbol ?? match.name ?? '';
 
-    return assetBalances
-      .filter(balance => ids.includes(balance.asset))
-      .map(balance => {
-        const price = balance.usdPrice.gt(0) ? balance.usdPrice : undefined;
-        const asset = balance.asset;
+  const ids = matches.map(({ identifier }) => identifier);
 
-        return {
-          route: Routes.ASSETS.route.replace(
-            ':identifier',
-            encodeURIComponent(asset)
-          ),
-          texts: [t('common.asset').toString(), map[asset] ?? ''],
-          price,
-          asset
-        };
-      });
-  } catch {
-    return [];
-  }
-};
+  return assetBalances
+    .filter(balance => ids.includes(balance.asset))
+    .map((balance) => {
+      const price = balance.usdPrice.gt(0) ? balance.usdPrice : undefined;
+      const asset = balance.asset;
+
+      return {
+        route: {
+          name: '/assets/[identifier]',
+          params: {
+            identifier: asset,
+          },
+        },
+        texts: [t('common.asset'), map[asset] ?? ''],
+        price,
+        asset,
+      };
+    });
+}
 
 function* transformLocations(): IterableIterator<SearchItemWithoutValue> {
   const locationBalances = get(balancesByLocation);
 
   for (const identifier in locationBalances) {
     const location = getLocationData(identifier);
-    if (!location) {
+    if (!location)
       continue;
-    }
+
     const total = locationBalances[identifier];
     yield {
-      route: Routes.LOCATIONS.route.replace(':identifier', location.identifier),
-      texts: [t('common.location').toString(), location.name],
+      route: {
+        name: '/locations/[identifier]',
+        params: {
+          identifier: encodeURIComponent(location.identifier),
+        },
+      },
+      texts: [t('common.location'), location.name],
       location,
-      total
+      total,
     } satisfies SearchItemWithoutValue;
   }
 }
 
-const getLocations = (keyword: string) =>
-  filterItems([...transformLocations()], keyword);
+function getLocations(keyword: string) {
+  return filterItems([...transformLocations()], keyword);
+}
 
 watchDebounced(
   search,
-  async keyword => {
+  async (keyword) => {
     if (!keyword) {
       set(visibleItems, []);
       return;
     }
 
-    const search = keyword.toLocaleLowerCase();
+    const search = keyword.toLocaleLowerCase().trim();
+
+    const staticData = [
+      ...getRoutes(search),
+      ...getExchanges(search),
+      ...getActions(search),
+      ...getLocations(search),
+    ].sort((a, b) => (b.matchedPoints ?? 0) - (a.matchedPoints ?? 0));
 
     set(
       visibleItems,
-      [
-        ...getRoutes(search),
-        ...getExchanges(search),
-        ...getActions(search),
-        ...(await getAssets(search)),
-        ...getLocations(search)
-      ].map((item, index) => ({
+      [...staticData, ...(await getAssets(search))].map((item, index) => ({
         ...item,
         value: index,
-        text: getItemText(item)
-      }))
+        text: getItemText(item),
+      })),
     );
 
     set(loading, false);
   },
   {
-    debounce: 800
-  }
+    debounce: 800,
+  },
 );
 
-watch(search, search => {
+watch(search, (search) => {
   set(loading, !!search);
 });
 
-watch(open, open => {
+watch(open, (open) => {
   nextTick(() => {
     if (open) {
       setTimeout(() => {
-        get(input)?.$refs?.input?.focus?.();
+        get(input)?.focus?.();
       }, 100);
     }
-    set(selected, '');
+    set(selected, undefined);
     set(search, '');
   });
 });
 
-const change = async (index: number) => {
+function change(index?: number) {
+  if (!index)
+    return;
+
   const item: SearchItem = get(visibleItems)[index];
   if (item) {
-    if (item.route) {
-      await router.push(item.route);
-    }
+    if (item.route && get(router.currentRoute).fullPath !== item.route)
+      startPromise(router.push(item.route));
+
     item?.action?.();
     set(open, false);
   }
-};
+}
 
 const interop = useInterop();
 onBeforeMount(async () => {
   set(isMac, await interop.isMac());
 
-  window.addEventListener('keydown', async event => {
+  window.addEventListener('keydown', (event) => {
     // Mac use Command, Others use Control
-    if (
-      ((get(isMac) && event.metaKey) || (!get(isMac) && event.ctrlKey)) &&
-      event.key === key
-    ) {
+    if (((get(isMac) && event.metaKey) || (!get(isMac) && event.ctrlKey)) && event.key === key)
       set(open, true);
-    }
   });
 });
 </script>
 
 <template>
-  <VDialog
+  <RuiDialog
     v-model="open"
     max-width="800"
-    open-delay="100"
-    height="400"
-    :content-class="$style.dialog"
-    transition="slide-y-transition"
+    content-class="mt-[16rem] !top-0 pb-2"
   >
-    <template #activator="{ on }">
+    <template #activator="{ attrs }">
       <MenuTooltipButton
-        class-name="secondary--text text--lighten-4"
         :tooltip="
           t('global_search.menu_tooltip', {
             modifier,
-            key
-          }).toString()
+            key,
+          })
         "
-        :on-menu="on"
+        v-bind="attrs"
       >
         <RuiIcon name="search-line" />
       </MenuTooltipButton>
     </template>
-    <div :class="$style.wrapper">
-      <VAutocomplete
+    <RuiCard
+      variant="flat"
+      no-padding
+      rounded="sm"
+      class="[&>div:last-child]:overflow-hidden"
+    >
+      <RuiAutoComplete
         ref="input"
         v-model="selected"
+        v-model:search-input="search"
         no-filter
-        filled
         :no-data-text="t('global_search.no_actions')"
-        :search-input.sync="search"
-        :background-color="dark ? 'black' : 'white'"
         hide-details
-        :items="visibleItems"
+        :loading="loading"
+        :item-height="50"
+        :options="visibleItems"
+        text-attr="text"
+        key-attr="value"
+        label=""
         auto-select-first
-        prepend-inner-icon="mdi-magnify"
-        append-icon=""
         :placeholder="t('global_search.search_placeholder')"
-        @input="change($event)"
+        @update:model-value="change($event)"
       >
+        <template #selection>
+          <span />
+        </template>
         <template #item="{ item }">
           <div class="flex items-center text-body-2 w-full">
-            <AssetIcon v-if="item.asset" size="30px" :identifier="item.asset" />
+            <AssetIcon
+              v-if="item.asset"
+              class="-my-1"
+              size="30px"
+              :identifier="item.asset"
+            />
             <template v-else>
               <LocationIcon
                 v-if="item.location"
@@ -475,43 +431,67 @@ onBeforeMount(async () => {
                 size="26px"
                 :item="item.location.identifier"
               />
-              <img
+              <AppImage
                 v-else-if="item.image"
-                :alt="item.location.name"
-                class="object-contain icon-bg"
-                width="30"
+                class="icon-bg"
                 :src="item.image"
+                contain
+                size="26px"
+              />
+              <RuiIcon
+                v-else-if="item.icon"
+                :name="item.icon"
+                size="26px"
               />
             </template>
-            <span class="ml-3">
+            <div class="ml-3 flex items-center">
               <template v-if="item.texts">
-                <span v-for="(text, index) in item.texts" :key="text + index">
-                  <span v-if="index === item.texts.length - 1">{{ text }}</span>
-                  <span v-else class="grey--text">
+                <div
+                  v-for="(text, index) in item.texts"
+                  :key="text + index"
+                  class="flex items-center"
+                >
+                  <div v-if="index === item.texts.length - 1">
+                    {{ text }}
+                  </div>
+                  <div
+                    v-else
+                    class="flex items-center text-rui-text-secondary"
+                  >
                     {{ text }}
                     <RuiIcon
-                      class="d-inline mr-2"
+                      class="d-inline mx-2"
                       size="16"
                       name="arrow-right-s-line"
                     />
-                  </span>
-                </span>
+                  </div>
+                </div>
               </template>
               <template v-else>
                 {{ item.text }}
               </template>
-            </span>
-            <VSpacer />
-            <div v-if="item.price" class="text-right">
-              <div class="text-caption">{{ t('common.price') }}:</div>
+            </div>
+            <div class="grow" />
+            <div
+              v-if="item.price"
+              class="text-right -my-6"
+            >
+              <div class="text-caption">
+                {{ t('common.price') }}:
+              </div>
               <AmountDisplay
                 class="font-bold"
                 :fiat-currency="currencySymbol"
                 :value="item.price"
               />
             </div>
-            <div v-if="item.total" class="text-right">
-              <div class="text-caption">{{ t('common.total') }}:</div>
+            <div
+              v-if="item.total"
+              class="text-right -my-4"
+            >
+              <div class="text-caption">
+                {{ t('common.total') }}:
+              </div>
               <AmountDisplay
                 class="font-bold"
                 :fiat-currency="currencySymbol"
@@ -520,27 +500,7 @@ onBeforeMount(async () => {
             </div>
           </div>
         </template>
-        <template #append>
-          <div v-if="loading" class="mt-n1 h-full flex items-center">
-            <VProgressCircular
-              class="asset-select__loading"
-              color="primary"
-              indeterminate
-              width="3"
-              size="30"
-            />
-          </div>
-        </template>
-      </VAutocomplete>
-    </div>
-  </VDialog>
+      </RuiAutoComplete>
+    </RuiCard>
+  </RuiDialog>
 </template>
-
-<style module lang="scss">
-.dialog {
-  margin-top: 200px;
-  align-self: flex-start;
-  box-shadow: none !important;
-  overflow: visible !important;
-}
-</style>

@@ -1,49 +1,44 @@
 <script setup lang="ts">
-import { LpType } from '@rotki/common/lib/defi';
+import { LpType } from '@rotki/common';
 
 const props = defineProps<{
   assets: string[];
   type: LpType;
 }>();
 
-const { assets, type } = toRefs(props);
-
 const data = [
   {
     identifier: LpType.UNISWAP_V2,
-    icon: './assets/images/protocols/uniswap.svg'
+    icon: './assets/images/protocols/uniswap.svg',
   },
   {
     identifier: LpType.UNISWAP_V3,
-    icon: './assets/images/protocols/uniswap.svg'
+    icon: './assets/images/protocols/uniswap.svg',
   },
   {
     identifier: LpType.SUSHISWAP,
-    icon: './assets/images/protocols/sushiswap.svg'
+    icon: './assets/images/protocols/sushiswap.svg',
   },
   {
     identifier: LpType.BALANCER,
-    icon: './assets/images/protocols/balancer.svg'
-  }
+    icon: './assets/images/protocols/balancer.svg',
+  },
 ];
 
 const icon = computed(() => {
-  const selected = data.find(({ identifier }) => identifier === get(type));
+  const selected = data.find(({ identifier }) => identifier === props.type);
 
-  if (!selected) {
-    return null;
-  }
+  if (!selected)
+    return undefined;
 
   return selected.icon;
 });
 
-const multiple = computed<boolean>(() => get(assets).length > 2);
-
-const css = useCssModule();
+const multiple = computed<boolean>(() => props.assets.length > 2);
 </script>
 
 <template>
-  <div class="flex">
+  <div class="flex relative">
     <div class="flex items-center">
       <AssetIcon
         circle
@@ -55,52 +50,56 @@ const css = useCssModule();
       <AssetIcon
         v-if="!multiple"
         circle
-        :class="css['second-icon']"
+        :class="$style['second-icon']"
         :identifier="assets[1]"
         size="32px"
         padding="0"
         :show-chain="false"
       />
-      <div v-else :class="[css['second-icon'], css['more-assets']]">
-        +{{ assets.length - 1 }}
-      </div>
+      <RuiMenu v-else>
+        <template #activator>
+          <div :class="[$style['second-icon'], $style['more-assets']]">
+            +{{ assets.length - 1 }}
+          </div>
+        </template>
+        <div class="p-2 flex">
+          <AssetIcon
+            v-for="asset in assets"
+            :key="asset"
+            circle
+            :identifier="asset"
+            size="32px"
+            padding="0"
+            :show-chain="false"
+          />
+        </div>
+      </RuiMenu>
     </div>
-    <div :class="css['lp-type-icon']">
-      <VAvatar
-        :size="20"
-        color="grey lighten-4"
-        :class="css['lp-type-icon-avatar']"
-      >
-        <VImg :width="16" :height="16" :src="icon" />
-      </VAvatar>
+    <div :class="$style['lp-type-icon']">
+      <AppImage
+        size="1rem"
+        :src="icon"
+      />
     </div>
   </div>
 </template>
 
 <style module lang="scss">
 .second-icon {
-  z-index: 0;
-  margin-left: -10px;
+  @apply z-0 -ml-2.5;
 }
 
 .more-assets {
-  border-radius: 50%;
-  font-size: 1rem;
-  width: 32px;
-  height: 32px;
-  background: var(--v-graphFade-darken4);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  @apply cursor-pointer rounded-full w-8 h-8 bg-rui-grey-300 text-rui-text flex items-center justify-center font-bold;
 }
 
 .lp-type-icon {
-  margin-left: -12px;
-  margin-top: -12px;
+  @apply relative p-0.5 w-5 h-5 rounded-full bg-rui-grey-200 -ml-3 -mt-3;
 }
 
-.lp-type-icon-avatar {
-  padding: 2px;
+:global(.dark) {
+  .more-assets {
+    @apply bg-rui-grey-700;
+  }
 }
 </style>

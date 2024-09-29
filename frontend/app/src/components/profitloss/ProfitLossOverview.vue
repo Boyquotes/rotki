@@ -1,13 +1,9 @@
 <script setup lang="ts">
-import {
-  type ProfitLossOverviewItem,
-  type SelectedReport
-} from '@/types/reports';
-import { pluralizeLastWord, toCapitalCase } from '@/utils/text';
+import type { ProfitLossOverviewItem, Report, SelectedReport } from '@/types/reports';
 
 const props = withDefaults(
   defineProps<{
-    report: SelectedReport;
+    report: SelectedReport | Report;
     symbol?: string | null;
     flat?: boolean;
     loading?: boolean;
@@ -15,15 +11,13 @@ const props = withDefaults(
   {
     symbol: null,
     flat: false,
-    loading: false
-  }
+    loading: false,
+  },
 );
 
 const { report } = toRefs(props);
 
-const total = computed<ProfitLossOverviewItem>(() =>
-  calculateTotalProfitLoss(get(report))
-);
+const total = computed<ProfitLossOverviewItem>(() => calculateTotalProfitLoss(get(report)));
 
 const { t } = useI18n();
 </script>
@@ -33,21 +27,17 @@ const { t } = useI18n();
     <template #header>
       {{ t('profit_loss_overview.title') }}
     </template>
-    <div
-      class="!rounded-md border border-rui-grey-300 dark:border-rui-grey-600 w-full"
-    >
+    <div class="!rounded-md border border-rui-grey-300 dark:border-rui-grey-600 w-full">
       <table class="w-full">
-        <thead
-          class="text-rui-text-secondary font-medium border-b border-default text-xs"
-        >
+        <thead class="text-rui-text-secondary font-medium border-b border-default text-xs">
           <tr>
-            <th class="text-left pa-4">
+            <th class="text-left p-4">
               {{ t('common.type') }}
             </th>
-            <th class="text-right pa-4">
+            <th class="text-right p-4">
               {{ t('profit_loss_overview.headers.tax_free_profit_loss') }}
             </th>
-            <th class="text-right pa-4">
+            <th class="text-right p-4">
               {{ t('profit_loss_overview.headers.taxable_profit_loss') }}
             </th>
           </tr>
@@ -58,8 +48,10 @@ const { t } = useI18n();
             :key="key"
             class="border-default border-b"
           >
-            <td class="pa-4">{{ pluralizeLastWord(toCapitalCase(key)) }}</td>
-            <td class="text-right pa-4">
+            <td class="p-4">
+              {{ pluralizeLastWord(toCapitalCase(key)) }}
+            </td>
+            <td class="text-right p-4">
               <AmountDisplay
                 pnl
                 force-currency
@@ -69,7 +61,7 @@ const { t } = useI18n();
                 :fiat-currency="report.settings.profitCurrency"
               />
             </td>
-            <td class="text-right pa-4">
+            <td class="text-right p-4">
               <AmountDisplay
                 pnl
                 force-currency
@@ -81,13 +73,16 @@ const { t } = useI18n();
             </td>
           </tr>
           <tr v-if="Object.keys(report.overview).length === 0">
-            <td colspan="3" class="pa-4 h-[3rem]" />
+            <td
+              colspan="3"
+              class="p-4 h-[3rem]"
+            />
           </tr>
           <tr class="border-t border-default font-medium">
-            <td class="pa-4">
+            <td class="p-4">
               {{ t('common.total') }}
             </td>
-            <td class="text-right pa-4">
+            <td class="text-right p-4">
               <AmountDisplay
                 pnl
                 force-currency
@@ -97,7 +92,7 @@ const { t } = useI18n();
                 :fiat-currency="report.settings.profitCurrency"
               />
             </td>
-            <td class="text-right pa-4">
+            <td class="text-right p-4">
               <AmountDisplay
                 pnl
                 force-currency

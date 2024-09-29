@@ -1,29 +1,30 @@
-import { type SemiPartial } from '../index';
+import type { Awaitable, SemiPartial } from '../utils';
 
 export enum Severity {
   WARNING = 'warning',
   ERROR = 'error',
-  INFO = 'info'
+  INFO = 'info',
+  REMINDER = 'reminder',
 }
 
 export enum Priority {
   BULK,
   NORMAL,
   HIGH,
-  ACTION
+  ACTION,
 }
 
 export enum NotificationGroup {
-  NEW_DETECTED_TOKENS = 'NEW_DETECTED_TOKENS'
+  NEW_DETECTED_TOKENS = 'NEW_DETECTED_TOKENS',
+  ASSET_SEARCH_ERROR = 'ASSET_SEARCH_ERROR',
 }
 
 export const NotificationCategory = {
   DEFAULT: 'default',
-  ADDRESS_MIGRATION: 'address_migration'
+  ADDRESS_MIGRATION: 'address_migration',
 } as const;
 
-export type NotificationCategory =
-  (typeof NotificationCategory)[keyof typeof NotificationCategory];
+export type NotificationCategory = (typeof NotificationCategory)[keyof typeof NotificationCategory];
 
 export interface Message {
   readonly title: string;
@@ -33,7 +34,9 @@ export interface Message {
 
 export interface NotificationAction {
   readonly label: string;
-  readonly action: () => void;
+  readonly action: Awaitable;
+  readonly icon?: string;
+  readonly persist?: boolean;
 }
 
 export interface I18nParam {
@@ -47,7 +50,7 @@ interface NotificationBase {
   readonly message: string;
   readonly severity: Severity;
   readonly category: NotificationCategory;
-  readonly action?: NotificationAction;
+  readonly action?: NotificationAction | NotificationAction[];
   readonly group?: NotificationGroup;
   readonly groupCount?: number;
   readonly i18nParam?: I18nParam;
@@ -66,7 +69,4 @@ export interface NotificationData extends NotificationBase {
   readonly date: Date;
 }
 
-export type Notification = SemiPartial<
-  NotificationPayload,
-  'title' | 'message'
->;
+export type Notification = SemiPartial<NotificationPayload, 'title' | 'message'>;

@@ -11,6 +11,7 @@ from rotkehlchen.constants.resolver import (
     evm_address_to_identifier,
     strethaddress_to_identifier,
 )
+from rotkehlchen.logging import enter_exit_debug_log
 
 if TYPE_CHECKING:
     from rotkehlchen.db.drivers.gevent import DBConnection, DBCursor
@@ -370,9 +371,9 @@ def translate_assets_in_price_table(cursor: 'DBCursor') -> list[tuple[str, str, 
     return updated_rows
 
 
+@enter_exit_debug_log(name='GlobalDB v2->v3 upgrade')
 def migrate_to_v3(connection: 'DBConnection') -> None:
     """Upgrade assets information and migrate globaldb to version 3"""
-    log.debug('Entered globaldb v2->v3 upgrade')
     with connection.read_ctx() as cursor:
         log.debug('Obtain ethereum assets information')
         evm_tuples, assets_tuple, common_asset_details = upgrade_ethereum_asset_ids_v3(cursor)
@@ -543,9 +544,7 @@ def migrate_to_v3(connection: 'DBConnection') -> None:
         # This file contains the EVM version of the assets that are currently in the
         # database and are not EVM (matic tokens, Otimism tokens, etc) + their variants in
         # other chains. And populates them properly via sql statements
-        with open(dir_path / 'data' / 'globaldb_v2_v3_assets.sql', encoding='utf8') as f:
-            raw_sql_sentences = f.read()
-            per_table_sentences = raw_sql_sentences.split('\n\n')
-            for sql_sentences in per_table_sentences:
-                cursor.execute(sql_sentences)
-        log.debug('Finished globaldb v2->v3 upgrade')
+        raw_sql_sentences = (dir_path / 'data' / 'globaldb_v2_v3_assets.sql').read_text(encoding='utf8')  # noqa: E501
+        per_table_sentences = raw_sql_sentences.split('\n\n')
+        for sql_sentences in per_table_sentences:
+            cursor.execute(sql_sentences)

@@ -1,13 +1,12 @@
 import logging
 from typing import TYPE_CHECKING, Literal, cast
 
-from eth_typing import BlockNumber
-
 from rotkehlchen.chain.constants import DEFAULT_EVM_RPC_TIMEOUT
 from rotkehlchen.chain.evm.contracts import EvmContracts
 from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants.assets import A_ETH
+from rotkehlchen.externalapis.blockscout import Blockscout
 from rotkehlchen.fval import FVal
 from rotkehlchen.greenlets.manager import GreenletManager
 from rotkehlchen.logging import RotkehlchenLogsAdapter
@@ -55,15 +54,15 @@ class ArbitrumOneInquirer(EvmNodeInquirer):
             contract_multicall=contracts.contract(string_to_evm_address('0xcA11bde05977b3631167028862bE2a173976CA11')),
             contract_scan=contracts.contract(string_to_evm_address('0x532E03C3167726cCfE0C777758b58b31054d3402')),
             native_token=A_ETH.resolve_to_crypto_asset(),
+            blockscout=Blockscout(
+                blockchain=SupportedBlockchain.ARBITRUM_ONE,
+                database=database,
+                msg_aggregator=database.msg_aggregator,
+            ),
         )
         self.etherscan = cast(ArbitrumOneEtherscan, self.etherscan)
 
     # -- Implementation of EvmNodeInquirer base methods --
-
-    def query_highest_block(self) -> BlockNumber:
-        block_number = self.etherscan.get_latest_block_number()
-        log.debug('Arbitrum One highest block result', block=block_number)
-        return BlockNumber(block_number)
 
     def _get_pruned_check_tx_hash(self) -> EVMTxHash:
         return PRUNED_NODE_CHECK_TX_HASH

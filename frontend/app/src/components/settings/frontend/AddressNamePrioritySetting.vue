@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import {
-  PrioritizedListData,
-  type PrioritizedListItemData
-} from '@/types/settings/prioritized-list-data';
+import { PrioritizedListData, type PrioritizedListItemData } from '@/types/settings/prioritized-list-data';
 import {
   BLOCKCHAIN_ACCOUNT_PRIO_LIST_ITEM,
   ENS_NAMES_PRIO_LIST_ITEM,
@@ -10,35 +7,34 @@ import {
   GLOBAL_ADDRESSBOOK_PRIO_LIST_ITEM,
   HARDCODED_MAPPINGS_PRIO_LIST_ITEM,
   PRIVATE_ADDRESSBOOK_PRIO_LIST_ITEM,
-  type PrioritizedListId
+  type PrioritizedListId,
 } from '@/types/settings/prioritized-list-id';
 
 const currentAddressNamePriorities = ref<PrioritizedListId[]>([]);
 const { addressNamePriority } = storeToRefs(useGeneralSettingsStore());
 const { resetAddressesNames } = useAddressesNamesStore();
 
-const finishEditing = async () => {
+function finishEditing() {
   resetCurrentAddressNamePriorities();
   resetAddressesNames();
-};
+}
 
-const resetCurrentAddressNamePriorities = () => {
+function resetCurrentAddressNamePriorities() {
   set(currentAddressNamePriorities, get(addressNamePriority));
-};
+}
 
-const availableCurrentAddressNamePriorities =
-  (): PrioritizedListData<PrioritizedListId> => {
-    const itemData: Array<PrioritizedListItemData<PrioritizedListId>> = [
-      BLOCKCHAIN_ACCOUNT_PRIO_LIST_ITEM,
-      ENS_NAMES_PRIO_LIST_ITEM,
-      ETHEREUM_TOKENS_PRIO_LIST_ITEM,
-      GLOBAL_ADDRESSBOOK_PRIO_LIST_ITEM,
-      HARDCODED_MAPPINGS_PRIO_LIST_ITEM,
-      PRIVATE_ADDRESSBOOK_PRIO_LIST_ITEM
-    ];
+function availableCurrentAddressNamePriorities(): PrioritizedListData<PrioritizedListId> {
+  const itemData: Array<PrioritizedListItemData<PrioritizedListId>> = [
+    BLOCKCHAIN_ACCOUNT_PRIO_LIST_ITEM,
+    ENS_NAMES_PRIO_LIST_ITEM,
+    ETHEREUM_TOKENS_PRIO_LIST_ITEM,
+    GLOBAL_ADDRESSBOOK_PRIO_LIST_ITEM,
+    HARDCODED_MAPPINGS_PRIO_LIST_ITEM,
+    PRIVATE_ADDRESSBOOK_PRIO_LIST_ITEM,
+  ];
 
-    return new PrioritizedListData(itemData);
-  };
+  return new PrioritizedListData(itemData);
+}
 
 onMounted(() => {
   resetCurrentAddressNamePriorities();
@@ -52,20 +48,18 @@ const { t } = useI18n();
       {{ t('address_book.hint.priority.title') }}
     </div>
     <SettingsOption
-      #default="{ error, success, update }"
+      #default="{ error, success, updateImmediate }"
       setting="addressNamePriority"
       @finished="finishEditing()"
     >
       <PrioritizedList
-        :value="currentAddressNamePriorities"
+        :model-value="currentAddressNamePriorities"
         :all-items="availableCurrentAddressNamePriorities()"
-        :item-data-name="
-          t('address_name_priority_setting.data_name').toString()
-        "
+        :item-data-name="t('address_name_priority_setting.data_name')"
         :disable-add="true"
         :disable-delete="true"
         :status="{ error, success }"
-        @input="update($event)"
+        @update:model-value="updateImmediate($event)"
       />
     </SettingsOption>
   </div>

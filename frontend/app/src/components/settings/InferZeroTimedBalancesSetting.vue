@@ -8,18 +8,16 @@ const { t } = useI18n();
 const updated = () => emit('updated');
 
 const inferZeroTimedBalances = ref<boolean>(false);
-const { inferZeroTimedBalances: enabled } = storeToRefs(
-  useGeneralSettingsStore()
-);
+const { inferZeroTimedBalances: enabled } = storeToRefs(useGeneralSettingsStore());
 
-const resetState = () => {
+function resetState() {
   set(inferZeroTimedBalances, get(enabled));
-};
+}
 
-const finished = () => {
+function finished() {
   resetState();
   updated();
-};
+}
 
 onMounted(() => {
   resetState();
@@ -28,7 +26,7 @@ onMounted(() => {
 
 <template>
   <div>
-    <CardTitle class="font-medium mb-2">
+    <CardTitle>
       {{ t('statistics_graph_settings.infer_zero_timed_balances.title') }}
     </CardTitle>
     <SettingsOption
@@ -36,13 +34,14 @@ onMounted(() => {
       setting="inferZeroTimedBalances"
       @finished="finished()"
     >
-      <VSwitch
+      <RuiSwitch
         v-model="inferZeroTimedBalances"
         :label="t('statistics_graph_settings.infer_zero_timed_balances.label')"
-        persistent-hint
+        color="primary"
+        class="mt-4"
         :success-messages="success"
         :error-messages="error"
-        @change="update($event)"
+        @update:model-value="update($event)"
       />
     </SettingsOption>
   </div>

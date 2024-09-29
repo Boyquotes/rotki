@@ -1,39 +1,36 @@
-import { type Balance } from '@rotki/common';
-import { type AssetBalances } from '@/types/balances';
-import { type ManualBalanceWithValue } from '@/types/manual-balances';
+import type { Balance } from '@rotki/common';
+import type { AssetBalances } from '@/types/balances';
+import type { ManualBalanceWithValue } from '@/types/manual-balances';
 
-const toAssetBalances = (balances: ManualBalanceWithValue[]): AssetBalances => {
+function toAssetBalances(balances: ManualBalanceWithValue[]): AssetBalances {
   const ownedAssets: AssetBalances = {};
 
   for (const { asset, usdValue, amount } of balances) {
     const balance: Balance = {
       amount,
-      usdValue
+      usdValue,
     };
-    if (!ownedAssets[asset]) {
+    if (!ownedAssets[asset])
       ownedAssets[asset] = balance;
-    } else {
-      ownedAssets[asset] = balanceSum(ownedAssets[asset], balance);
-    }
+    else ownedAssets[asset] = balanceSum(ownedAssets[asset], balance);
   }
   return ownedAssets;
-};
+}
 
-export const useManualAssetBalances = () => {
-  const { manualBalances, manualLiabilities } = storeToRefs(
-    useManualBalancesStore()
-  );
+interface UseManualAssetBalancesReturn {
+  balances: ComputedRef<AssetBalances>;
+  liabilities: ComputedRef<AssetBalances>;
+}
 
-  const balances: ComputedRef<AssetBalances> = computed(() =>
-    toAssetBalances(get(manualBalances))
-  );
+export function useManualAssetBalances(): UseManualAssetBalancesReturn {
+  const { manualBalances, manualLiabilities } = storeToRefs(useManualBalancesStore());
 
-  const liabilities: ComputedRef<AssetBalances> = computed(() =>
-    toAssetBalances(get(manualLiabilities))
-  );
+  const balances = computed<AssetBalances>(() => toAssetBalances(get(manualBalances)));
+
+  const liabilities = computed<AssetBalances>(() => toAssetBalances(get(manualLiabilities)));
 
   return {
     balances,
-    liabilities
+    liabilities,
   };
-};
+}

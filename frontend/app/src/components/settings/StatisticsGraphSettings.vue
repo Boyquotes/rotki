@@ -7,38 +7,39 @@ const { t } = useI18n();
 
 const updated = () => emit('updated');
 
-const showMenu: Ref<boolean> = ref(false);
+const showMenu = ref<boolean>(false);
 </script>
 
 <template>
-  <VMenu
+  <RuiMenu
     v-model="showMenu"
-    max-width="500px"
-    min-width="280px"
-    left
-    :close-on-content-click="false"
+    menu-class="min-w-[18rem] max-w-[20rem]"
+    :popper="{ placement: 'bottom-end' }"
   >
-    <template #activator="{ on }">
+    <template #activator="{ attrs }">
       <MenuTooltipButton
         :tooltip="t('statistics_graph_settings.tooltip')"
         class-name="graph-period"
-        :on-menu="on"
+        custom-color
+        v-bind="attrs"
       >
         <RuiIcon name="settings-4-line" />
       </MenuTooltipButton>
     </template>
 
-    <Card>
+    <div class="p-4">
       <SsfGraphMultiplierSetting @updated="updated()" />
-      <VDivider class="my-4" />
+      <RuiDivider class="my-4" />
       <InferZeroTimedBalancesSetting @updated="updated()" />
 
-      <template #buttons>
-        <div class="grow" />
-        <RuiButton color="primary" @click="showMenu = false">
+      <div class="flex justify-end">
+        <RuiButton
+          color="primary"
+          @click="showMenu = false"
+        >
           {{ t('common.actions.close') }}
         </RuiButton>
-      </template>
-    </Card>
-  </VMenu>
+      </div>
+    </div>
+  </RuiMenu>
 </template>

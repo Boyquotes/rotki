@@ -5,6 +5,9 @@ import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from rotkehlchen.globaldb.upgrades.v6_v7 import migrate_to_v7
+from rotkehlchen.globaldb.upgrades.v7_v8 import migrate_to_v8
+from rotkehlchen.globaldb.upgrades.v8_v9 import migrate_to_v9
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.utils.misc import ts_now
 from rotkehlchen.utils.upgrades import UpgradeRecord
@@ -39,6 +42,18 @@ UPGRADES_LIST = [
         from_version=5,
         function=migrate_to_v6,
     ),
+    UpgradeRecord(
+        from_version=6,
+        function=migrate_to_v7,
+    ),
+    UpgradeRecord(
+        from_version=7,
+        function=migrate_to_v8,
+    ),
+    UpgradeRecord(
+        from_version=8,
+        function=migrate_to_v9,
+    ),
 ]
 
 
@@ -67,7 +82,7 @@ def maybe_upgrade_globaldb(
             f'globaldb version is {db_version}. To be able to use it you will need to '
             f'first use a previous version of rotki and then use this one. '
             f'Refer to the documentation for more information. '
-            f'https://rotki.readthedocs.io/en/latest/usage_guide.html#upgrading-rotki-after-a-very-long-time',
+            f'https://docs.rotki.com/usage-guides#upgrading-rotki-after-a-long-time',
         )
     if db_version > GLOBAL_DB_VERSION:
         raise ValueError(

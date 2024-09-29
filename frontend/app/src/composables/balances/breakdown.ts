@@ -1,87 +1,83 @@
-import { type AssetBalanceWithPrice, type BigNumber } from '@rotki/common';
-import { type MaybeRef } from '@vueuse/core';
 import { TRADE_LOCATION_BLOCKCHAIN } from '@/data/defaults';
-import { type AssetBreakdown } from '@/types/blockchain/accounts';
+import type { AssetBalanceWithPrice, BigNumber } from '@rotki/common';
+import type { MaybeRef } from '@vueuse/core';
+import type { AssetBreakdown } from '@/types/blockchain/accounts';
 
-export const useBalancesBreakdown = () => {
+interface UseBalancesBreakdownReturn {
+  assetBreakdown: (asset: string) => ComputedRef<AssetBreakdown[]>;
+  liabilityBreakdown: (asset: string) => ComputedRef<AssetBreakdown[]>;
+  locationBreakdown: (identifier: MaybeRef<string>) => ComputedRef<AssetBalanceWithPrice[]>;
+  balancesByLocation: ComputedRef<Record<string, BigNumber>>;
+}
+
+export function useBalancesBreakdown(): UseBalancesBreakdownReturn {
   const manualStore = useManualBalancesStore();
   const { manualBalanceByLocation } = storeToRefs(manualStore);
-  const {
-    getBreakdown: getManualBreakdown,
-    getLocationBreakdown: getManualLocationBreakdown
-  } = manualStore;
+  const { assetBreakdown: manualAssetBreakdown, liabilityBreakdown: manualLiabilityBreakdown, getLocationBreakdown: getManualLocationBreakdown } = manualStore;
   const {
     getBreakdown: getExchangeBreakdown,
     getLocationBreakdown: getExchangesLocationBreakdown,
-    getByLocationBalances: getExchangesByLocationBalances
+    getByLocationBalances: getExchangesByLocationBalances,
   } = useExchangeBalancesStore();
-  const { getBreakdown: getBlockchainBreakdown } = useAccountBalances();
-  const { locationBreakdown: blockchainLocationBreakdown, blockchainTotal } =
-    useBlockchainAggregatedBalances();
+  const { assetBreakdown: blockchainAssetBreakdown, liabilityBreakdown: blockchainLiabilityBreakdown } = useBlockchainStore();
+  const { locationBreakdown: blockchainLocationBreakdown, blockchainTotal } = useBlockchainAggregatedBalances();
   const { toSelectedCurrency, assetPrice } = useBalancePricesStore();
   const { isAssetIgnored } = useIgnoredAssetsStore();
+  const { toSortedAssetBalanceWithPrice } = useBalanceSorting();
 
-  const assetBreakdown = (asset: string): ComputedRef<AssetBreakdown[]> =>
-    computed(() =>
-      groupAssetBreakdown(
-        get(getBlockchainBreakdown(asset))
-          .concat(get(getManualBreakdown(asset)))
-          .concat(get(getExchangeBreakdown(asset)))
-          .filter(item => !item.balance.amount.isZero())
-      )
-    );
+  const assetBreakdown = (asset: string): ComputedRef<AssetBreakdown[]> => computed<AssetBreakdown[]>(() =>
+    groupAssetBreakdown(
+      get(blockchainAssetBreakdown(asset))
+        .concat(get(manualAssetBreakdown(asset)))
+        .concat(get(getExchangeBreakdown(asset)))
+        .filter(item => !!item.amount && !item.amount.isZero()),
+    ),
+  );
 
-  const locationBreakdown = (
-    identifier: MaybeRef<string>
-  ): ComputedRef<AssetBalanceWithPrice[]> =>
-    computed(() => {
+  const liabilityBreakdown = (asset: string): ComputedRef<AssetBreakdown[]> => computed<AssetBreakdown[]>(() =>
+    groupAssetBreakdown(
+      get(blockchainLiabilityBreakdown(asset))
+        .concat(get(manualLiabilityBreakdown(asset)))
+        .filter(item => !!item.amount && !item.amount.isZero()),
+    ),
+  );
+
+  const locationBreakdown = (identifier: MaybeRef<string>): ComputedRef<AssetBalanceWithPrice[]> =>
+    computed<AssetBalanceWithPrice[]>(() => {
       const id = get(identifier);
-      let balances = mergeAssetBalances(
-        get(getManualLocationBreakdown(id)),
-        get(getExchangesLocationBreakdown(id))
-      );
+      let balances = mergeAssetBalances(get(getManualLocationBreakdown(id)), get(getExchangesLocationBreakdown(id)));
 
-      if (id === TRADE_LOCATION_BLOCKCHAIN) {
-        balances = mergeAssetBalances(
-          balances,
-          get(blockchainLocationBreakdown)
-        );
-      }
+      if (id === TRADE_LOCATION_BLOCKCHAIN)
+        balances = mergeAssetBalances(balances, get(blockchainLocationBreakdown));
 
-      return toSortedAssetBalanceWithPrice(
-        balances,
-        asset => get(isAssetIgnored(asset)),
-        assetPrice,
-        true
-      );
+      return toSortedAssetBalanceWithPrice(balances, asset => get(isAssetIgnored(asset)), assetPrice, true);
     });
 
-  const balancesByLocation: ComputedRef<Record<string, BigNumber>> = computed(
-    () => {
-      const map: Record<string, BigNumber> = {
-        [TRADE_LOCATION_BLOCKCHAIN]: get(toSelectedCurrency(blockchainTotal))
-      };
+  const balancesByLocation = computed<Record<string, BigNumber>>(() => {
+    const map: Record<string, BigNumber> = {
+      [TRADE_LOCATION_BLOCKCHAIN]: get(toSelectedCurrency(blockchainTotal)),
+    };
 
-      const exchange = get(getExchangesByLocationBalances(toSelectedCurrency));
-      for (const location in exchange) {
-        const total = map[location];
-        const usdValue = exchange[location];
-        map[location] = total ? total.plus(usdValue) : usdValue;
-      }
-
-      const manual = get(manualBalanceByLocation);
-      for (const { location, usdValue } of manual) {
-        const total = map[location];
-        map[location] = total ? total.plus(usdValue) : usdValue;
-      }
-
-      return map;
+    const exchange = get(getExchangesByLocationBalances(toSelectedCurrency));
+    for (const location in exchange) {
+      const total = map[location];
+      const usdValue = exchange[location];
+      map[location] = total ? total.plus(usdValue) : usdValue;
     }
-  );
+
+    const manual = get(manualBalanceByLocation);
+    for (const { location, usdValue } of manual) {
+      const total = map[location];
+      map[location] = total ? total.plus(usdValue) : usdValue;
+    }
+
+    return map;
+  });
 
   return {
     assetBreakdown,
+    liabilityBreakdown,
     locationBreakdown,
-    balancesByLocation
+    balancesByLocation,
   };
-};
+}

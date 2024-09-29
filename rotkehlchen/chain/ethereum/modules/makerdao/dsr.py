@@ -25,7 +25,6 @@ from rotkehlchen.types import (
     Timestamp,
     deserialize_evm_tx_hash,
 )
-from rotkehlchen.user_messages import MessagesAggregator
 from rotkehlchen.utils.misc import hexstr_to_int, ts_now
 
 from .constants import MAKERDAO_REQUERY_PERIOD, RAD
@@ -33,6 +32,7 @@ from .constants import MAKERDAO_REQUERY_PERIOD, RAD
 if TYPE_CHECKING:
     from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.user_messages import MessagesAggregator
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -109,7 +109,7 @@ class MakerdaoDsr(HasDSProxy):
             ethereum_inquirer: 'EthereumInquirer',
             database: 'DBHandler',
             premium: Premium | None,
-            msg_aggregator: MessagesAggregator,
+            msg_aggregator: 'MessagesAggregator',
     ) -> None:
 
         super().__init__(
@@ -144,7 +144,7 @@ class MakerdaoDsr(HasDSProxy):
             proxy_mappings = self.ethereum.proxies_inquirer.get_accounts_having_proxy()
             balances = {}
             try:
-                current_dai_price = Inquirer().find_usd_price(A_DAI)
+                current_dai_price = Inquirer.find_usd_price(A_DAI)
             except RemoteError:
                 current_dai_price = Price(ONE)
             for account, proxy in proxy_mappings.items():
@@ -212,7 +212,8 @@ class MakerdaoDsr(HasDSProxy):
                     break
                 except DeserializationError:
                     value = None
-        return value * RAY  # turn it from DAI to RAD
+
+        return value * RAY if value is not None else None  # turn it from DAI to RAD
 
     def _historical_dsr_for_account(
             self,
@@ -373,10 +374,10 @@ class MakerdaoDsr(HasDSProxy):
                 normalized_balance -= m.normalized_balance
 
         chi = self.makerdao_pot.call(self.ethereum, 'chi')
-        normalized_balance = normalized_balance * chi
+        normalized_balance *= chi
         gain = normalized_balance - amount_in_dsr
         try:
-            current_dai_price = Inquirer().find_usd_price(A_DAI)
+            current_dai_price = Inquirer.find_usd_price(A_DAI)
         except RemoteError:
             current_dai_price = Price(ONE)
 

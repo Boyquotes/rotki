@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.chain.ethereum.modules.eth2.structures import Eth2Validator
+from rotkehlchen.chain.ethereum.modules.eth2.structures import ValidatorDetails
 from rotkehlchen.chain.ethereum.modules.eth2.utils import form_withdrawal_notes
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants import ONE
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     '0x23F02E9272EAc1F12F5be76D48b4a15323778f08', '0xCb2a5c130709a4C6c4BA39368879A523C0060c71',
 ]])
 @pytest.mark.parametrize('query_method', ['etherscan', 'blockscout'])
-@pytest.mark.freeze_time('2023-11-19 19:58:00 GMT')
+@pytest.mark.freeze_time('2024-02-04 23:50:00 GMT')
 def test_withdrawals(eth2: 'Eth2', database, ethereum_accounts, query_method):
     """Test that when withdrawals are queried, they are properly saved in the DB.
 
@@ -49,7 +49,7 @@ def test_withdrawals(eth2: 'Eth2', database, ethereum_accounts, query_method):
             group_by_event_ids=False,
         )
 
-    assert len(events) == 74
+    assert len(events) == 94
     account0_events, account1_events = 0, 0
     for idx, x in enumerate(events):
         assert isinstance(x, EthWithdrawalEvent)
@@ -129,11 +129,11 @@ def test_withdrawals(eth2: 'Eth2', database, ethereum_accounts, query_method):
         assert isinstance(x.balance.amount, FVal)
         assert FVal('0.01') <= x.balance.amount <= FVal('0.06')
 
-    assert account0_events == 37
-    assert account1_events == 37
+    assert account0_events == 47
+    assert account1_events == 47
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('network_mocking', [False])
 @pytest.mark.freeze_time('2023-04-24 21:00:00 GMT')
 def test_block_production(eth2: 'Eth2', database):
@@ -146,19 +146,19 @@ def test_block_production(eth2: 'Eth2', database):
     vindex1_address = string_to_evm_address('0x0fdAe061cAE1Ad4Af83b27A96ba5496ca992139b')
     vindex2_address = string_to_evm_address('0x76b23B82c8dCf1635a9DF63Fe6D9AafAaF042A9B')
     with database.user_write() as write_cursor:
-        dbeth2.add_validators(write_cursor, [
-            Eth2Validator(
-                index=vindex1,
+        dbeth2.add_or_update_validators(write_cursor, [
+            ValidatorDetails(
+                validator_index=vindex1,
                 public_key=Eth2PubKey('0xadd9843b2eb53ccaf5afb52abcc0a13223088320656fdfb162360ca53a71ebf8775dbebd0f1f1bf6c3e823d4bf2815f7'),
                 ownership_proportion=ONE,
-            ), Eth2Validator(
-                index=vindex2,
+            ), ValidatorDetails(
+                validator_index=vindex2,
                 public_key=Eth2PubKey('0x8cd650758f377763bf7ebaf7fe60cb14b4b05f3ffe750820abf4ae70bc4bf25f84ccdff3a92489e1435ebf94768a03f1'),
                 ownership_proportion=ONE,
             ),
         ])
 
-    eth2.beaconchain.get_and_store_produced_blocks([vindex1, vindex2])
+    eth2.beacon_inquirer.beaconchain.get_and_store_produced_blocks([vindex1, vindex2])
 
     with database.conn.read_ctx() as cursor:
         events = dbevents.get_history_events(
@@ -275,7 +275,7 @@ def test_block_production(eth2: 'Eth2', database):
     )]
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('network_mocking', [False])
 @pytest.mark.freeze_time('2023-11-19 16:30:00 GMT')
 def test_withdrawals_detect_exit(eth2: 'Eth2', database):
@@ -333,19 +333,16 @@ def test_withdrawals_detect_exit(eth2: 'Eth2', database):
     ]
 
     with database.user_write() as write_cursor:
-        dbeth2.add_validators(write_cursor, [
-            Eth2Validator(
-                index=active_index,
+        dbeth2.add_or_update_validators(write_cursor=write_cursor, validators=[
+            ValidatorDetails(
+                validator_index=active_index,
                 public_key=Eth2PubKey('0xa1d1ad0714035353258038e964ae9675dc0252ee22cea896825c01458e1807bfad2f9969338798548d9858a571f7425c'),
-                ownership_proportion=ONE,
-            ), Eth2Validator(
-                index=exited_index,
+            ), ValidatorDetails(
+                validator_index=exited_index,
                 public_key=Eth2PubKey('0x800041b1eff8af7a583caa402426ffe8e5da001615f5ce00ba30ea8e3e627491e0aa7f8c0417071d5c1c7eb908962d8e'),
-                ownership_proportion=ONE,
-            ), Eth2Validator(
-                index=slashed_index,
+            ), ValidatorDetails(
+                validator_index=slashed_index,
                 public_key=Eth2PubKey('0xb02c42a2cda10f06441597ba87e87a47c187cd70e2b415bef8dc890669efe223f551a2c91c3d63a5779857d3073bf288'),
-                ownership_proportion=ONE,
             ),
         ])
 
@@ -390,4 +387,38 @@ def test_query_no_withdrawals(
 
     with eth2.database.conn.read_ctx() as cursor:
         assert cursor.execute('SELECT COUNT(*) FROM history_events').fetchone()[0] == 0
-        assert cursor.execute('SELECT * FROM used_query_ranges').fetchone()[0] == 'ethwithdrawalsts_0xc37b40ABdB939635068d3c5f13E7faF686F03B65'  # noqa: E501
+        assert cursor.execute('SELECT name FROM key_value_cache').fetchone()[0] == 'ethwithdrawalsts_0xc37b40ABdB939635068d3c5f13E7faF686F03B65'  # noqa: E501
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('network_mocking', [False])
+@pytest.mark.freeze_time('2024-02-07 10:00:00 GMT')
+def test_beacon_node_rpc_queries(eth2: 'Eth2'):
+    # Test setting rpc endpoint both with/without trailing slash. Also unsetting
+    eth2.beacon_inquirer.set_rpc_endpoint('http://42.42.42.42:6969')  # without trailing slash
+    assert eth2.beacon_inquirer.node is not None
+    eth2.beacon_inquirer.set_rpc_endpoint('')  # unset beacon rpc endpoint
+    assert eth2.beacon_inquirer.node is None
+    eth2.beacon_inquirer.set_rpc_endpoint('http://42.42.42.42:6969/')  # type: ignore  # with trailing slash -- not sure why it says this is unreachable
+    assert eth2.beacon_inquirer.node is not None
+
+    # now let's test balances
+    indices = list(range(1074000, 1074100))
+    validators = [Eth2PubKey('0xa2f870e998e823e5c53527407dd4d17ca80de5416fc756154cd68862a0a8ada2910e4b2bf2c7a5152bd20e5e06900b7e')] + indices  # noqa: E501
+
+    with patch.object(eth2.beacon_inquirer.beaconchain, '_query', wraps=eth2.beacon_inquirer.beaconchain._query) as beaconchain_query:  # noqa: E501
+        balances = eth2.beacon_inquirer.get_balances(indices_or_pubkeys=validators, has_premium=True)  # noqa: E501
+        assert beaconchain_query.call_count == 0, 'beaconcha.in should not have been queried'
+        assert len(balances) == len(validators)
+        assert all(x.amount > 32 for x in balances.values())
+
+        # now let's test validator data
+        validator_data = eth2.beacon_inquirer.get_validator_data(validators)
+        assert len(validator_data) == len(validators)
+        for entry in validator_data:
+            if entry.public_key == validators[0]:
+                assert entry.validator_index == 1086866
+            else:
+                assert entry.validator_index in indices
+
+        assert beaconchain_query.call_count == 0, 'beaconcha.in should not have been queried'

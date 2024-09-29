@@ -6,7 +6,8 @@ from rotkehlchen.chain.ethereum.modules.yearn.constants import (
     CPT_YEARN_V1,
     CPT_YEARN_V2,
     YEARN_ICON,
-    YEARN_LABEL,
+    YEARN_LABEL_V1,
+    YEARN_LABEL_V2,
 )
 from rotkehlchen.chain.evm.constants import ZERO_ADDRESS
 from rotkehlchen.chain.evm.decoding.interfaces import DecoderInterface
@@ -16,6 +17,7 @@ from rotkehlchen.chain.evm.decoding.structures import (
     TransferEnrichmentOutput,
 )
 from rotkehlchen.chain.evm.decoding.types import CounterpartyDetails
+from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants.resolver import ethaddress_to_identifier
 from rotkehlchen.errors.asset import UnknownAsset, WrongAssetType
 from rotkehlchen.globaldb.handler import GlobalDBHandler
@@ -56,10 +58,14 @@ class YearnDecoder(DecoderInterface):
             base_tools=base_tools,
             msg_aggregator=msg_aggregator,
         )
-        vaults_v1 = GlobalDBHandler().get_evm_tokens(chain_id=ChainID.ETHEREUM, protocol=YEARN_VAULTS_V1_PROTOCOL)  # noqa: E501
-        vaults_v2 = GlobalDBHandler().get_evm_tokens(chain_id=ChainID.ETHEREUM, protocol=YEARN_VAULTS_V2_PROTOCOL)  # noqa: E501
-        self.vaults_v1 = {vault.evm_address for vault in vaults_v1}
-        self.vaults_v2 = {vault.evm_address for vault in vaults_v2}
+
+        with GlobalDBHandler().conn.read_ctx() as cursor:
+            db_query = 'SELECT address FROM evm_tokens WHERE protocol=? AND chain=?'
+            cursor.execute(db_query, (YEARN_VAULTS_V1_PROTOCOL, ChainID.ETHEREUM.serialize_for_db()))  # noqa: E501
+            self.vaults_v1 = {string_to_evm_address(row[0]) for row in cursor}
+
+            cursor.execute(db_query, (YEARN_VAULTS_V2_PROTOCOL, ChainID.ETHEREUM.serialize_for_db()))  # noqa: E501
+            self.vaults_v2 = {string_to_evm_address(row[0]) for row in cursor}
 
     def _maybe_enrich_yearn_transfers(
             self,
@@ -148,12 +154,12 @@ class YearnDecoder(DecoderInterface):
         return (
             CounterpartyDetails(
                 identifier=CPT_YEARN_V1,
-                label=YEARN_LABEL,
+                label=YEARN_LABEL_V1,
                 image=YEARN_ICON,
             ),
             CounterpartyDetails(
                 identifier=CPT_YEARN_V2,
-                label=YEARN_LABEL,
+                label=YEARN_LABEL_V2,
                 image=YEARN_ICON,
             ),
         )

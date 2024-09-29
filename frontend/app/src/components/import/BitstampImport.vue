@@ -5,9 +5,12 @@ const { t } = useI18n();
 <template>
   <ImportSource source="bitstamp">
     <template #upload-title>
-      <i18n tag="span" path="import_data.bitstamp.import">
+      <i18n-t
+        tag="span"
+        keypath="import_data.bitstamp.import"
+      >
         <strong>{{ t('import_data.bitstamp.import_types') }}</strong>
-      </i18n>
+      </i18n-t>
     </template>
   </ImportSource>
 </template>

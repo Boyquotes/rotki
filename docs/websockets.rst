@@ -93,7 +93,7 @@ The messages sent by rotki when a user is logging in and a db upgrade is happeni
 
 
 - ``start_version``: DB version that user's database had before any upgrades began. This is the version of the DB when rotki first starts.
-- ``current_upgrade``: Structure that holds information about currently running upgrade. Contains: ``to_version`` - version of the the database upgrade that is currently being applied; ``total_steps`` - total number of steps that currently running upgrade consists of; ``current_step`` - step that the upgrade is at as of this websocket message.
+- ``current_upgrade``: Structure that holds information about currently running upgrade. Contains: ``to_version`` - version of the database upgrade that is currently being applied; ``total_steps`` - total number of steps that currently running upgrade consists of; ``current_step`` - step that the upgrade is at as of this websocket message.
 - ``target_version``: The target version of the DB. When this is reached, the upgrade process will have finished.
 
 
@@ -125,30 +125,30 @@ The messages sent by rotki when a user is logging in and a db upgrade is happeni
 - ``target_version``: The target migration version. When this will have been reached and finished, the migrations will end.
 
 
-EVM Accounts Detection
-=======================
+EVM/EVMLke Accounts Detection
+==========================================
 
-If there are new evm accounts detected (due to a data migration, user-initiated detection, periodic detection, etc.) then the frontend will be notified of any new EVM accounts that were detected. This is done via the following message.
+If there are new evm / evmlike accounts detected (due to a data migration, user-initiated detection, periodic detection, etc.) then the frontend will be notified of any new EVM accounts that were detected. This is done via the following message.
 
 ::
 
     {
-        "type": "evm_accounts_detection",
+        "type": "evmlike_accounts_detection",
         "data": [
             {
                 "address": "0x4bBa290826C253BD854121346c370a9886d1bC26",
-                "evm_chain": "optimism"
+                "chain": "optimism"
             },
             {
                 "address": "0x4bBa290826C253BD854121346c370a9886d1bC26",
-                "evm_chain": "avalanche"
+                "chain": "zksync_lite"
             }
         ]
     }
 
 
 - ``address``: Address of an account.
-- ``evm_chain``: Chain of an account.
+- ``chain``: Chain of an account.
 
 
 EVM Token Detection
@@ -238,7 +238,7 @@ Finally the backend provides more granular information to know what interval of 
             "location": "kraken",
             "event_type": "history_query",
             "name": "My kraken exchange",
-            'period': [0, 1682100570]
+            "period": [0, 1682100570]
         }
     }
 
@@ -280,7 +280,7 @@ Whenever the backend attempts to upload a premium user DB there can be various r
         "type": "database_upload_result",
         "data": {
             "uploaded": False,
-	    "actionable": True,
+            "actionable": True,
             "message": "Remote database bigger than the local one"
         }
     }
@@ -314,17 +314,81 @@ Transaction decoding process
 When the endpoint to start the task for decoding undecoded transactions is queried we send ws messages to inform about the progress.
 
 ::
+
     {
-        "type":"evm_undecoded_transactions",
-        "data":{
-            "evm_chain":"ethereum",
-            "total":2,
-            "processed":0
-        }
+        "type": "evm_undecoded_transactions",
+        "data": {chain":"ethereum", "total":2, "processed":0}
     }
 
-- ``evm_chain``: Evm chain where the task is decoding transactions.
+
+- ``chain``: Chain where the task is decoding transactions.
 - ``total``: Total number of transactions that will be decoded.
 - ``processed``: The total number of transactions that have already been decoded.
 
 The backend will send a ws message at the beginning before decoding any transaction and another at the end of the task. Every 10 decoded transactions it will also update the status.
+
+
+Calendar reminders
+============================
+
+When a reminder for a calendar event is processed we emit a message with the following format. The reminder is then deleted.
+
+::
+
+    {
+        "data":{
+            "identifier":2,
+            "name":"CRV unlock",
+            "description":"Unlock date for CRV",
+            "timestamp":1713621899,
+        },
+        "type":"calendar_reminder"
+    }
+
+
+- ``data``: Contains the information of the calendar event, that is: identifier, name, description, timestamp, address, blockchain, counterparty and color.
+
+
+Protocol cache updates
+============================
+
+Whenever a protocol cache is being updated for protocols like Curve, Convex, Gearbox, [Velo/Aero]drome, etc., Messages are emitted every 5 seconds to notify the progress of it.
+
+::
+
+    {
+        "data": {
+            "protocol":"curve",
+            "chain":"ethereum",
+            "processed": 324,
+            "total":3042,
+        },
+        "type":"protocol_cache_updates"
+    }
+
+
+- ``data``: Contains the information of the progress of the process of updating the cache, that is: protocol, chain, processed, and total.
+
+
+Unknown asset on exchange
+============================
+
+If an unknown asset is encountered on an exchange we emit a message with the following format.
+
+::
+
+    {
+        "type": "exchange_unknown_asset",
+        "data": {
+            "location": "bybit",
+            "name": "Bybit 1",
+            "identifier": "ENA",
+            "details": "balance query",
+        }
+    }
+
+
+- ``location``: Exchange where the asset was found.
+- ``name``: Differentiates between multiple instances of the same exchange.
+- ``identifier``: Asset identifier of the unknown asset.
+- ``details``: Details about what type of event was being processed when the unknown asset was encountered.

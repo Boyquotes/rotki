@@ -1,11 +1,11 @@
-﻿<script setup lang="ts">
-import { Blockchain } from '@rotki/common/lib/blockchain';
+<script setup lang="ts">
+import { Blockchain } from '@rotki/common';
 import { truncateAddress } from '@/utils/truncate';
-import {
-  type Chains,
-  type ExplorerUrls,
-  explorerUrls
-} from '@/types/asset/asset-urls';
+import { type ExplorerUrls, explorerUrls, isChains } from '@/types/asset/asset-urls';
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 const props = withDefaults(
   defineProps<{
@@ -14,8 +14,9 @@ const props = withDefaults(
     fullAddress?: boolean;
     linkOnly?: boolean;
     noLink?: boolean;
+    copyOnly?: boolean;
     baseUrl?: string;
-    chain?: Chains;
+    chain?: string;
     evmChain?: string;
     buttons?: boolean;
     size?: number | string;
@@ -23,6 +24,7 @@ const props = withDefaults(
     type?: keyof ExplorerUrls;
     disableScramble?: boolean;
     hideAliasName?: boolean;
+    location?: string;
   }>(),
   {
     showIcon: true,
@@ -30,6 +32,7 @@ const props = withDefaults(
     fullAddress: false,
     linkOnly: false,
     noLink: false,
+    copyOnly: false,
     baseUrl: undefined,
     chain: Blockchain.ETH,
     evmChain: undefined,
@@ -38,115 +41,182 @@ const props = withDefaults(
     truncateLength: 4,
     type: 'address',
     disableScramble: false,
-    hideAliasName: false
-  }
+    hideAliasName: false,
+    location: undefined,
+  },
 );
 const { t } = useI18n();
 const { copy } = useClipboard();
 
-const { text, baseUrl, chain, evmChain, type, disableScramble, hideAliasName } =
-  toRefs(props);
-const { scrambleData, shouldShowAmount, scrambleHex, scrambleIdentifier } =
-  useScramble();
+const { text, baseUrl, chain, evmChain, type, disableScramble, hideAliasName, location } = toRefs(props);
+const { scrambleData, shouldShowAmount, scrambleAddress, scrambleIdentifier } = useScramble();
 
 const { explorers } = storeToRefs(useFrontendSettingsStore());
-const { getChain } = useSupportedChains();
+const { getChain, getChainInfoByName } = useSupportedChains();
 
 const { addressNameSelector } = useAddressesNamesStore();
-const addressName = addressNameSelector(text, chain);
+const addressName = computed(() => {
+  const name = get(location);
+  if (name && !get(getChainInfoByName(name)))
+    return null;
+
+  return get(addressNameSelector(text, chain));
+});
 
 const blockchain = computed(() => {
-  if (isDefined(evmChain)) {
+  if (isDefined(evmChain))
     return getChain(get(evmChain));
-  }
+
   return get(chain);
 });
 
 const aliasName = computed<string | null>(() => {
-  if (get(hideAliasName) || get(scrambleData) || get(type) !== 'address') {
+  if (get(hideAliasName) || get(scrambleData) || get(type) !== 'address')
     return null;
-  }
 
   const name = get(addressName);
-  if (!name) {
+  if (!name)
     return null;
-  }
 
-  return truncateAddress(name, 10);
+  return name;
+});
+
+const truncatedAliasName = computed<string | null>(() => {
+  const alias = get(aliasName);
+
+  if (!alias)
+    return alias;
+
+  return truncateAddress(alias, 10);
 });
 
 const displayText = computed<string>(() => {
   const linkText = get(text);
   const linkType = get(type);
 
-  if (get(disableScramble)) {
+  if (get(disableScramble))
     return linkText;
-  }
 
-  if (linkType === 'block' || consistOfNumbers(linkText)) {
+  if (linkType === 'block' || consistOfNumbers(linkText))
     return scrambleIdentifier(linkText);
-  }
 
-  return scrambleHex(linkText);
+  return scrambleAddress(linkText);
 });
 
 const base = computed<string>(() => {
-  if (isDefined(baseUrl)) {
+  if (isDefined(baseUrl))
     return get(baseUrl);
-  }
 
   const selectedChain = get(blockchain);
-  const defaultExplorer: ExplorerUrls = explorerUrls[selectedChain];
-  const linkType = get(type);
-  let base: string | undefined = undefined;
+  let base: string | undefined;
+  if (isChains(selectedChain)) {
+    const defaultExplorer: ExplorerUrls = explorerUrls[selectedChain];
+    const linkType = get(type);
 
-  if (selectedChain === 'zksync') {
-    base = defaultExplorer[linkType];
-  } else {
     const explorerSetting = get(explorers)[selectedChain];
 
-    if (explorerSetting || defaultExplorer) {
+    if (explorerSetting || defaultExplorer)
       base = explorerSetting?.[linkType] ?? defaultExplorer[linkType];
-    }
   }
 
-  if (!base) {
+  if (!base)
     return '';
-  }
 
   return base.endsWith('/') ? base : `${base}/`;
 });
 
 const url = computed<string>(() => get(base) + get(text));
 
-const displayUrl = computed<string>(
-  () => get(base) + truncateAddress(get(text), 10)
-);
+const displayUrl = computed<string>(() => get(base) + truncateAddress(get(text), 10));
 
 const { href, onLinkClick } = useLinks(url);
+
+const { showGlobalDialog } = useAddressBookForm();
+
+const tooltip = ref();
+
+function openAddressBookForm() {
+  get(tooltip)?.onClose?.(true);
+  showGlobalDialog({
+    address: get(text),
+    blockchain: get(blockchain),
+  });
+}
+
+const showAddressBookButton = computed(() => get(type) === 'address' && get(blockchain) !== Blockchain.ETH2);
+
+const [DefineButton, ReuseButton] = createReusableTemplate();
 </script>
 
 <template>
-  <div class="flex flex-row shrink items-center gap-1">
+  <DefineButton>
+    <RuiButton
+      v-if="showAddressBookButton"
+      size="sm"
+      variant="text"
+      icon
+      @click="openAddressBookForm()"
+    >
+      <template #prepend>
+        <RuiIcon
+          name="pencil-line"
+          size="20"
+          class="!text-rui-grey-400"
+        />
+      </template>
+    </RuiButton>
+  </DefineButton>
+  <div
+    class="flex flex-row shrink items-center gap-1 text-xs [&_*]:font-mono [&_*]:leading-6"
+    v-bind="$attrs"
+  >
     <template v-if="showIcon && !linkOnly && type === 'address'">
-      <EnsAvatar :address="displayText" avatar size="22px" />
+      <EnsAvatar
+        :address="displayText"
+        avatar
+        size="22px"
+      />
     </template>
 
     <template v-if="!linkOnly && !buttons">
-      <span v-if="fullAddress" :class="{ blur: !shouldShowAmount }">
+      <span
+        v-if="fullAddress"
+        :class="{ blur: !shouldShowAmount }"
+      >
         {{ displayText }}
       </span>
 
-      <RuiTooltip v-else :popper="{ placement: 'top' }" :open-delay="400">
+      <RuiTooltip
+        v-else
+        ref="tooltip"
+        :popper="{ placement: 'top' }"
+        :open-delay="400"
+        tooltip-class="[&_*]:font-mono"
+        persist-on-tooltip-hover
+      >
         <template #activator>
-          <span :class="{ blur: !shouldShowAmount }">
-            <template v-if="aliasName">{{ aliasName }}</template>
+          <div :class="{ blur: !shouldShowAmount }">
+            <template v-if="truncatedAliasName">
+              {{ truncatedAliasName }}
+            </template>
             <template v-else>
               {{ truncateAddress(displayText, truncateLength) }}
             </template>
-          </span>
+          </div>
         </template>
-        {{ displayText }}
+        <div class="flex items-center gap-2">
+          {{ displayText }}
+
+          <ReuseButton v-if="!aliasName" />
+        </div>
+        <div
+          v-if="aliasName"
+          class="font-bold flex justify-between items-center mt-1 !gap-2"
+        >
+          {{ aliasName }}
+
+          <ReuseButton />
+        </div>
       </RuiTooltip>
     </template>
 
@@ -165,15 +235,18 @@ const { href, onLinkClick } = useLinks(url);
             color="primary"
             @click="copy(text)"
           >
-            <RuiIcon name="file-copy-line" :size="size" />
+            <RuiIcon
+              name="file-copy-line"
+              :size="size"
+            />
           </RuiButton>
         </template>
 
-        {{ t('common.actions.copy') }}
+        {{ t('common.actions.copy_to_clipboard') }}
       </RuiTooltip>
 
       <RuiTooltip
-        v-if="linkOnly || !noLink || buttons"
+        v-if="(linkOnly || !noLink || buttons) && !copyOnly"
         :popper="{ placement: 'top' }"
         :open-delay="600"
       >
@@ -190,7 +263,10 @@ const { href, onLinkClick } = useLinks(url);
             target="_blank"
             @click="onLinkClick()"
           >
-            <RuiIcon name="external-link-line" :size="size" />
+            <RuiIcon
+              name="external-link-line"
+              :size="size"
+            />
           </RuiButton>
         </template>
 

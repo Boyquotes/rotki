@@ -6,11 +6,11 @@ export class RotkehlchenApi {
   private _serverUrl: string;
   private signal = axios.CancelToken.source();
   private readonly pathname: string;
+  private authFailureAction?: () => void;
 
   get defaultServerUrl(): string {
-    if (import.meta.env.VITE_BACKEND_URL) {
+    if (import.meta.env.VITE_BACKEND_URL)
       return import.meta.env.VITE_BACKEND_URL as string;
-    }
 
     if (import.meta.env.VITE_PUBLIC_PATH) {
       const pathname = this.pathname;
@@ -43,33 +43,63 @@ export class RotkehlchenApi {
     this.axios = axios.create({
       baseURL: `${this.serverUrl}/api/1/`,
       timeout: 30000,
-      transformResponse: basicAxiosTransformer
+      transformResponse: basicAxiosTransformer,
     });
     this.setupCancellation();
+    this.setupAuthRedirect();
   }
 
-  setup(serverUrl: string) {
+  setup(serverUrl: string): void {
     this._serverUrl = serverUrl;
     this.axios = axios.create({
       baseURL: `${serverUrl}/api/1/`,
       timeout: 30000,
-      transformResponse: basicAxiosTransformer
+      transformResponse: basicAxiosTransformer,
     });
     this.setupCancellation();
+    this.setupAuthRedirect();
   }
 
-  private setupCancellation() {
+  setOnAuthFailure(action: () => void): void {
+    this.authFailureAction = action;
+  }
+
+  private setupCancellation(): void {
     this.axios.interceptors.request.use(
-      request => {
+      (request) => {
         request.cancelToken = this.signal.token;
         return request;
       },
-      error => {
+      (error) => {
+        if (error.response)
+          return Promise.reject(error.response.data);
+
+        return Promise.reject(error);
+      },
+    );
+  }
+
+  private setupAuthRedirect(): void {
+    this.axios.interceptors.response.use(
+      (response) => {
+        if (response.status === 401) {
+          this.cancel();
+          this.authFailureAction?.();
+          window.location.href = '/#/';
+        }
+
+        return response;
+      },
+      (error) => {
         if (error.response) {
+          if (error.response.status === 401) {
+            this.cancel();
+            window.location.href = '/#/';
+          }
           return Promise.reject(error.response.data);
         }
         return Promise.reject(error);
-      }
+      },
     );
   }
 }

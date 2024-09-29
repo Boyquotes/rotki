@@ -1,4 +1,5 @@
 from contextlib import ExitStack
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
     from rotkehlchen.api.server import APIServer
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
 def test_icons_and_avatars_cache_deletion(rotkehlchen_api_server):
     """Checks that clearing the cache for avatars and icons work as expected."""
@@ -38,18 +40,11 @@ def test_icons_and_avatars_cache_deletion(rotkehlchen_api_server):
         )
 
     # populate icons dir
-    with open(f'{icons_dir}/ETH_small.png', 'wb') as f:
-        f.write(b'')
-
-    with open(f'{icons_dir}/BTC_small.png', 'wb') as f:
-        f.write(b'')
-
-    with open(f'{icons_dir}/AVAX_small.png', 'wb') as f:
-        f.write(b'')
-
+    Path(f'{icons_dir}/ETH_small.png').write_bytes(b'')
+    Path(f'{icons_dir}/BTC_small.png').write_bytes(b'')
+    Path(f'{icons_dir}/AVAX_small.png').write_bytes(b'')
     # also add an avatar, to make sure it's not deleted when icons are
-    with open(f'{avatars_dir}/me.eth.png', 'wb') as f:
-        f.write(b'')
+    Path(f'{avatars_dir}/me.eth.png').write_bytes(b'')
 
     assert len([i for i in icons_dir.iterdir() if i.is_file()]) == 3
     response = requests.post(
@@ -78,14 +73,9 @@ def test_icons_and_avatars_cache_deletion(rotkehlchen_api_server):
     assert len([i for i in avatars_dir.iterdir() if i.is_file()]) == 1
 
     # populate avatars dir to test the cache deletion
-    with open(f'{avatars_dir}/ava.eth.png', 'wb') as f:
-        f.write(b'')
-
-    with open(f'{avatars_dir}/prettyirrelevant.eth.png', 'wb') as f:
-        f.write(b'')
-
-    with open(f'{avatars_dir}/nebolax.eth.png', 'wb') as f:
-        f.write(b'')
+    Path(f'{avatars_dir}/ava.eth.png').write_bytes(b'')
+    Path(f'{avatars_dir}/prettyirrelevant.eth.png').write_bytes(b'')
+    Path(f'{avatars_dir}/nebolax.eth.png').write_bytes(b'')
 
     assert len([i for i in avatars_dir.iterdir() if i.is_file()]) == 4
     response = requests.post(
@@ -123,7 +113,7 @@ def test_icons_and_avatars_cache_deletion(rotkehlchen_api_server):
     assert response.headers['Content-Type'] == 'image/png'
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 def test_general_cache_refresh(rotkehlchen_api_server: 'APIServer'):
     """Tests that refreshing the general cache works as expected"""
     with ExitStack() as stack:
@@ -140,7 +130,11 @@ def test_general_cache_refresh(rotkehlchen_api_server: 'APIServer'):
             new=MagicMock(),
         ))
         patched_velodrome_query = stack.enter_context(patch(
-            'rotkehlchen.api.rest.query_velodrome_data',
+            'rotkehlchen.api.rest.query_velodrome_like_data',
+            new=MagicMock(),
+        ))
+        patched_gearbox_query = stack.enter_context(patch(
+            'rotkehlchen.api.rest.query_gearbox_data',
             new=MagicMock(),
         ))
         patched_query_yearn_vaults = stack.enter_context(patch(
@@ -158,7 +152,9 @@ def test_general_cache_refresh(rotkehlchen_api_server: 'APIServer'):
         ))
         assert_proper_response(response)
         assert patched_convex_query.call_count == 1, 'Convex pools should have been queried despite should_update_protocol_cache being False'  # noqa: E501
-        assert patched_curve_query.call_count == 1, 'Curve pools should have been queried despite should_update_protocol_cache being False'  # noqa: E501
-        assert patched_velodrome_query.call_count == 1, 'Velodrome pools should have been queried despite should_update_protocol_cache being False'  # noqa: E501
+        assert patched_curve_query.call_count == 6, 'Curve pools should have been queried despite should_update_protocol_cache being False'  # noqa: E501
+        assert patched_gearbox_query.call_count == 1, 'Gearbox pools should have been queried despite should_update_protocol_cache being False'  # noqa: E501
+        # we query query_velodrome_like_data twice. First for velodrome and then for aerodrome
+        assert patched_velodrome_query.call_count == 2, 'Velodrome pools should have been queried despite should_update_protocol_cache being False'  # noqa: E501
         assert patched_query_yearn_vaults.call_count == 1, 'Yearn vaults refresh should have been triggered'  # noqa: E501
         assert patched_ilk_registry.call_count == 1, 'Ilk registry refresh should have been triggered'  # noqa: E501

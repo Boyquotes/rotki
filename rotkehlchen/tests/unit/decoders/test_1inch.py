@@ -1,7 +1,7 @@
 import pytest
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.assets.asset import Asset
+from rotkehlchen.assets.asset import Asset, EvmToken
 from rotkehlchen.chain.ethereum.modules.oneinch.constants import (
     CPT_ONEINCH_V1,
     CPT_ONEINCH_V2,
@@ -11,10 +11,11 @@ from rotkehlchen.chain.ethereum.modules.oneinch.constants import (
 )
 from rotkehlchen.chain.ethereum.modules.oneinch.v2.constants import ONEINCH_V2_MAINNET_ROUTER
 from rotkehlchen.chain.ethereum.modules.oneinch.v3.constants import ONEINCH_V3_MAINNET_ROUTER
-from rotkehlchen.chain.ethereum.modules.uniswap.constants import CPT_UNISWAP_V2
 from rotkehlchen.chain.evm.decoding.constants import CPT_GAS
+from rotkehlchen.chain.evm.decoding.oneinch.constants import CPT_ONEINCH_V6, ONEINCH_V6_ROUTER
 from rotkehlchen.chain.evm.decoding.oneinch.v4.constants import ONEINCH_V4_ROUTER
 from rotkehlchen.chain.evm.decoding.oneinch.v5.decoder import ONEINCH_V5_ROUTER
+from rotkehlchen.chain.evm.decoding.uniswap.constants import CPT_UNISWAP_V2
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants.assets import (
     A_DAI,
@@ -36,18 +37,14 @@ from rotkehlchen.types import Location, TimestampMS, deserialize_evm_tx_hash
 ADDY = '0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12'
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [[ADDY]])
-def test_1inchv1_swap(database, ethereum_inquirer):
+def test_1inchv1_swap(ethereum_inquirer):
     """Data taken from
     https://etherscan.io/tx/0x8b8652c502e80ce7c5441cdedc9184ea8f07a9c13b4c3446a47ae08c6c1d6efa
     """
     tx_hash = deserialize_evm_tx_hash('0x8b8652c502e80ce7c5441cdedc9184ea8f07a9c13b4c3446a47ae08c6c1d6efa')  # noqa: E501
-    events, _ = get_decoded_events_of_transaction(
-        evm_inquirer=ethereum_inquirer,
-        database=database,
-        tx_hash=tx_hash,
-    )
+    events, _ = get_decoded_events_of_transaction(evm_inquirer=ethereum_inquirer, tx_hash=tx_hash)
     chispender_addy = string_to_evm_address('0xed04A060050cc289d91779A8BB3942C3A6589254')
     oneinch_contract = string_to_evm_address('0x11111254369792b2Ca5d084aB5eEA397cA8fa48B')
     timestamp = TimestampMS(1594500575000)
@@ -107,9 +104,9 @@ def test_1inchv1_swap(database, ethereum_inquirer):
     assert expected_events == events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [[ADDY]])
-def test_1inchv2_swap_for_eth(database, ethereum_inquirer):
+def test_1inchv2_swap_for_eth(ethereum_inquirer):
     """
     Test an 1inchv2 swap for ETH.
 
@@ -117,11 +114,7 @@ def test_1inchv2_swap_for_eth(database, ethereum_inquirer):
     https://etherscan.io/tx/0x5edc23d5a05e347afc60e64a4d5831ed2551985c21dceb85d267926ca2e2c13e
     """
     tx_hash = deserialize_evm_tx_hash('0x5edc23d5a05e347afc60e64a4d5831ed2551985c21dceb85d267926ca2e2c13e')  # noqa: E501
-    events, _ = get_decoded_events_of_transaction(
-        evm_inquirer=ethereum_inquirer,
-        database=database,
-        tx_hash=tx_hash,
-    )
+    events, _ = get_decoded_events_of_transaction(evm_inquirer=ethereum_inquirer, tx_hash=tx_hash)
     timestamp = TimestampMS(1608498702000)
     expected_events = [
         EvmEvent(
@@ -144,9 +137,9 @@ def test_1inchv2_swap_for_eth(database, ethereum_inquirer):
             event_type=HistoryEventType.INFORMATIONAL,
             event_subtype=HistoryEventSubType.APPROVE,
             asset=A_PAN,
-            balance=Balance(amount=FVal('1.157920892373161954235709850E+59')),
+            balance=Balance(amount=FVal('115792089237316195423570985008687907853269984665640564037304.954007913129639935')),
             location_label=ADDY,
-            notes=f'Set PAN spending approval of {ADDY} by {ONEINCH_V2_MAINNET_ROUTER} to 115792089237316195423570985000000000000000000000000000000000',  # noqa: E501
+            notes=f'Set PAN spending approval of {ADDY} by {ONEINCH_V2_MAINNET_ROUTER} to 115792089237316195423570985008687907853269984665640564037304.954007913129639935',  # noqa: E501
             address=ONEINCH_V2_MAINNET_ROUTER,
         ), EvmEvent(
             tx_hash=tx_hash,
@@ -179,16 +172,12 @@ def test_1inchv2_swap_for_eth(database, ethereum_inquirer):
     assert expected_events == events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [['0x9531C059098e3d194fF87FebB587aB07B30B1306']])
-def test_1inchv3_swap_for_eth(database, ethereum_inquirer, ethereum_accounts):
+def test_1inchv3_swap_for_eth(ethereum_inquirer, ethereum_accounts):
     """Test an 1inchv3 swap for ETH."""
     tx_hash = deserialize_evm_tx_hash('0xc9403f8010c78cec3036fd502103b78566f9b50eae57068538735527b59435ae')  # noqa: E501
-    events, _ = get_decoded_events_of_transaction(
-        evm_inquirer=ethereum_inquirer,
-        database=database,
-        tx_hash=tx_hash,
-    )
+    events, _ = get_decoded_events_of_transaction(evm_inquirer=ethereum_inquirer, tx_hash=tx_hash)
     user_address = ethereum_accounts[0]
     timestamp = TimestampMS(1618011137000)
     expected_events = [
@@ -235,9 +224,9 @@ def test_1inchv3_swap_for_eth(database, ethereum_inquirer, ethereum_accounts):
     assert expected_events == events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('ethereum_accounts', [['0x312419eEC9C4632155904D9440dc1EeeafFBb280']])
-def test_1inchv4_swap_on_uniswapv3(database, ethereum_inquirer):
+def test_1inchv4_swap_on_uniswapv3(ethereum_inquirer):
     """
     Test an 1inch v4 swap for ETH via Uniswap v3.
 
@@ -245,11 +234,7 @@ def test_1inchv4_swap_on_uniswapv3(database, ethereum_inquirer):
     https://etherscan.io/tx/0xd02bbee01f92d778af8c2d159fb269ad31425b32703da568abb427ac14547e6d
     """
     tx_hash = deserialize_evm_tx_hash('0xd02bbee01f92d778af8c2d159fb269ad31425b32703da568abb427ac14547e6d')  # noqa: E501
-    events, _ = get_decoded_events_of_transaction(
-        evm_inquirer=ethereum_inquirer,
-        database=database,
-        tx_hash=tx_hash,
-    )
+    events, _ = get_decoded_events_of_transaction(evm_inquirer=ethereum_inquirer, tx_hash=tx_hash)
     timestamp = TimestampMS(1687361999000)
     user_address = '0x312419eEC9C4632155904D9440dc1EeeafFBb280'
     expected_events = [
@@ -296,9 +281,62 @@ def test_1inchv4_swap_on_uniswapv3(database, ethereum_inquirer):
     assert expected_events == events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('ethereum_accounts', [['0x456325F2AC7067234dD71E01bebe032B0255e039']])
+def test_1inchv4_orderfilledrfq(ethereum_inquirer, ethereum_accounts):
+    tx_hash = deserialize_evm_tx_hash('0x7e98fc61cdec43a7b886a9d045264bcc9292b2a34f8c466e4270ee6671684b69')  # noqa: E501
+    events, _ = get_decoded_events_of_transaction(
+        evm_inquirer=ethereum_inquirer,
+        tx_hash=tx_hash,
+    )
+    timestamp, user_address, gas, amount_out, amount_in = TimestampMS(1683201803000), ethereum_accounts[0], '0.010777074', '1457.408044', '634.912997630527012864'  # noqa: E501
+    expected_events = [
+        EvmEvent(
+            tx_hash=tx_hash,
+            sequence_index=0,
+            timestamp=timestamp,
+            location=Location.ETHEREUM,
+            event_type=HistoryEventType.SPEND,
+            event_subtype=HistoryEventSubType.FEE,
+            asset=A_ETH,
+            balance=Balance(amount=FVal(gas)),
+            location_label=user_address,
+            notes=f'Burned {gas} ETH for gas',
+            counterparty=CPT_GAS,
+        ), EvmEvent(
+            tx_hash=tx_hash,
+            sequence_index=1,
+            timestamp=timestamp,
+            location=Location.ETHEREUM,
+            event_type=HistoryEventType.TRADE,
+            event_subtype=HistoryEventSubType.SPEND,
+            asset=A_USDT,
+            balance=Balance(amount=FVal(amount_out)),
+            location_label=user_address,
+            notes=f'Swap {amount_out} USDT in {CPT_ONEINCH_V4}',
+            address=ONEINCH_V4_ROUTER,
+            counterparty=CPT_ONEINCH_V4,
+        ), EvmEvent(
+            tx_hash=tx_hash,
+            sequence_index=2,
+            timestamp=timestamp,
+            location=Location.ETHEREUM,
+            event_type=HistoryEventType.TRADE,
+            event_subtype=HistoryEventSubType.RECEIVE,
+            asset=EvmToken('eip155:1/erc20:0x6De037ef9aD2725EB40118Bb1702EBb27e4Aeb24'),
+            balance=Balance(amount=FVal(amount_in)),
+            location_label=user_address,
+            notes=f'Receive {amount_in} RNDR as a result of a {CPT_ONEINCH_V4} swap',
+            address=ONEINCH_V4_ROUTER,
+            counterparty=CPT_ONEINCH_V4,
+        ),
+    ]
+    assert expected_events == events
+
+
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [['0xF92940216a808378bfFD05f444B7bF71d5A193Cd']])
-def test_1inchv4_swap_on_sushiswap(database, ethereum_inquirer):
+def test_1inchv4_swap_on_sushiswap(ethereum_inquirer):
     """
     Test an 1inch v4 swap for ETH via Sushiswap.
 
@@ -308,7 +346,6 @@ def test_1inchv4_swap_on_sushiswap(database, ethereum_inquirer):
     tx_hash = deserialize_evm_tx_hash('0x396f57534e5deff9b530357bda8dcd31b80892ba7ce3de6f6593b0225bba3d0f')  # noqa: E501
     events, _ = get_decoded_events_of_transaction(
         evm_inquirer=ethereum_inquirer,
-        database=database,
         tx_hash=tx_hash,
     )
     timestamp = TimestampMS(1687551611000)
@@ -357,9 +394,9 @@ def test_1inchv4_swap_on_sushiswap(database, ethereum_inquirer):
     assert expected_events == events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [['0x201b5Abfd44A8F9b75F0fE1BaE74CDaC7675E54B']])
-def test_1inchv4_multiple_swaps(database, ethereum_inquirer):
+def test_1inchv4_multiple_swaps(ethereum_inquirer):
     """
     Test an 1inch v4 swap via multiple pools.
 
@@ -369,7 +406,6 @@ def test_1inchv4_multiple_swaps(database, ethereum_inquirer):
     tx_hash = deserialize_evm_tx_hash('0xeeefe25741462f0832183925ac4b1b840b819fbacd95cfc635496d853b7022bd')  # noqa: E501
     events, _ = get_decoded_events_of_transaction(
         evm_inquirer=ethereum_inquirer,
-        database=database,
         tx_hash=tx_hash,
     )
     timestamp = TimestampMS(1687762727000)
@@ -395,9 +431,9 @@ def test_1inchv4_multiple_swaps(database, ethereum_inquirer):
             event_type=HistoryEventType.INFORMATIONAL,
             event_subtype=HistoryEventSubType.APPROVE,
             asset=Asset('eip155:1/erc20:0xE60779CC1b2c1d0580611c526a8DF0E3f870EC48'),
-            balance=Balance(amount=FVal('1.157920892373161954235709850E+59')),
+            balance=Balance(amount=FVal('115792089237316195423570985008687907853269984665640563937640.413716264772814197')),
             location_label=user_address,
-            notes=f'Set USH spending approval of {user_address} by {ONEINCH_V4_ROUTER} to 115792089237316195423570985000000000000000000000000000000000',  # noqa: E501
+            notes=f'Set USH spending approval of {user_address} by {ONEINCH_V4_ROUTER} to 115792089237316195423570985008687907853269984665640563937640.413716264772814197',  # noqa: E501
             address=ONEINCH_V4_ROUTER,
         ), EvmEvent(
             tx_hash=tx_hash,
@@ -412,8 +448,7 @@ def test_1inchv4_multiple_swaps(database, ethereum_inquirer):
             notes=f'Swap 50000 USH in {CPT_ONEINCH_V4}',
             address=ONEINCH_V4_ROUTER,
             counterparty=CPT_ONEINCH_V4,
-        ),
-        EvmEvent(
+        ), EvmEvent(
             tx_hash=tx_hash,
             sequence_index=36,
             timestamp=timestamp,
@@ -431,9 +466,9 @@ def test_1inchv4_multiple_swaps(database, ethereum_inquirer):
     assert expected_events == events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [['0xcA74F404E0C7bfA35B13B511097df966D5a65597']])
-def test_1inchv4_weth_eth_swap(database, ethereum_inquirer):
+def test_1inchv4_weth_eth_swap(ethereum_inquirer):
     """
     Test an 1inch v4 WETH to ETH swap via the WETH contract.
 
@@ -443,7 +478,6 @@ def test_1inchv4_weth_eth_swap(database, ethereum_inquirer):
     tx_hash = deserialize_evm_tx_hash('0x7097e7e9ef2b8bb096ed98950875b4512a833d41ceb3246903e06b61665cd5cd')  # noqa: E501
     events, _ = get_decoded_events_of_transaction(
         evm_inquirer=ethereum_inquirer,
-        database=database,
         tx_hash=tx_hash,
     )
     timestamp = TimestampMS(1687870007000)
@@ -492,9 +526,9 @@ def test_1inchv4_weth_eth_swap(database, ethereum_inquirer):
     assert expected_events == events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [['0xdCB02829F91533Ab757b1B0e8B595D7c950AfBb8']])
-def test_1inchv4_eth_weth_swap(database, ethereum_inquirer):
+def test_1inchv4_eth_weth_swap(ethereum_inquirer):
     """
     Test an 1inch v4 ETH to WETH swap via the WETH contract.
 
@@ -504,7 +538,6 @@ def test_1inchv4_eth_weth_swap(database, ethereum_inquirer):
     tx_hash = deserialize_evm_tx_hash('0x6446f928148dc9f7e1ad719730d661d6d3409a9c62293ca8e8c259d06c6bd004')  # noqa: E501
     events, _ = get_decoded_events_of_transaction(
         evm_inquirer=ethereum_inquirer,
-        database=database,
         tx_hash=tx_hash,
     )
     timestamp = TimestampMS(1688039855000)
@@ -553,16 +586,15 @@ def test_1inchv4_eth_weth_swap(database, ethereum_inquirer):
     assert expected_events == events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('polygon_pos_accounts', [['0xc37b40ABdB939635068d3c5f13E7faF686F03B65']])
-def test_1inch_swap_polygon(database, polygon_pos_inquirer, polygon_pos_accounts):
+def test_1inch_swap_polygon(polygon_pos_inquirer, polygon_pos_accounts):
     """Data taken from
     https://polygonscan.com/tx/0xe13e0ebab7a6abc0c0a22fcf0766b9a585a430415c88f3f90328b310119a85af
     """
     tx_hash = deserialize_evm_tx_hash('0xe13e0ebab7a6abc0c0a22fcf0766b9a585a430415c88f3f90328b310119a85af')  # noqa: E501
     events, _ = get_decoded_events_of_transaction(
         evm_inquirer=polygon_pos_inquirer,
-        database=database,
         tx_hash=tx_hash,
     )
     user_addy = polygon_pos_accounts[0]
@@ -590,10 +622,10 @@ def test_1inch_swap_polygon(database, polygon_pos_inquirer, polygon_pos_accounts
             event_type=HistoryEventType.INFORMATIONAL,
             event_subtype=HistoryEventSubType.APPROVE,
             asset=pos_usdt,
-            balance=Balance(FVal('115792089237316195423570985000000000000000000000000000000000000000000000')),
+            balance=Balance(amount=FVal('115792089237316195423570985008687907853269984665640564039457584007913032.844935')),
             location_label=user_addy,
             address=ONEINCH_V4_ROUTER,
-            notes=f'Set USDT spending approval of {user_addy} by {ONEINCH_V4_ROUTER} to 115792089237316195423570985000000000000000000000000000000000000000000000',  # noqa: E501
+            notes=f'Set USDT spending approval of {user_addy} by {ONEINCH_V4_ROUTER} to 115792089237316195423570985008687907853269984665640564039457584007913032.844935',  # noqa: E501
         ), EvmEvent(
             tx_hash=tx_hash,
             sequence_index=278,
@@ -625,12 +657,12 @@ def test_1inch_swap_polygon(database, polygon_pos_inquirer, polygon_pos_accounts
     assert expected_events == events
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('gnosis_accounts', [['0xc37b40ABdB939635068d3c5f13E7faF686F03B65']])
-def test_1inch_gnosis_v5_swap(database, gnosis_inquirer, gnosis_accounts):
+def test_1inch_gnosis_v5_swap(gnosis_inquirer, gnosis_accounts):
     tx_hash = deserialize_evm_tx_hash('0x4b1fcb8836d7cc323015c0d019f595273d176bd6024f7b59b4b15d3f7071ef71')  # noqa: E501
     events, _ = get_decoded_events_of_transaction(
         evm_inquirer=gnosis_inquirer,
-        database=database,
         tx_hash=tx_hash,
     )
     user_addy = gnosis_accounts[0]
@@ -679,13 +711,12 @@ def test_1inch_gnosis_v5_swap(database, gnosis_inquirer, gnosis_accounts):
     assert expected_events == events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('optimism_accounts', [['0x3Ba6eB0e4327B96aDe6D4f3b578724208a590CEF']])
-def test_1inch_velodrome(database, optimism_inquirer, optimism_accounts):
+def test_1inch_velodrome(optimism_inquirer, optimism_accounts):
     tx_hash = deserialize_evm_tx_hash('0x3cb68ee7dae76c0ca6466e3a593b32144d25eabb27c1ba416c83f154627d84d8')  # noqa: E501
     events, _ = get_decoded_events_of_transaction(
         evm_inquirer=optimism_inquirer,
-        database=database,
         tx_hash=tx_hash,
     )
     user_addy = optimism_accounts[0]
@@ -734,9 +765,9 @@ def test_1inch_velodrome(database, optimism_inquirer, optimism_accounts):
     assert expected_events == events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [['0xC5d494aa0CBabD7871af0Ef122fB410Fa25c3379']])
-def test_half_decoded_1inch_v5_swap(database, ethereum_inquirer, ethereum_accounts):
+def test_half_decoded_1inch_v5_swap(ethereum_inquirer, ethereum_accounts):
     """
     Test that if a swap using 1inch v5 has been  half decoded by other decoder (uniswap) first
     then the two legs of the swap are properly handled by the 1inch decoder.
@@ -744,7 +775,6 @@ def test_half_decoded_1inch_v5_swap(database, ethereum_inquirer, ethereum_accoun
     tx_hash = deserialize_evm_tx_hash('0x0a86fef1df2e7f186cf7239083f67c424c735f91461388c5b23e01c4d6a4e7d8')  # noqa: E501
     events, _ = get_decoded_events_of_transaction(
         evm_inquirer=ethereum_inquirer,
-        database=database,
         tx_hash=tx_hash,
     )
     timestamp = TimestampMS(1701001727000)
@@ -770,9 +800,9 @@ def test_half_decoded_1inch_v5_swap(database, ethereum_inquirer, ethereum_accoun
             event_type=HistoryEventType.INFORMATIONAL,
             event_subtype=HistoryEventSubType.APPROVE,
             asset=A_LUSD,
-            balance=Balance(amount=FVal('115792089237316195423570985000000000000000000000000000000000')),
+            balance=Balance(amount=FVal('115792089237316195423570985008687907853269984665640564038929.427407919914021705')),
             location_label=user_address,
-            notes='Set LUSD spending approval of 0xC5d494aa0CBabD7871af0Ef122fB410Fa25c3379 by 0x1111111254EEB25477B68fb85Ed929f73A960582 to 115792089237316195423570985000000000000000000000000000000000',  # noqa: E501
+            notes='Set LUSD spending approval of 0xC5d494aa0CBabD7871af0Ef122fB410Fa25c3379 by 0x1111111254EEB25477B68fb85Ed929f73A960582 to 115792089237316195423570985008687907853269984665640564038929.427407919914021705',  # noqa: E501
             address=ONEINCH_V5_ROUTER,
             counterparty=None,
         ), EvmEvent(
@@ -804,3 +834,133 @@ def test_half_decoded_1inch_v5_swap(database, ethereum_inquirer, ethereum_accoun
         ),
     ]
     assert events == expetec_events
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('base_accounts', [['0xc37b40ABdB939635068d3c5f13E7faF686F03B65']])
+def test_1inch_base_v6_swap(base_inquirer, base_accounts):
+    tx_hash = deserialize_evm_tx_hash('0x5b41c094c49462cd97fc19dc898ef23c24f859b46dbd38ecf5d34d3d0fd291f5')  # noqa: E501
+    events, _ = get_decoded_events_of_transaction(
+        evm_inquirer=base_inquirer,
+        tx_hash=tx_hash,
+    )
+    timestamp, gas, swap_amount, receive_amount = TimestampMS(1716833467000), '0.000019908608867869', '311804', '0.002362174980374604'  # noqa: E501
+    expected_events = [
+        EvmEvent(
+            tx_hash=tx_hash,
+            sequence_index=0,
+            timestamp=timestamp,
+            location=Location.BASE,
+            event_type=HistoryEventType.SPEND,
+            event_subtype=HistoryEventSubType.FEE,
+            asset=A_ETH,
+            balance=Balance(amount=FVal(gas)),
+            location_label=base_accounts[0],
+            notes=f'Burned {gas} ETH for gas',
+            counterparty=CPT_GAS,
+        ), EvmEvent(
+            tx_hash=tx_hash,
+            sequence_index=2,
+            timestamp=timestamp,
+            location=Location.BASE,
+            event_type=HistoryEventType.INFORMATIONAL,
+            event_subtype=HistoryEventSubType.APPROVE,
+            asset=Asset('eip155:8453/erc20:0xAd1C24dE53fAD18270D5C99026302E989D212b41'),
+            balance=Balance(amount=FVal(0)),
+            location_label=base_accounts[0],
+            notes=f'Revoke BERD spending approval of {base_accounts[0]} by {ONEINCH_V6_ROUTER}',
+            address=ONEINCH_V6_ROUTER,
+        ), EvmEvent(
+            tx_hash=tx_hash,
+            sequence_index=3,
+            timestamp=timestamp,
+            location=Location.BASE,
+            event_type=HistoryEventType.TRADE,
+            event_subtype=HistoryEventSubType.SPEND,
+            asset=Asset('eip155:8453/erc20:0xAd1C24dE53fAD18270D5C99026302E989D212b41'),
+            balance=Balance(amount=FVal(swap_amount)),
+            location_label=base_accounts[0],
+            notes=f'Swap {swap_amount} BERD in 1inch-v6',
+            counterparty=CPT_ONEINCH_V6,
+            address=ONEINCH_V6_ROUTER,
+        ), EvmEvent(
+            tx_hash=tx_hash,
+            sequence_index=4,
+            timestamp=timestamp,
+            location=Location.BASE,
+            event_type=HistoryEventType.TRADE,
+            event_subtype=HistoryEventSubType.RECEIVE,
+            asset=A_ETH,
+            balance=Balance(amount=FVal(receive_amount)),
+            location_label=base_accounts[0],
+            notes=f'Receive {receive_amount} ETH as a result of a 1inch-v6 swap',
+            counterparty=CPT_ONEINCH_V6,
+            address=ONEINCH_V6_ROUTER,
+        ),
+    ]
+    assert expected_events == events
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('polygon_pos_accounts', [['0x9531C059098e3d194fF87FebB587aB07B30B1306']])
+def test_1inchv4_swap_on_polygon(polygon_pos_inquirer, polygon_pos_accounts):
+    tx_hash = deserialize_evm_tx_hash('0x4c1fcbc20fdd397229d9e3e88411fea589e7ceb901e770f6af2e70e89008d5fa')  # noqa: E501
+    events, _ = get_decoded_events_of_transaction(
+        evm_inquirer=polygon_pos_inquirer,
+        tx_hash=tx_hash,
+    )
+    timestamp, user, gas, amount_in, amount_out = TimestampMS(1653476213000), polygon_pos_accounts[0], '0.015694020167926014', '174.218999', '174.206'  # noqa: E501
+    expected_events = [
+        EvmEvent(
+            tx_hash=tx_hash,
+            sequence_index=0,
+            timestamp=timestamp,
+            location=Location.POLYGON_POS,
+            event_type=HistoryEventType.SPEND,
+            event_subtype=HistoryEventSubType.FEE,
+            asset=A_POLYGON_POS_MATIC,
+            balance=Balance(amount=FVal(gas)),
+            location_label=user,
+            notes=f'Burned {gas} MATIC for gas',
+            counterparty=CPT_GAS,
+        ), EvmEvent(
+            tx_hash=tx_hash,
+            sequence_index=20,
+            timestamp=timestamp,
+            location=Location.POLYGON_POS,
+            event_type=HistoryEventType.INFORMATIONAL,
+            event_subtype=HistoryEventSubType.APPROVE,
+            asset=Asset('eip155:137/erc20:0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063'),  # DAI
+            balance=Balance(FVal('115792089237316195423570985008687907853269984665640564039283.378007913129639935')),
+            location_label=user,
+            notes=f'Set DAI spending approval of {user} by {ONEINCH_V4_ROUTER} to 115792089237316195423570985008687907853269984665640564039283.378007913129639935',  # noqa: E501
+            address=ONEINCH_V4_ROUTER,
+        ), EvmEvent(
+            tx_hash=tx_hash,
+            sequence_index=21,
+            timestamp=timestamp,
+            location=Location.POLYGON_POS,
+            event_type=HistoryEventType.TRADE,
+            event_subtype=HistoryEventSubType.SPEND,
+            asset=Asset('eip155:137/erc20:0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063'),  # DAI
+            balance=Balance(amount=FVal(amount_out)),
+            location_label=user,
+            notes=f'Swap {amount_out} DAI in {CPT_ONEINCH_V4}',
+            address=ONEINCH_V4_ROUTER,
+            counterparty=CPT_ONEINCH_V4,
+        ), EvmEvent(
+            tx_hash=tx_hash,
+            sequence_index=22,
+            timestamp=timestamp,
+            location=Location.POLYGON_POS,
+            event_type=HistoryEventType.TRADE,
+            event_subtype=HistoryEventSubType.RECEIVE,
+            asset=Asset('eip155:137/erc20:0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'),  # USDC
+            balance=Balance(amount=FVal(amount_in)),
+            location_label=user,
+            notes=f'Receive {amount_in} USDC as a result of a {CPT_ONEINCH_V4} swap',
+            address=ONEINCH_V4_ROUTER,
+            counterparty=CPT_ONEINCH_V4,
+        ),
+    ]
+    assert expected_events == events

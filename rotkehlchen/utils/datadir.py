@@ -3,6 +3,8 @@ from pathlib import Path
 from shutil import Error, copytree, move, rmtree
 
 from rotkehlchen.constants.misc import (
+    AIRDROPSDIR_NAME,
+    AIRDROPSPOAPDIR_NAME,
     ALLASSETIMAGESDIR_NAME,
     APPDIR_NAME,
     ASSETIMAGESDIR_NAME,
@@ -95,16 +97,19 @@ def maybe_restructure_rotki_data_directory(data_dir: Path) -> None:
     for x in data_dir.iterdir():
         try:
             if not x.is_dir():
-                other_paths.append(x)
+                if x.name == 'cryptocompare_coinlist.json':
+                    x.unlink()  # no longer needed -- is in DB cache
+                else:
+                    other_paths.append(x)
                 continue
 
-            if (x / USERDB_NAME).exists():
-                user_paths.append(x)
+            if (x / USERDB_NAME).exists():  # putting first to never lose any
+                user_paths.append(x)  # user data in case they use weird user names
             elif x.name == 'global_data':
                 global_path = x
-            elif x.name == 'airdrops':
+            elif x.name == AIRDROPSDIR_NAME:
                 airdrops_path = x
-            elif x.name == 'airdrops_poap':
+            elif x.name == AIRDROPSPOAPDIR_NAME:
                 airdrops_poap_path = x
             elif x.name == MISCDIR_NAME:
                 misc_path = x
@@ -113,8 +118,9 @@ def maybe_restructure_rotki_data_directory(data_dir: Path) -> None:
             else:
                 other_paths.append(x)
 
-        except PermissionError:
+        except PermissionError as e:
             # ignore directories that can't be accessed
+            log.debug(f'Ignoring directory {x} during data dir restructuring due to {e!s}')
             continue
 
     # create the user_data directory and move users there

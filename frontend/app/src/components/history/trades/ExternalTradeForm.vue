@@ -1,22 +1,18 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { helpers, required, requiredIf } from '@vuelidate/validators';
 import dayjs from 'dayjs';
-import { type Writeable } from '@/types';
-import {
-  type NewTrade,
-  type Trade,
-  type TradeType
-} from '@/types/history/trade';
 import { TaskType } from '@/types/task-type';
 import { toMessages } from '@/utils/validation';
+import type { Writeable } from '@rotki/common';
+import type { NewTrade, Trade, TradeType } from '@/types/history/trade';
 
 const props = withDefaults(
   defineProps<{
     editableItem?: Trade | null;
   }>(),
   {
-    editableItem: null
-  }
+    editableItem: null,
+  },
 );
 
 const { t } = useI18n();
@@ -50,47 +46,32 @@ const quoteSymbol = assetSymbol(quote);
 
 const rules = {
   baseAsset: {
-    required: helpers.withMessage(
-      t('external_trade_form.validation.non_empty_base').toString(),
-      required
-    )
+    required: helpers.withMessage(t('external_trade_form.validation.non_empty_base'), required),
   },
   quoteAsset: {
-    required: helpers.withMessage(
-      t('external_trade_form.validation.non_empty_quote').toString(),
-      required
-    )
+    required: helpers.withMessage(t('external_trade_form.validation.non_empty_quote'), required),
   },
   amount: {
-    required: helpers.withMessage(
-      t('external_trade_form.validation.non_empty_amount').toString(),
-      required
-    )
+    required: helpers.withMessage(t('external_trade_form.validation.non_empty_amount'), required),
   },
   rate: {
-    required: helpers.withMessage(
-      t('external_trade_form.validation.non_empty_rate').toString(),
-      required
-    )
+    required: helpers.withMessage(t('external_trade_form.validation.non_empty_rate'), required),
   },
   quoteAmount: {
-    required: helpers.withMessage(
-      t('external_trade_form.validation.non_empty_quote_amount').toString(),
-      required
-    )
+    required: helpers.withMessage(t('external_trade_form.validation.non_empty_quote_amount'), required),
   },
   fee: {
     required: helpers.withMessage(
-      t('external_trade_form.validation.non_empty_fee').toString(),
-      requiredIf(refIsTruthy(feeCurrency))
-    )
+      t('external_trade_form.validation.non_empty_fee'),
+      requiredIf(refIsTruthy(feeCurrency)),
+    ),
   },
   feeCurrency: {
     required: helpers.withMessage(
-      t('external_trade_form.validation.non_empty_fee_currency').toString(),
-      requiredIf(refIsTruthy(fee))
-    )
-  }
+      t('external_trade_form.validation.non_empty_fee_currency'),
+      requiredIf(refIsTruthy(fee)),
+    ),
+  },
 };
 
 const { setValidation, setSubmitFunc } = useTradesForm();
@@ -104,27 +85,25 @@ const v$ = setValidation(
     rate,
     quoteAmount,
     fee,
-    feeCurrency
+    feeCurrency,
   },
   {
     $autoDirty: true,
-    $externalResults: errorMessages
-  }
+    $externalResults: errorMessages,
+  },
 );
 
-const triggerFeeValidator = () => {
+function triggerFeeValidator() {
   get(feeInput)?.textInput?.validate(true);
   get(feeCurrencyInput)?.autoCompleteInput?.validate(true);
-};
+}
 
 const quoteHint = computed<string>(() =>
-  get(type) === 'buy'
-    ? t('external_trade_form.buy_quote').toString()
-    : t('external_trade_form.sell_quote').toString()
+  get(type) === 'buy' ? t('external_trade_form.buy_quote') : t('external_trade_form.sell_quote'),
 );
 
 const shouldRenderSummary = computed<boolean>(
-  () => !!(get(type) && get(base) && get(quote) && get(amount) && get(rate))
+  () => !!(get(type) && get(base) && get(quote) && get(amount) && get(rate)),
 );
 
 const fetching = isTaskRunning(TaskType.FETCH_HISTORIC_PRICE);
@@ -134,7 +113,7 @@ const numericQuoteAmount = bigNumberifyFromRef(quoteAmount);
 const numericFee = bigNumberifyFromRef(fee);
 const numericRate = bigNumberifyFromRef(rate);
 
-const reset = () => {
+function reset() {
   set(id, '');
   set(datetime, convertFromTimestamp(dayjs().unix()));
   set(amount, '');
@@ -145,9 +124,9 @@ const reset = () => {
   set(notes, '');
   set(type, 'buy');
   set(errorMessages, {});
-};
+}
 
-const setEditMode = () => {
+function setEditMode() {
   const trade = get(editableItem);
   if (!trade) {
     reset();
@@ -165,29 +144,29 @@ const setEditMode = () => {
   set(notes, trade.notes ?? '');
   set(type, trade.tradeType);
   set(id, trade.tradeId);
-};
+}
 
 const { setMessage } = useMessageStore();
 
 const { addExternalTrade, editExternalTrade } = useTrades();
 
-const save = async (): Promise<boolean> => {
+async function save(): Promise<boolean> {
   const amount = get(numericAmount);
   const fee = get(numericFee);
   const rate = get(numericRate);
 
   const tradePayload: Writeable<NewTrade> = {
     amount: amount.isNaN() ? Zero : amount,
-    fee: fee.isNaN() || fee.isZero() ? undefined : fee,
-    feeCurrency: get(feeCurrency) || undefined,
-    link: get(link) || undefined,
-    notes: get(notes) || undefined,
+    fee: fee.isNaN() || fee.isZero() ? null : fee,
+    feeCurrency: get(feeCurrency) || null,
+    link: get(link) || null,
+    notes: get(notes) || null,
     baseAsset: get(base),
     quoteAsset: get(quote),
     rate: rate.isNaN() ? Zero : rate,
     location: 'external',
     timestamp: convertToTimestamp(get(datetime)),
-    tradeType: get(type)
+    tradeType: get(type),
   };
 
   const identifier = get(id);
@@ -203,41 +182,28 @@ const save = async (): Promise<boolean> => {
   if (result.message) {
     if (typeof result.message === 'string') {
       setMessage({
-        description: result.message
+        description: result.message,
       });
-    } else {
+    }
+    else {
       set(errorMessages, result.message);
       await get(v$).$validate();
     }
   }
 
   return false;
-};
+}
 
 setSubmitFunc(save);
 
-const updateRate = (forceUpdate = false) => {
-  if (
-    get(amount) &&
-    get(rate) &&
-    (!get(quoteAmountInputFocused) || forceUpdate)
-  ) {
-    set(
-      quoteAmount,
-      get(numericAmount).multipliedBy(get(numericRate)).toFixed()
-    );
-  }
-};
+function updateRate(forceUpdate = false) {
+  if (get(amount) && get(rate) && (!get(quoteAmountInputFocused) || forceUpdate))
+    set(quoteAmount, get(numericAmount).multipliedBy(get(numericRate)).toFixed());
+}
 
-const fetchPrice = async () => {
-  if (
-    (get(rate) && get(editableItem)) ||
-    !get(datetime) ||
-    !get(base) ||
-    !get(quote)
-  ) {
+async function fetchPrice() {
+  if ((get(rate) && get(editableItem)) || !get(datetime) || !get(base) || !get(quote))
     return;
-  }
 
   const timestamp = convertToTimestamp(get(datetime));
   const fromAsset = get(base);
@@ -246,28 +212,28 @@ const fetchPrice = async () => {
   const rateFromHistoricPrice = await getHistoricPrice({
     timestamp,
     fromAsset,
-    toAsset
+    toAsset,
   });
 
   if (rateFromHistoricPrice.gt(0)) {
     set(rate, rateFromHistoricPrice.toFixed());
     updateRate(true);
-  } else if (!get(rate)) {
+  }
+  else if (!get(rate)) {
     set(errorMessages, {
-      rate: [t('external_trade_form.rate_not_found').toString()]
+      rate: [t('external_trade_form.rate_not_found')],
     });
     await get(v$).rate.$validate();
     useTimeoutFn(() => {
       set(errorMessages, {});
     }, 4000);
   }
-};
+}
 
-const onQuoteAmountChange = () => {
-  if (get(amount) && get(quoteAmount) && get(quoteAmountInputFocused)) {
+function onQuoteAmountChange() {
+  if (get(amount) && get(quoteAmount) && get(quoteAmountInputFocused))
     set(rate, get(numericQuoteAmount).div(get(numericAmount)).toFixed());
-  }
-};
+}
 
 watch([datetime, quote, base], async () => {
   await fetchPrice();
@@ -291,48 +257,48 @@ onMounted(setEditMode);
 </script>
 
 <template>
-  <form data-cy="trade-form" class="external-trade-form">
+  <form
+    data-cy="trade-form"
+    class="external-trade-form"
+  >
     <DateTimePicker
       v-model="datetime"
-      outlined
       limit-now
       data-cy="date"
-      :label="t('external_trade_form.date.label')"
+      :label="t('common.datetime')"
       persistent-hint
       :hint="t('external_trade_form.date.hint')"
-      :error-messages="errorMessages['timestamp']"
+      :error-messages="errorMessages.timestamp"
     />
 
-    <div class="grid md:grid-cols-3 gap-x-4 gap-y-2">
+    <div class="grid md:grid-cols-4 gap-x-4 gap-y-2">
       <div data-cy="type">
-        <VRadioGroup
+        <RuiRadioGroup
           v-model="type"
-          class="md:mt-7"
+          class="pt-3"
+          color="primary"
           hide-details
-          :column="false"
+          inline
           required
           :label="t('external_trade_form.trade_type.label')"
         >
-          <VRadio
-            class="ml-4"
+          <RuiRadio
             :label="t('external_trade_form.trade_type.buy')"
             value="buy"
+            data-cy="trade-input-buy"
           />
-          <VRadio
-            class="ml-4"
+          <RuiRadio
             :label="t('external_trade_form.trade_type.sell')"
             value="sell"
+            data-cy="trade-input-sell"
           />
-        </VRadioGroup>
+        </RuiRadioGroup>
       </div>
-      <div
-        class="col-span-2 flex flex-col md:flex-row md:items-start gap-x-4 pt-4"
-      >
+      <div class="col-span-3 flex flex-col md:flex-row md:items-start gap-x-4 pt-4">
         <AssetSelect
           v-model="base"
           class="flex-1"
           outlined
-          required
           data-cy="base-asset"
           :error-messages="toMessages(v$.baseAsset)"
           :hint="t('external_trade_form.base_asset.hint')"
@@ -345,7 +311,6 @@ onMounted(setEditMode);
         <AssetSelect
           v-model="quote"
           class="flex-1"
-          required
           outlined
           data-cy="quote-asset"
           :error-messages="toMessages(v$.quoteAsset)"
@@ -359,69 +324,52 @@ onMounted(setEditMode);
     <div class="mt-2">
       <AmountInput
         v-model="amount"
-        required
-        outlined
+        variant="outlined"
+        class="mb-2"
         :error-messages="toMessages(v$.amount)"
         data-cy="amount"
         :label="t('common.amount')"
-        persistent-hint
         :hint="t('external_trade_form.amount.hint')"
         @blur="v$.amount.$touch()"
       />
       <TwoFieldsAmountInput
-        class="mb-5"
-        :primary-value.sync="rate"
-        :secondary-value.sync="quoteAmount"
+        v-model:primary-value="rate"
+        v-model:secondary-value="quoteAmount"
+        class="-mb-5"
         :loading="fetching"
         :disabled="fetching"
         data-cy="trade-rate"
         :label="{
           primary: t('external_trade_form.rate.label'),
-          secondary: t('external_trade_form.quote_amount.label')
+          secondary: t('external_trade_form.quote_amount.label'),
         }"
         :error-messages="{
           primary: toMessages(v$.rate),
-          secondary: toMessages(v$.quoteAmount)
+          secondary: toMessages(v$.quoteAmount),
         }"
         @update:reversed="quoteAmountInputFocused = $event"
       />
       <div
         v-if="shouldRenderSummary"
-        class="flex items-center gap-2 text-caption text-rui-success -mt-4 -mb-6 ml-3"
+        class="flex items-center gap-1 text-caption text-rui-success -mt-5 -mb-5 ml-3"
       >
-        <RuiIcon size="16" name="chat-quote-line" />
-        <i18n v-if="type === 'buy'" path="external_trade_form.summary.buy">
-          <template #label>
-            <strong>{{ t('external_trade_form.summary.label') }}</strong>
-          </template>
-          <template #amount>
-            <strong>
-              <AmountDisplay :value="numericAmount" :tooltip="false" />
-            </strong>
-          </template>
-          <template #base>
-            <strong>{{ baseSymbol }}</strong>
-          </template>
-          <template #quote>
-            <strong>{{ quoteSymbol }}</strong>
-          </template>
-          <template #rate>
-            <strong>
-              <AmountDisplay :value="numericRate" :tooltip="false" />
-            </strong>
-          </template>
-        </i18n>
-        <i18n
-          v-if="type === 'sell'"
-          tag="span"
-          path="external_trade_form.summary.sell"
+        <RuiIcon
+          size="16"
+          name="chat-quote-line"
+        />
+        <i18n-t
+          v-if="type === 'buy'"
+          keypath="external_trade_form.summary.buy"
         >
           <template #label>
             <strong>{{ t('external_trade_form.summary.label') }}</strong>
           </template>
           <template #amount>
             <strong>
-              <AmountDisplay :value="numericAmount" :tooltip="false" />
+              <AmountDisplay
+                :value="numericAmount"
+                :tooltip="false"
+              />
             </strong>
           </template>
           <template #base>
@@ -432,40 +380,71 @@ onMounted(setEditMode);
           </template>
           <template #rate>
             <strong>
-              <AmountDisplay :value="numericRate" :tooltip="false" />
+              <AmountDisplay
+                :value="numericRate"
+                :tooltip="false"
+              />
             </strong>
           </template>
-        </i18n>
+        </i18n-t>
+        <i18n-t
+          v-if="type === 'sell'"
+          tag="span"
+          keypath="external_trade_form.summary.sell"
+        >
+          <template #label>
+            <strong>{{ t('external_trade_form.summary.label') }}</strong>
+          </template>
+          <template #amount>
+            <strong>
+              <AmountDisplay
+                :value="numericAmount"
+                :tooltip="false"
+              />
+            </strong>
+          </template>
+          <template #base>
+            <strong>{{ baseSymbol }}</strong>
+          </template>
+          <template #quote>
+            <strong>{{ quoteSymbol }}</strong>
+          </template>
+          <template #rate>
+            <strong>
+              <AmountDisplay
+                :value="numericRate"
+                :tooltip="false"
+              />
+            </strong>
+          </template>
+        </i18n-t>
       </div>
     </div>
 
-    <VDivider class="mb-6 mt-8" />
+    <RuiDivider class="mb-6 mt-8" />
 
     <div class="grid md:grid-cols-2 gap-x-4 gap-y-2 mb-2">
       <AmountInput
         ref="feeInput"
         v-model="fee"
         class="external-trade-form__fee"
-        persistent-hint
-        outlined
+        variant="outlined"
         data-cy="fee"
         :required="!!feeCurrency"
         :label="t('external_trade_form.fee.label')"
         :hint="t('external_trade_form.fee.hint')"
         :error-messages="toMessages(v$.fee)"
-        @input="triggerFeeValidator()"
+        @update:model-value="triggerFeeValidator()"
       />
       <AssetSelect
         ref="feeCurrencyInput"
         v-model="feeCurrency"
         data-cy="fee-currency"
         outlined
-        persistent-hint
         :label="t('external_trade_form.fee_currency.label')"
         :hint="t('external_trade_form.fee_currency.hint')"
-        :required="!!fee"
         :error-messages="toMessages(v$.feeCurrency)"
-        @input="triggerFeeValidator()"
+        @update:model-value="triggerFeeValidator()"
       />
     </div>
 
@@ -476,9 +455,8 @@ onMounted(setEditMode);
       color="primary"
       prepend-icon="link"
       :label="t('external_trade_form.link.label')"
-      persistent-hint
       :hint="t('external_trade_form.link.hint')"
-      :error-messages="errorMessages['link']"
+      :error-messages="errorMessages.link"
     />
 
     <RuiTextArea
@@ -490,9 +468,8 @@ onMounted(setEditMode);
       data-cy="notes"
       class="mt-4"
       :label="t('external_trade_form.notes.label')"
-      persistent-hint
       :hint="t('external_trade_form.notes.hint')"
-      :error-messages="errorMessages['notes']"
+      :error-messages="errorMessages.notes"
     />
   </form>
 </template>

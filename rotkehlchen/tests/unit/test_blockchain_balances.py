@@ -6,8 +6,7 @@ import pytest
 from rotkehlchen.accounting.structures.balance import Balance, BalanceSheet
 from rotkehlchen.assets.asset import Asset, EvmToken
 from rotkehlchen.chain.balances import BlockchainBalances
-from rotkehlchen.chain.evm.types import NodeName, WeightedNode, string_to_evm_address
-from rotkehlchen.constants import ONE
+from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants.assets import A_BCH, A_BTC, A_ETH, A_LQTY, A_LUSD, A_POLYGON_POS_MATIC
 from rotkehlchen.fval import FVal
 from rotkehlchen.tests.utils.factories import UNIT_BTC_ADDRESS1, make_evm_address
@@ -59,7 +58,9 @@ def fixture_blockchain_balances(use_db, data_dir, username, sql_vm_instructions_
     a.optimism[address2].assets[OPTIMISM_OP_TOKEN] = Balance(amount=1, usd_value=1)
     a.optimism[address2].assets[A_ETH] = Balance(amount=1, usd_value=1)
 
-    return a, address1, address2, all_btc_addresses, xpub_data
+    yield a, address1, address2, all_btc_addresses, xpub_data
+    if use_db is True:
+        db.logout()
 
 
 def test_copy():
@@ -161,6 +162,11 @@ def test_serialize(blockchain_balances):
 @pytest.mark.parametrize('should_mock_web3', [True])
 @pytest.mark.parametrize('ethereum_mock_data', [{
     'eth_call': {
+        '0xA39739EF8b0231DbFA0DcdA07d7e29faAbCf4bb2': {  # since it queries the total collateral ratio also  # noqa: E501
+            '0xb82f263d00000000000000000000000000000000000000000000000014d1120d7b160000': {
+                'latest': '0x0000000000000000000000000000000000000000000000000000000000000001',
+            },
+        },
         '0x5BA1e12693Dc8F9c48aAD8770482f4739bEeD696': {
             '0x252dba4200000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000004678f0a6958e4d2bc4f1baf7bc52e8f3564f3fe400000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000024c4552791000000000000000000000000bb8311c7bad518f0d8f907cad26c5ccc85a06dc4000000000000000000000000000000000000000000000000000000000000000000000000000000004678f0a6958e4d2bc4f1baf7bc52e8f3564f3fe400000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000024c4552791000000000000000000000000c37b40abdb939635068d3c5f13e7faf686f03b6500000000000000000000000000000000000000000000000000000000': {  # noqa: E501
                 # calling addr() on resolver for bruno.eth
@@ -201,20 +207,7 @@ def test_protocol_balances(blockchain: 'ChainsAggregator') -> None:
     assert ETH_ADDRESS2 not in blockchain.balances.eth
 
 
-LLAMA_NODE = WeightedNode(
-    node_info=NodeName(
-        name='DefiLlama',
-        endpoint='https://polygon.llamarpc.com',
-        owned=False,
-        blockchain=SupportedBlockchain.POLYGON_POS,
-    ),
-    active=True,
-    weight=ONE,
-)
-
-
-@pytest.mark.vcr()
-@pytest.mark.parametrize('polygon_pos_manager_connect_at_start', [[LLAMA_NODE]])
+@pytest.mark.vcr
 @pytest.mark.parametrize('polygon_pos_accounts', [['0x4bBa290826C253BD854121346c370a9886d1bC26']])
 def test_native_token_balance(blockchain, polygon_pos_accounts):
     """
@@ -222,9 +215,11 @@ def test_native_token_balance(blockchain, polygon_pos_accounts):
     We test it by requesting a Polygon POS balance and checking MATIC balance.
     """
     address = polygon_pos_accounts[0]
+    sorted_call_order = sorted(blockchain.polygon_pos.node_inquirer.default_call_order())
 
     def mock_default_call_order(skip_etherscan: bool = False):  # pylint: disable=unused-argument
-        return [LLAMA_NODE]  # Keep only one node to remove randomness, and thus make it vcr'able
+        # return sorted_call_order to remove randomness, and thus make it vcr'able
+        return sorted_call_order
 
     with patch.object(
         blockchain.polygon_pos.node_inquirer,
@@ -239,19 +234,19 @@ def test_native_token_balance(blockchain, polygon_pos_accounts):
         balances = blockchain.balances.polygon_pos[address].assets
         assert balances == {
             A_POLYGON_POS_MATIC: Balance(
-                amount=FVal('14.625551850495690815'),
-                usd_value=FVal('21.9383277757435362225'),
+                amount=FVal('8.206486866125895549'),
+                usd_value=FVal('12.3097302991888433235'),
             ),
-            Asset('eip155:137/erc20:0x625E7708f30cA75bfd92586e17077590C60eb4cD'): Balance(  # aPolUSDC  # noqa: E501
-                amount=FVal('20.299941'),
-                usd_value=FVal('30.4499115'),
+            Asset('eip155:137/erc20:0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359'): Balance(  # USDC  # noqa: E501
+                amount=FVal('10.045085'),
+                usd_value=FVal('15.0676275'),
             ),
             Asset('eip155:137/erc20:0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619'): Balance(  # WETH
-                amount=FVal('0.010320301779068381'),
-                usd_value=FVal('0.0154804526686025715'),
+                amount=FVal('0.007712106620416874'),
+                usd_value=FVal('0.0115681599306253110'),
             ),
             Asset('eip155:137/erc20:0xc2132D05D31c914a87C6611C10748AEb04B58e8F'): Balance(  # USDT
-                amount=FVal('0.076457'),
-                usd_value=FVal('0.1146855'),
+                amount=FVal('0.074222'),
+                usd_value=FVal('0.1113330'),
             ),
         }

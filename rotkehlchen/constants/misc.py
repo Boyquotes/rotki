@@ -2,11 +2,15 @@ from typing import Final
 
 from rotkehlchen.fval import FVal
 
-CURRENCYCONVERTER_API_KEY = '08caf5396d98ee1bf9f0'
+CURRENCYCONVERTER_API_KEY: Final = '8ea59f745e252780bf6f'
 
-ZERO = FVal(0)
-ONE = FVal(1)
-EXP18 = FVal(1e18)
+ZERO: Final = FVal(0)
+ONE: Final = FVal(1)
+EXP18: Final = FVal(1e18)
+# Tolerance used when querying claims in the database since we need to cast
+# to float and we can loose precision in SQL. With lower tolerance the ens
+# airdrop fails to get detected.
+AIRDROPS_TOLERANCE: Final = FVal(10e-13)
 
 # Could also try to extend HTTPStatus but looks complicated
 # https://stackoverflow.com/questions/45028991/best-way-to-extend-httpstatus-with-custom-value
@@ -33,5 +37,5 @@ ALLASSETIMAGESDIR_NAME: Final = 'all'
 CUSTOMASSETIMAGESDIR_NAME: Final = 'custom'
 MISCDIR_NAME: Final = 'misc'
 APPDIR_NAME: Final = 'app'
-
-LAST_SPAM_ASSETS_DETECT_KEY: Final = 'last_spam_assets_detect_key'
+AIRDROPSDIR_NAME: Final = 'airdrops'
+AIRDROPSPOAPDIR_NAME: Final = 'airdrops_poap'

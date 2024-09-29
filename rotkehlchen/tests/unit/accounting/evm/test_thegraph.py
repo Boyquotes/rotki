@@ -12,7 +12,7 @@ from rotkehlchen.accounting.mixins.event import AccountingEventType
 from rotkehlchen.accounting.pnl import PNL
 from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.accounting.structures.processed_event import ProcessedAccountingEvent
-from rotkehlchen.chain.ethereum.modules.thegraph.constants import CPT_THEGRAPH
+from rotkehlchen.chain.evm.decoding.thegraph.constants import CPT_THEGRAPH
 from rotkehlchen.constants.assets import A_GRT
 from rotkehlchen.constants.misc import ONE, ZERO
 from rotkehlchen.fval import FVal
@@ -25,7 +25,7 @@ from rotkehlchen.utils.misc import ts_sec_to_ms
 if TYPE_CHECKING:
     from rotkehlchen.accounting.accountant import Accountant
 
-TS1, TS2, TS3 = Timestamp(1), Timestamp(2), Timestamp(3)
+TS1, TS2, TS3 = Timestamp(1704200595), Timestamp(1704201595), Timestamp(1704202595)
 TSMS1, TSMS2, TSMS3 = ts_sec_to_ms(TS1), ts_sec_to_ms(TS2), ts_sec_to_ms(TS3)
 USER_ADDRESS = make_evm_address()
 HASH1, HASH2, HASH3 = make_evm_tx_hash(), make_evm_tx_hash(), make_evm_tx_hash()
@@ -99,7 +99,7 @@ def test_delegation_reward(accountant: 'Accountant'):
     matched_acquisitions[0].event.remaining_amount = FVal('995')  # can't be set by init
     expected_events = [
         ProcessedAccountingEvent(
-            type=AccountingEventType.TRANSACTION_EVENT,
+            event_type=AccountingEventType.TRANSACTION_EVENT,
             notes='Acquire 1000 GRT',
             location=Location.ETHEREUM,
             timestamp=TS1,
@@ -112,7 +112,7 @@ def test_delegation_reward(accountant: 'Accountant'):
             index=0,
             extra_data={'tx_hash': HASH1.hex()},  # pylint: disable=no-member
         ), ProcessedAccountingEvent(
-            type=AccountingEventType.TRANSACTION_EVENT,
+            event_type=AccountingEventType.TRANSACTION_EVENT,
             notes='Delegate 995 GRT to indexer',
             location=Location.ETHEREUM,
             timestamp=TS2,
@@ -125,7 +125,7 @@ def test_delegation_reward(accountant: 'Accountant'):
             index=1,
             extra_data={'tx_hash': HASH2.hex()},  # pylint: disable=no-member
         ), ProcessedAccountingEvent(
-            type=AccountingEventType.TRANSACTION_EVENT,
+            event_type=AccountingEventType.TRANSACTION_EVENT,
             notes='Burn 5 GRT as delegation tax',
             location=Location.ETHEREUM,
             timestamp=TS2,
@@ -144,7 +144,7 @@ def test_delegation_reward(accountant: 'Accountant'):
             index=2,
             extra_data={'tx_hash': HASH2.hex()},  # pylint: disable=no-member
         ), ProcessedAccountingEvent(
-            type=AccountingEventType.TRANSACTION_EVENT,
+            event_type=AccountingEventType.TRANSACTION_EVENT,
             notes=f'Gained 10 GRT as delegation reward for {USER_ADDRESS}',
             location=Location.ETHEREUM,
             timestamp=TS3,
@@ -157,7 +157,7 @@ def test_delegation_reward(accountant: 'Accountant'):
             index=3,
             extra_data={'tx_hash': HASH3.hex()},  # pylint: disable=no-member
         ), ProcessedAccountingEvent(
-            type=AccountingEventType.TRANSACTION_EVENT,
+            event_type=AccountingEventType.TRANSACTION_EVENT,
             notes='Withdraw 1005 GRT from indexer',
             location=Location.ETHEREUM,
             timestamp=TS3,

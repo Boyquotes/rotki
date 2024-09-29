@@ -1,89 +1,53 @@
 <script setup lang="ts">
-import { type Eth2ValidatorEntry } from '@rotki/common/lib/staking/eth2';
+import type { Eth2ValidatorEntry } from '@rotki/common';
 
-const props = withDefaults(
-  defineProps<{
-    value: Eth2ValidatorEntry[];
-    items: Eth2ValidatorEntry[];
-    loading?: boolean;
-  }>(),
-  {
-    loading: false
-  }
-);
+defineOptions({
+  inheritAttrs: false,
+});
 
-const emit = defineEmits<{
-  (e: 'input', value: Eth2ValidatorEntry[]): void;
-}>();
+withDefaults(defineProps<{
+  items: Eth2ValidatorEntry[];
+  loading?: boolean;
+}>(), {
+  loading: false,
+});
 
-const { value } = toRefs(props);
-
-const search: Ref<string> = ref('');
-
-const input = (value: Eth2ValidatorEntry[]) => {
-  emit('input', value);
-};
-
-const filter = (
-  { publicKey, validatorIndex }: Eth2ValidatorEntry,
-  queryText: string
-) =>
-  publicKey.includes(queryText) ||
-  validatorIndex.toString().includes(queryText);
-
-const removeValidator = (validator: Eth2ValidatorEntry) => {
-  const selection = [...get(value)];
-  const index = selection.findIndex(v => v.publicKey === validator.publicKey);
-  if (index >= 0) {
-    selection.splice(index, 1);
-  }
-  input(selection);
-};
-
-const { dark } = useTheme();
+const model = defineModel<Eth2ValidatorEntry[]>({ required: true });
 
 const { t } = useI18n();
 </script>
 
 <template>
-  <VAutocomplete
-    :filter="filter"
-    :value="value"
-    :items="items"
-    :search-input.sync="search"
+  <RuiAutoComplete
+    v-model="model"
+    :options="items"
     :loading="loading"
     :disabled="loading"
     hide-details
     hide-selected
     hide-no-data
-    return-object
     chips
     clearable
-    multiple
-    solo
-    flat
     dense
-    outlined
-    item-value="publicKey"
+    auto-select-first
+    return-object
+    key-attr="publicKey"
+    text-attr="index"
+    :item-height="68"
+    variant="outlined"
     :label="t('validator_filter_input.label')"
-    :open-on-clear="false"
-    item-text="publicKey"
-    @input="input($event)"
   >
     <template #item="{ item }">
-      <ValidatorDisplay :validator="item" />
+      <ValidatorDisplay
+        class="py-2"
+        :validator="item"
+      />
     </template>
     <template #selection="{ item }">
-      <VChip
-        small
-        :color="dark ? null : 'grey lighten-3'"
-        filter
-        class="text-truncate m-0.5"
-        close
-        @click:close="removeValidator(item)"
-      >
-        <ValidatorDisplay :validator="item" horizontal />
-      </VChip>
+      <ValidatorDisplay
+        :validator="item"
+        horizontal
+      />
     </template>
-  </VAutocomplete>
+  </RuiAutoComplete>
 </template>

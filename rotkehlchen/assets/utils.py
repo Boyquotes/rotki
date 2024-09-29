@@ -1,14 +1,20 @@
 import logging
-from enum import auto
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, Optional
 
 import regex
 
 from rotkehlchen.api.websockets.typedefs import WSMessageType
 from rotkehlchen.assets.asset import Asset, AssetWithOracles, EvmToken, UnderlyingToken
-from rotkehlchen.assets.resolver import AssetResolver
 from rotkehlchen.assets.types import AssetType
-from rotkehlchen.constants.assets import A_ETH
+from rotkehlchen.constants.assets import (
+    A_ETH,
+    A_WETH,
+    A_WETH_ARB,
+    A_WETH_BASE,
+    A_WETH_OPT,
+    A_WETH_POLYGON,
+    A_WXDAI,
+)
 from rotkehlchen.constants.resolver import evm_address_to_identifier
 from rotkehlchen.errors.asset import UnknownAsset
 from rotkehlchen.errors.misc import NotERC20Conformant
@@ -21,9 +27,9 @@ from rotkehlchen.types import (
     ChecksumEvmAddress,
     EvmTokenKind,
     EVMTxHash,
+    SupportedBlockchain,
     Timestamp,
 )
-from rotkehlchen.utils.mixins.enums import SerializableEnumNameMixin
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
@@ -36,7 +42,7 @@ SPAM_ASSET_REGEX = r"""
     https:// |                      # Matches 'https://'
     claim | visit | invited |       # Matches 'claim' or 'visit' anywhere in the string
     ^\$.+\..+ |                     # Matches strings that start with '$' and contain '.'
-    (\p{Sk}|\p{P})+(com|io|site|xyz|li|org|cc|net|pm)+  # Matches common domain extensions. It also detects any letter modifier or punctuation in unicode before the domain extension
+    (\p{Sk}|\p{Po})+(com|io|site|xyz|li|org|cc|net|pm)+  # Matches common domain extensions. It also detects any letter modifier or punctuation in unicode before the domain extension
 """  # noqa: E501
 # Compile the regex pattern:
 # - re.IGNORECASE makes it case-insensitive
@@ -50,7 +56,7 @@ def add_evm_token_to_db(token_data: EvmToken) -> EvmToken:
     May raise:
     - InputError if token already exists in the DB
     """
-    GlobalDBHandler().add_asset(token_data)
+    GlobalDBHandler.add_asset(token_data)
     # This can, but should not raise UnknownAsset, DeserializationError
     return EvmToken(token_data.identifier)
 
@@ -100,6 +106,9 @@ def edit_token_and_clean_cache(
         started: Timestamp | None,
         underlying_tokens: list[UnderlyingToken] | None,
         evm_inquirer: 'EvmNodeInquirer | None',
+        coingecko: str | None = None,
+        cryptocompare: str | None = None,
+        protocol: str | None = None,
 ) -> None:
     """
     Update information regarding name and decimals for an ethereum token.
@@ -141,10 +150,21 @@ def edit_token_and_clean_cache(
         object.__setattr__(evm_token, 'underlying_tokens', underlying_tokens)
         updated_fields = True
 
+    if coingecko is not None and evm_token.coingecko != coingecko:
+        object.__setattr__(evm_token, 'coingecko', coingecko)
+        updated_fields = True
+
+    if cryptocompare is not None and evm_token.cryptocompare != cryptocompare:
+        object.__setattr__(evm_token, 'cryptocompare', cryptocompare)
+        updated_fields = True
+
+    if protocol is not None and evm_token.protocol != protocol:
+        object.__setattr__(evm_token, 'protocol', protocol)
+        updated_fields = True
+
     # clean the cache if we need to update the token
     if updated_fields is True:
-        AssetResolver.clean_memory_cache(evm_token.identifier)
-        GlobalDBHandler().edit_evm_token(evm_token)
+        GlobalDBHandler.edit_evm_token(evm_token)
 
 
 def check_if_spam_token(symbol: str | None, name: str | None) -> bool:
@@ -190,6 +210,11 @@ def get_or_create_evm_token(
         underlying_tokens: list[UnderlyingToken] | None = None,
         evm_inquirer: Optional['EvmNodeInquirer'] = None,
         encounter: TokenEncounterInfo | None = None,
+        coingecko: str | None = None,
+        cryptocompare: str | None = None,
+        fallback_decimals: int | None = None,
+        fallback_name: str | None = None,
+        fallback_symbol: str | None = None,
 ) -> EvmToken:
     """Given a token address return the <EvmToken>
 
@@ -201,10 +226,14 @@ def get_or_create_evm_token(
     Optionally the caller can provide a transaction hash of where the token was seen.
     This is used in the websocket message to provide information to the frontend.
 
+    If fallback values are provided and the token isn't ERC20 conformant we use those
+    as values for the decimal, name and symbol attributes.
+
     Note: if the token already exists but the other arguments don't match the
     existing token will still be silently returned
     Note2: This entire function is designed so that it does not context switch away from
     its calling greenlet so it should be safe to call from multiple greenlets.
+    Note3: If encounter is None, it will broadcast the `NEW_EVM_TOKEN_DETECTED` message by default.
 
     May raise:
     - NotERC20Conformant exception if an ethereum manager is given to query
@@ -231,6 +260,9 @@ def get_or_create_evm_token(
                 started=started,
                 underlying_tokens=underlying_tokens,
                 evm_inquirer=evm_inquirer,
+                coingecko=coingecko,
+                cryptocompare=cryptocompare,
+                protocol=protocol,
             )
 
         except (UnknownAsset, DeserializationError):
@@ -243,22 +275,32 @@ def get_or_create_evm_token(
             except UnknownAsset:
                 asset_exists = False
 
-            if evm_inquirer is not None:
-                name, symbol, decimals = _query_or_get_given_token_info(
-                    evm_inquirer=evm_inquirer,
-                    evm_address=evm_address,
-                    name=name,
-                    symbol=symbol,
-                    decimals=decimals,
-                    token_kind=token_kind,
-                )
+            if (
+                None in (name, symbol, decimals) and
+                evm_inquirer is not None
+            ):
+                try:
+                    name, symbol, decimals = _query_or_get_given_token_info(
+                        evm_inquirer=evm_inquirer,
+                        evm_address=evm_address,
+                        name=name,
+                        symbol=symbol,
+                        decimals=decimals,
+                        token_kind=token_kind,
+                    )
+                except NotERC20Conformant:
+                    if None not in (fallback_name, fallback_symbol, fallback_decimals):
+                        name, symbol, decimals = fallback_name, fallback_symbol, fallback_decimals
+                    else:
+                        raise
+
             # make sure that basic information is always filled
             name = identifier if name is None else name
             decimals = 18 if decimals is None else decimals
 
             is_spam_token = (
                 protocol == SPAM_PROTOCOL or
-                protocol is None and check_if_spam_token(symbol=symbol, name=name)
+                (protocol is None and check_if_spam_token(symbol=symbol, name=name))
             )
 
             # Store the information in the database
@@ -272,11 +314,13 @@ def get_or_create_evm_token(
                 protocol=protocol if not is_spam_token else SPAM_PROTOCOL,
                 underlying_tokens=underlying_tokens,
                 started=started,
+                coingecko=coingecko,
+                cryptocompare=cryptocompare,
             )
             if asset_exists is True:
                 # This means that we need to update the information in the database with the
                 # newly queried data
-                GlobalDBHandler().edit_evm_token(evm_token)
+                GlobalDBHandler.edit_evm_token(evm_token)
             else:
                 # inform frontend new token detected
                 data: dict[str, Any] = {'token_identifier': identifier}
@@ -306,19 +350,6 @@ def get_or_create_evm_token(
     return evm_token
 
 
-def set_token_protocol_if_missing(evm_token: EvmToken, protocol: str) -> None:
-    """
-    Check if the provided token has the expected protocol and if the protocol is not the expected
-    update the token and update it in the database.
-    """
-    if evm_token.protocol == protocol:
-        return
-
-    object.__setattr__(evm_token, 'protocol', protocol)  # since is a frozen dataclass
-    AssetResolver.clean_memory_cache(evm_token.identifier)
-    GlobalDBHandler().edit_evm_token(evm_token)
-
-
 def get_crypto_asset_by_symbol(
         symbol: str,
         asset_type: AssetType | None = None,
@@ -333,7 +364,7 @@ def get_crypto_asset_by_symbol(
     if symbol == 'ETH':
         return A_ETH.resolve_to_asset_with_oracles()  # ETH can be ETH and ETH2 in the DB
 
-    assets_data = GlobalDBHandler().get_assets_with_symbol(
+    assets_data = GlobalDBHandler.get_assets_with_symbol(
         symbol=symbol,
         asset_type=asset_type,
         chain_id=chain_id,
@@ -385,13 +416,11 @@ def symbol_to_evm_token(symbol: str) -> EvmToken:
     return maybe_asset.resolve_to_evm_token()
 
 
-class IgnoredAssetsHandling(SerializableEnumNameMixin):
-    NONE = auto()
-    EXCLUDE = auto()
-    SHOW_ONLY = auto()
-
-    def operator(self) -> Literal['IN', 'NOT IN']:
-        """Caller should make sure this is narrowed between exclude and show only"""
-        if self == IgnoredAssetsHandling.EXCLUDE:
-            return 'NOT IN'
-        return 'IN'
+CHAIN_TO_WRAPPED_TOKEN: Final = {
+    SupportedBlockchain.ETHEREUM: A_WETH,
+    SupportedBlockchain.ARBITRUM_ONE: A_WETH_ARB,
+    SupportedBlockchain.OPTIMISM: A_WETH_OPT,
+    SupportedBlockchain.BASE: A_WETH_BASE,
+    SupportedBlockchain.GNOSIS: A_WXDAI,
+    SupportedBlockchain.POLYGON_POS: A_WETH_POLYGON,
+}

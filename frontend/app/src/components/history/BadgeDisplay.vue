@@ -4,14 +4,14 @@ const props = withDefaults(
     color?: 'grey' | 'red' | 'green';
   }>(),
   {
-    color: 'grey'
-  }
+    color: 'grey',
+  },
 );
 
 const colorVariants: Record<typeof props.color, string> = {
-  grey: 'text-rui-grey-600 bg-rui-grey-100',
-  red: 'text-rui-red-600 bg-rui-red-100',
-  green: 'text-green-600 bg-rui-green-100'
+  grey: 'text-rui-grey-700 bg-rui-grey-100 dark:text-rui-grey-400 dark:bg-rui-grey-800',
+  red: 'text-rui-red-700 bg-rui-red-100',
+  green: 'text-rui-green-700 bg-rui-green-100',
 };
 </script>
 

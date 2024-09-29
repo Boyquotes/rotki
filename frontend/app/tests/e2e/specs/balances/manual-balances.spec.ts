@@ -1,11 +1,7 @@
-import {
-  type FixtureManualBalance,
-  ManualBalancesPage
-} from '../../pages/account-balances-page/manual-balances-page';
+import { type FixtureManualBalance, ManualBalancesPage } from '../../pages/account-balances-page/manual-balances-page';
 import { DashboardPage } from '../../pages/dashboard-page';
 import { GeneralSettingsPage } from '../../pages/general-settings-page';
 import { RotkiApp } from '../../pages/rotki-app';
-import { waitForAsyncQuery } from '../../support/utils';
 import { createUser } from '../../utils/user';
 
 const PRECISION = 0.1;
@@ -25,7 +21,7 @@ describe('balances', () => {
     dashboardPage = new DashboardPage();
     settings = new GeneralSettingsPage();
 
-    cy.fixture('account-balances/manual-balances').then(balances => {
+    cy.fixture('account-balances/manual-balances').then((balances) => {
       manualBalances = balances;
     });
     app.fasterLogin(username);
@@ -33,20 +29,13 @@ describe('balances', () => {
   });
 
   it('add manual balances', () => {
-    cy.get('.manual-balances__add-balance').should('be.visible');
-
     for (let i = 0; i < 3; i++) {
-      cy.get('.manual-balances__add-balance').click();
+      manualBalancesPage.openAddDialog();
       const balance = manualBalances[i];
       manualBalancesPage.addBalance(balance);
       manualBalancesPage.visibleEntries(i + 1);
       manualBalancesPage.isVisible(i, balance);
     }
-
-    waitForAsyncQuery({
-      method: 'POST',
-      url: '/api/1/assets/prices/latest'
-    });
   });
 
   it('data is reflected in dashboard', () => {
@@ -54,16 +43,16 @@ describe('balances', () => {
 
     manualBalancesPage.getTotals().then(({ total, balances }) => {
       dashboardPage.visit();
-      dashboardPage.getOverallBalance().then($overallBalance => {
+      dashboardPage.getOverallBalance().then(($overallBalance) => {
         expect($overallBalance.toNumber(), 'total').to.be.within(
           total.minus(PRECISION).toNumber(),
-          total.plus(PRECISION).toNumber()
+          total.plus(PRECISION).toNumber(),
         );
       });
-      dashboardPage.getLocationBalances().then($dashboardBalances => {
+      dashboardPage.getLocationBalances().then(($dashboardBalances) => {
         expect(
           balances.map(x => x.location),
-          'dashboard and manual balances'
+          'dashboard and manual balances',
         ).to.have.members(Array.from($dashboardBalances.keys()));
 
         balances.forEach(({ location, value }) => {
@@ -71,7 +60,7 @@ describe('balances', () => {
           expect(dashboardBalance, `${location} balance`).to.not.be.undefined;
           expect(dashboardBalance?.toNumber(), location).to.be.within(
             value.minus(PRECISION).toNumber(),
-            value.plus(PRECISION).toNumber()
+            value.plus(PRECISION).toNumber(),
           );
         });
       });
@@ -114,7 +103,7 @@ describe('balances', () => {
   it('test scramble mode from top nav', () => {
     manualBalancesPage.visit();
     app.togglePrivacyMenu(true);
-    app.toggleScrambler(false);
+    cy.get('[data-cy="privacy-mode-scramble__toggle"] input[type="checkbox"]').should('not.be.checked');
     manualBalancesPage.balanceShouldMatch(manualBalances);
 
     app.toggleScrambler(true);
@@ -144,7 +133,7 @@ describe('balances', () => {
     manualBalancesPage.visibleEntries(3);
     manualBalancesPage.isVisible(1, {
       ...manualBalances[1],
-      amount: firstNewAmount
+      amount: firstNewAmount,
     });
 
     const secondNewAmount = '300';
@@ -153,10 +142,10 @@ describe('balances', () => {
     manualBalancesPage.visibleEntries(3);
     manualBalancesPage.isVisible(1, {
       ...manualBalances[1],
-      amount: secondNewAmount
+      amount: secondNewAmount,
     });
 
-    cy.get('.manual-balances__add-balance').click();
+    manualBalancesPage.openAddDialog();
 
     const apiManualBalance = { ...manualBalances[1], label: 'extra' };
     manualBalancesPage.addBalance(apiManualBalance);

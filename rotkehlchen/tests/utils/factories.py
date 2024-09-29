@@ -6,8 +6,10 @@ from typing import Any
 from eth_utils.address import to_checksum_address
 
 from rotkehlchen.accounting.structures.balance import Balance
+from rotkehlchen.accounting.types import EventAccountingRuleStatus
 from rotkehlchen.assets.asset import CryptoAsset, EvmToken
 from rotkehlchen.chain.evm.types import string_to_evm_address
+from rotkehlchen.chain.substrate.types import SubstrateAddress
 from rotkehlchen.constants import ONE, ZERO
 from rotkehlchen.constants.assets import A_ETH, A_USDC
 from rotkehlchen.exchanges.data_structures import Trade
@@ -19,6 +21,7 @@ from rotkehlchen.types import (
     ApiKey,
     ApiSecret,
     AssetAmount,
+    BTCAddress,
     ChainID,
     ChecksumEvmAddress,
     EvmTokenKind,
@@ -37,6 +40,9 @@ from rotkehlchen.utils.misc import ts_now
 
 DEFAULT_START_TS = Timestamp(1451606400)
 ZERO_TIMESTAMP_MS = TimestampMS(0)
+ADDRESS_ETH = string_to_evm_address('0x9D904063e7e120302a13C6820561940538a2Ad57')
+ADDRESS_MULTICHAIN = string_to_evm_address('0x368B9ad9B6AAaeFCE33b8c21781cfF375e09be67')
+ADDRESS_OP = string_to_evm_address('0x3D61AEBB1238062a21BE5CC79df308f030BF0c1B')
 
 
 def make_random_bytes(size: int) -> bytes:
@@ -154,31 +160,54 @@ def make_ethereum_event(
 
 def generate_events_response(
         data: list['EvmEvent'],
+        accounting_status: EventAccountingRuleStatus = EventAccountingRuleStatus.PROCESSED,
 ) -> list:
-    return [{'entry': x.serialize()} for x in data]
+    return [
+        x.serialize_for_api(
+            customized_event_ids=[],
+            ignored_ids_mapping={},
+            hidden_event_ids=[],
+            event_accounting_rule_status=accounting_status,
+        ) for x in data
+    ]
 
 
 def make_addressbook_entries() -> list[AddressbookEntry]:
     return [
         AddressbookEntry(
-            address=to_checksum_address('0x9d904063e7e120302a13c6820561940538a2ad57'),
+            address=ADDRESS_ETH,
             name='My dear friend Fred',
             blockchain=SupportedBlockchain.ETHEREUM,
         ),
         AddressbookEntry(
-            address=to_checksum_address('0x368B9ad9B6AAaeFCE33b8c21781cfF375e09be67'),
+            address=ADDRESS_MULTICHAIN,
             name='Neighbour Thomas',
             blockchain=SupportedBlockchain.OPTIMISM,
         ),
         AddressbookEntry(
-            address=to_checksum_address('0x368B9ad9B6AAaeFCE33b8c21781cfF375e09be67'),
+            address=ADDRESS_MULTICHAIN,
             name='Neighbour Thomas but in Ethereum',
             blockchain=SupportedBlockchain.ETHEREUM,
         ),
         AddressbookEntry(
-            address=to_checksum_address('0x3D61AEBB1238062a21BE5CC79df308f030BF0c1B'),
+            address=ADDRESS_OP,
             name='Secret agent Rose',
             blockchain=SupportedBlockchain.OPTIMISM,
+        ),
+        AddressbookEntry(
+            address=BTCAddress('bc1qamhqfr5z2ypehv0sqq784hzgd6ws2rjf6v46w8'),
+            name='Secret btc address',
+            blockchain=SupportedBlockchain.BITCOIN,
+        ),
+        AddressbookEntry(
+            address=BTCAddress('pquqql0e3pd8598g52k3gvsc6ls9zsv705z20neple'),
+            name='Public bch address',
+            blockchain=SupportedBlockchain.BITCOIN_CASH,
+        ),
+        AddressbookEntry(
+            address=SubstrateAddress('13EcxFSXEFmJfxGXSQYLfgEXXGZBSF1P753MyHauw5NV4tAV'),
+            name='Polkadot address',
+            blockchain=SupportedBlockchain.POLKADOT,
         ),
     ]
 
@@ -194,7 +223,7 @@ def make_user_notes_entries() -> list[dict[str, Any]]:
         {
             'title': 'Coins Watchlist #1',
             'content': '$NEAR $SCRT $ETH $BTC $AVAX',
-            'location': 'ledger actions',
+            'location': 'history events',
             'is_pinned': False,
         },
         {
@@ -216,7 +245,7 @@ def make_random_user_notes(num_notes: int) -> list[dict[str, Any]]:
     } for note_number in range(num_notes)]
 
 
-def make_random_trades(num_trades: int) -> list[Trade]:
+def make_random_trades(num_trades: int, base_asset=A_ETH) -> list[Trade]:
     """Make random trades to be used in tests."""
     trades = []
     for idx in range(num_trades):
@@ -226,7 +255,7 @@ def make_random_trades(num_trades: int) -> list[Trade]:
                 timestamp=Timestamp(random.randint(100000, 10000000)),
                 trade_type=trade_type,
                 location=Location.EXTERNAL,
-                base_asset=A_ETH,
+                base_asset=base_asset,
                 quote_asset=A_USDC,
                 amount=AssetAmount(FVal(idx)),
                 rate=Price(FVal(idx)),

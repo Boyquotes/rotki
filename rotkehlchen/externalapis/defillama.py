@@ -2,7 +2,6 @@ import json
 import logging
 from http import HTTPStatus
 from typing import Any
-from urllib.parse import urlencode
 
 import requests
 
@@ -40,7 +39,6 @@ class Defillama(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
         PenalizablePriceOracleMixin.__init__(self)
         self.session = requests.session()
         self.session.headers.update({'User-Agent': 'rotkehlchen'})
-        self.all_coins_cache: dict[str, dict[str, Any]] | None = None
         self.last_rate_limit = 0
 
     def _query(
@@ -60,10 +58,11 @@ class Defillama(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
         if subpath:
             url += subpath
 
-        log.debug(f'Querying defillama: {url}?{urlencode(options)}')
+        log.debug(f'Querying defillama: {url=} with {options=}')
         try:
             response = self.session.get(
-                f'{url}?{urlencode(options)}',
+                url=url,
+                params=options,
                 timeout=CachedSettings().get_timeout_tuple(),
             )
         except requests.exceptions.RequestException as e:
@@ -99,9 +98,21 @@ class Defillama(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
         """
         if asset.is_evm_token() is True:
             asset = asset.resolve_to_evm_token()
-            # The evm chain names we have so far match perfectly except for 'polygon pos'
-            # which is expected as polygon by the defillama api
-            chain_name = 'polygon' if asset.chain_id == ChainID.POLYGON_POS else str(asset.chain_id)  # noqa: E501
+            # The evm names for chains that we give don't match what defillama
+            # uses in all the cases
+            if asset.chain_id == ChainID.POLYGON_POS:
+                chain_name = 'polygon'
+            elif asset.chain_id == ChainID.ARBITRUM_ONE:
+                chain_name = 'arbitrum'
+            elif asset.chain_id == ChainID.BINANCE:
+                chain_name = 'bsc'
+            elif asset.chain_id == ChainID.AVALANCHE:
+                chain_name = 'avax'
+            elif asset.chain_id == ChainID.ZKSYNC_ERA:
+                chain_name = 'era'
+            else:
+                chain_name = str(asset.chain_id)
+
             return f'{chain_name}:{asset.evm_address}'
 
         return f'coingecko:{asset.to_coingecko()}'
@@ -168,7 +179,7 @@ class Defillama(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
             log.warning(
                 f'Tried to query current price using Defillama from {from_asset} to '
                 f'{to_asset} but {from_asset} is not an EVM token and is not '
-                f'suppported by defillama',
+                f'supported by defillama',
             )
             return ZERO_PRICE, False
 
@@ -183,7 +194,7 @@ class Defillama(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
 
         # We got the price in usd but that is not what we need we should query for the next
         # step in the chain of prices
-        rate_price = Inquirer().find_price(from_asset=A_USD, to_asset=to_asset)
+        rate_price = Inquirer.find_price(from_asset=A_USD, to_asset=to_asset)
         return Price(usd_price * rate_price), False
 
     def can_query_history(
@@ -222,7 +233,7 @@ class Defillama(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
             raise PriceQueryUnsupportedAsset(e.identifier) from e
 
         # check DB cache
-        price_cache_entry = GlobalDBHandler().get_historical_price(
+        price_cache_entry = GlobalDBHandler.get_historical_price(
             from_asset=from_asset,
             to_asset=to_asset,
             timestamp=timestamp,
@@ -277,7 +288,7 @@ class Defillama(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
 
         # save result in the DB and return
         date_timestamp = create_timestamp(date, formatstr='%d-%m-%Y')
-        GlobalDBHandler().add_historical_prices(entries=[HistoricalPrice(
+        GlobalDBHandler.add_historical_prices(entries=[HistoricalPrice(
             from_asset=from_asset,
             to_asset=to_asset,
             source=HistoricalPriceOracle.DEFILLAMA,
@@ -285,7 +296,3 @@ class Defillama(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
             price=price,
         )])
         return price
-
-    def all_coins(self) -> dict[str, dict[str, Any]]:
-        """no op for defillama. Required for the interface"""
-        return {}

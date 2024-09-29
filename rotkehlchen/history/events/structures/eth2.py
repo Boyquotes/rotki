@@ -1,4 +1,4 @@
-from abc import ABCMeta
+from abc import ABC
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, cast
 
@@ -57,7 +57,7 @@ STAKING_DB_INSERT_QUERY_STR = 'eth_staking_events_info(identifier, validator_ind
 STAKING_DB_UPDATE_QUERY_STR = 'UPDATE eth_staking_events_info SET validator_index=?, is_exit_or_blocknumber=?'  # noqa: E501
 
 
-class EthStakingEvent(HistoryBaseEntry, metaclass=ABCMeta):  # noqa: PLW1641  # hash in superclass
+class EthStakingEvent(HistoryBaseEntry, ABC):  # noqa: PLW1641  # hash in superclass
     """An ETH staking related event. Block production/withdrawal"""
 
     def __init__(
@@ -210,13 +210,13 @@ class EthWithdrawalEvent(EthStakingEvent):
     ) -> int:
         profit_amount = self.balance.amount
         if self.balance.amount >= 32:
-            profit_amount = 32 - self.balance.amount
+            profit_amount = self.balance.amount - 32
 
         # TODO: This is hacky and does not cover edge case where people mistakenly
         # double deposited for a validator. We can and should combine deposit and
         # withdrawal processing by querying deposits for that validator index.
         # saving pubkey and validator index for deposits.
-
+        # TODO: rotki/rotki/issues/7508
         name = 'Exit' if bool(self.is_exit_or_blocknumber) else 'Withdrawal'
         accounting.add_in_event(
             event_type=AccountingEventType.HISTORY_EVENT,
@@ -225,7 +225,7 @@ class EthWithdrawalEvent(EthStakingEvent):
             timestamp=self.get_timestamp_in_sec(),
             asset=self.asset,
             amount=profit_amount,
-            taxable=True,
+            taxable=accounting.events_accountant.rules_manager.eth_staking_taxable_after_withdrawal_enabled,
         )
         return 1
 

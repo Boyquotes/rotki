@@ -1,11 +1,6 @@
-import { BigNumber } from '@rotki/common';
-import { Blockchain } from '@rotki/common/lib/blockchain';
-import { Theme } from '@rotki/common/lib/settings';
-import {
-  TimeFramePeriod,
-  TimeFramePersist
-} from '@rotki/common/lib/settings/graphs';
+import { BigNumber, Blockchain, Theme, TimeFramePeriod, TimeFramePersist } from '@rotki/common';
 import { type Pinia, createPinia } from 'pinia';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Defaults } from '@/data/defaults';
 import { DARK_COLORS, LIGHT_COLORS } from '@/plugins/theme';
 import { snakeCaseTransformer } from '@/services/axios-tranformers';
@@ -16,14 +11,14 @@ import {
   DashboardTableType,
   type FrontendSettings,
   Quarter,
-  SupportedLanguage
+  SupportedLanguage,
 } from '@/types/settings/frontend-settings';
 import { TableColumn } from '@/types/table-column';
 
 vi.mock('@/composables/api/settings/settings-api', () => ({
   useSettingsApi: vi.fn().mockReturnValue({
-    setSettings: vi.fn()
-  })
+    setSettings: vi.fn(),
+  }),
 }));
 
 describe('settings:frontend', () => {
@@ -35,7 +30,7 @@ describe('settings:frontend', () => {
     api = useSettingsApi();
   });
 
-  test('updates settings on valid payload', async () => {
+  it('updates settings on valid payload', async () => {
     expect.assertions(1);
     const store = useFrontendSettingsStore(pinia);
     await store.updateSetting({ defiSetupDone: true });
@@ -52,12 +47,13 @@ describe('settings:frontend', () => {
             queryPeriod: 5,
             profitLossReportPeriod: {
               year: new Date().getFullYear().toString(),
-              quarter: Quarter.ALL
+              quarter: Quarter.ALL,
             },
             thousandSeparator: Defaults.DEFAULT_THOUSAND_SEPARATOR,
             decimalSeparator: Defaults.DEFAULT_DECIMAL_SEPARATOR,
             currencyLocation: Defaults.DEFAULT_CURRENCY_LOCATION,
             abbreviateNumber: false,
+            minimumDigitToBeAbbreviated: 4,
             refreshPeriod: -1,
             explorers: {},
             itemsPerPage: 10,
@@ -73,35 +69,31 @@ describe('settings:frontend', () => {
             renderAllNftImages: true,
             whitelistedDomainsForNftImages: [],
             dashboardTablesVisibleColumns: {
-              [DashboardTableType.ASSETS]:
-                Defaults.DEFAULT_DASHBOARD_TABLE_VISIBLE_COLUMNS,
-              [DashboardTableType.LIABILITIES]:
-                Defaults.DEFAULT_DASHBOARD_TABLE_VISIBLE_COLUMNS,
-              [DashboardTableType.NFT]:
-                Defaults.DEFAULT_DASHBOARD_TABLE_VISIBLE_COLUMNS,
-              [DashboardTableType.LIQUIDITY_POSITION]:
-                Defaults.DEFAULT_DASHBOARD_TABLE_VISIBLE_COLUMNS
+              [DashboardTableType.ASSETS]: Defaults.DEFAULT_DASHBOARD_TABLE_VISIBLE_COLUMNS,
+              [DashboardTableType.LIABILITIES]: Defaults.DEFAULT_DASHBOARD_TABLE_VISIBLE_COLUMNS,
+              [DashboardTableType.NFT]: Defaults.DEFAULT_DASHBOARD_TABLE_VISIBLE_COLUMNS,
+              [DashboardTableType.LIQUIDITY_POSITION]: Defaults.DEFAULT_DASHBOARD_TABLE_VISIBLE_COLUMNS,
             },
             dateInputFormat: DateFormat.DateMonthYearHourMinuteSecond,
-            versionUpdateCheckFrequency:
-              Defaults.DEFAULT_VERSION_UPDATE_CHECK_FREQUENCY,
+            versionUpdateCheckFrequency: Defaults.DEFAULT_VERSION_UPDATE_CHECK_FREQUENCY,
             enableAliasNames: true,
-            blockchainRefreshButtonBehaviour:
-              BlockchainRefreshButtonBehaviour.ONLY_REFRESH_BALANCES,
-            savedFilters: {}
-          })
-        )
-      })
+            blockchainRefreshButtonBehaviour: BlockchainRefreshButtonBehaviour.ONLY_REFRESH_BALANCES,
+            shouldRefreshValidatorDailyStats: false,
+            unifyAccountsTable: false,
+            savedFilters: {},
+          }),
+        ),
+      }),
     );
   });
 
-  test('does not update settings on missing payload', async () => {
+  it('does not update settings on missing payload', async () => {
     expect.assertions(1);
     const store = useFrontendSettingsStore(pinia);
     await expect(store.updateSetting({})).rejects.toBeInstanceOf(Error);
   });
 
-  test('restore', async () => {
+  it('restore', () => {
     const store = useFrontendSettingsStore(pinia);
     const state: FrontendSettings = {
       defiSetupDone: true,
@@ -114,22 +106,23 @@ describe('settings:frontend', () => {
         TimeFramePeriod.THREE_MONTHS,
         TimeFramePeriod.MONTH,
         TimeFramePeriod.TWO_WEEKS,
-        TimeFramePeriod.WEEK
+        TimeFramePeriod.WEEK,
       ],
       queryPeriod: 5,
       profitLossReportPeriod: {
         year: '2018',
-        quarter: Quarter.Q3
+        quarter: Quarter.Q3,
       },
       currencyLocation: CurrencyLocation.BEFORE,
       abbreviateNumber: false,
+      minimumDigitToBeAbbreviated: 4,
       thousandSeparator: '|',
       decimalSeparator: '-',
       refreshPeriod: 120,
       explorers: {
         [Blockchain.ETH]: {
-          transaction: 'explore/tx'
-        }
+          transaction: 'explore/tx',
+        },
       },
       itemsPerPage: 25,
       valueRoundingMode: BigNumber.ROUND_DOWN,
@@ -138,12 +131,12 @@ describe('settings:frontend', () => {
       lightTheme: {
         primary: '#000000',
         accent: '#ffffff',
-        graph: '#555555'
+        graph: '#555555',
       },
       darkTheme: {
         primary: '#ffffff',
         accent: '#000000',
-        graph: '#555555'
+        graph: '#555555',
       },
       defaultThemeVersion: 1,
       graphZeroBased: true,
@@ -152,23 +145,18 @@ describe('settings:frontend', () => {
       renderAllNftImages: false,
       whitelistedDomainsForNftImages: [],
       dashboardTablesVisibleColumns: {
-        [DashboardTableType.ASSETS]: [
-          TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE
-        ],
-        [DashboardTableType.LIABILITIES]: [
-          TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE
-        ],
+        [DashboardTableType.ASSETS]: [TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE],
+        [DashboardTableType.LIABILITIES]: [TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE],
         [DashboardTableType.NFT]: [TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE],
-        [DashboardTableType.LIQUIDITY_POSITION]: [
-          TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE
-        ]
+        [DashboardTableType.LIQUIDITY_POSITION]: [TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE],
       },
       dateInputFormat: DateFormat.DateMonthYearHourMinuteSecond,
       versionUpdateCheckFrequency: 24,
       enableAliasNames: true,
-      blockchainRefreshButtonBehaviour:
-        BlockchainRefreshButtonBehaviour.ONLY_REFRESH_BALANCES,
-      savedFilters: {}
+      blockchainRefreshButtonBehaviour: BlockchainRefreshButtonBehaviour.ONLY_REFRESH_BALANCES,
+      shouldRefreshValidatorDailyStats: false,
+      unifyAccountsTable: false,
+      savedFilters: {},
     };
 
     store.update(state);
@@ -183,22 +171,23 @@ describe('settings:frontend', () => {
       TimeFramePeriod.THREE_MONTHS,
       TimeFramePeriod.MONTH,
       TimeFramePeriod.TWO_WEEKS,
-      TimeFramePeriod.WEEK
+      TimeFramePeriod.WEEK,
     ]);
     expect(store.queryPeriod).toBe(5);
     expect(store.profitLossReportPeriod).toMatchObject({
       year: '2018',
-      quarter: Quarter.Q3
+      quarter: Quarter.Q3,
     });
     expect(store.thousandSeparator).toBe('|');
     expect(store.decimalSeparator).toBe('-');
     expect(store.currencyLocation).toBe(CurrencyLocation.BEFORE);
     expect(store.abbreviateNumber).toBe(false);
+    expect(store.minimumDigitToBeAbbreviated).toBe(4);
     expect(store.refreshPeriod).toBe(120);
     expect(store.explorers).toStrictEqual({
       [Blockchain.ETH]: {
-        transaction: 'explore/tx'
-      }
+        transaction: 'explore/tx',
+      },
     });
     expect(store.itemsPerPage).toBe(25);
     expect(store.valueRoundingMode).toBe(BigNumber.ROUND_DOWN);
@@ -207,12 +196,12 @@ describe('settings:frontend', () => {
     expect(store.lightTheme).toStrictEqual({
       primary: '#000000',
       accent: '#ffffff',
-      graph: '#555555'
+      graph: '#555555',
     });
     expect(store.darkTheme).toStrictEqual({
       primary: '#ffffff',
       accent: '#000000',
-      graph: '#555555'
+      graph: '#555555',
     });
     expect(store.graphZeroBased).toBe(true);
     expect(store.showGraphRangeSelector).toBe(true);
@@ -221,22 +210,14 @@ describe('settings:frontend', () => {
     expect(store.whitelistedDomainsForNftImages).toStrictEqual([]);
     expect(store.dashboardTablesVisibleColumns).toStrictEqual({
       [DashboardTableType.ASSETS]: [TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE],
-      [DashboardTableType.LIABILITIES]: [
-        TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE
-      ],
+      [DashboardTableType.LIABILITIES]: [TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE],
       [DashboardTableType.NFT]: [TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE],
-      [DashboardTableType.LIQUIDITY_POSITION]: [
-        TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE
-      ]
+      [DashboardTableType.LIQUIDITY_POSITION]: [TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE],
     });
-    expect(store.dateInputFormat).toBe(
-      DateFormat.DateMonthYearHourMinuteSecond
-    );
+    expect(store.dateInputFormat).toBe(DateFormat.DateMonthYearHourMinuteSecond);
     expect(store.versionUpdateCheckFrequency).toBe(24);
     expect(store.enableAliasNames).toBe(true);
-    expect(store.blockchainRefreshButtonBehaviour).toBe(
-      BlockchainRefreshButtonBehaviour.ONLY_REFRESH_BALANCES
-    );
+    expect(store.blockchainRefreshButtonBehaviour).toBe(BlockchainRefreshButtonBehaviour.ONLY_REFRESH_BALANCES);
     expect(store.savedFilters).toMatchObject({});
   });
 });

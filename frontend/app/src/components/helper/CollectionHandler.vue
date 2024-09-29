@@ -1,22 +1,21 @@
-<script setup lang="ts">
-import { type Collection } from '@/types/collection';
+<script setup lang="ts" generic="T extends object">
+import type { Collection } from '@/types/collection';
 
 const props = defineProps<{
-  collection: Collection<any>;
+  collection: Collection<T>;
 }>();
 
 const emit = defineEmits<{
   (e: 'set-page', page: number): void;
 }>();
 
-const setPage = (page: number) => {
+function setPage(page: number) {
   emit('set-page', page);
-};
+}
 
 const { collection } = toRefs(props);
 
-const { data, limit, found, total, entriesFoundTotal, totalUsdValue } =
-  getCollectionData(collection);
+const { data, limit, found, total, entriesFoundTotal, totalUsdValue } = getCollectionData(collection);
 
 const { itemsPerPage } = storeToRefs(useFrontendSettingsStore());
 watch([data, found, itemsPerPage], ([data, found, itemsPerPage]) => {
@@ -26,12 +25,7 @@ watch([data, found, itemsPerPage], ([data, found, itemsPerPage]) => {
   }
 });
 
-const { showUpgradeRow, itemLength } = setupEntryLimit(
-  limit,
-  found,
-  total,
-  entriesFoundTotal
-);
+const { showUpgradeRow, itemLength } = setupEntryLimit(limit, found, total, entriesFoundTotal);
 </script>
 
 <template>

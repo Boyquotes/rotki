@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from rotkehlchen.constants import ZERO
@@ -12,20 +14,24 @@ def test_simple_arithmetic():
     c = FVal(-23.124)
     d = FVal(5006337207657766294397)
     e = ZERO
+    f = FVal('1.49298E+12')
+    g = FVal('5.23267356186572e+8')
     FVal(b'0')
 
     assert a + b == FVal('7.33')
     assert a - b == FVal('3.09')
     assert a * b == FVal('11.0452')
-    assert a / b == FVal('2.457547169811320754716981132')
+    assert a / b == FVal('2.45754716981132075471698113207547169811320754716981132075471698113207547169811')  # noqa: E501
     assert a ** 3 == FVal('141.420761')
-    assert a.fma(b, FVal(3.14)) == FVal('14.1852')
+    assert a.fma(b, FVal('3.14')) == FVal('14.1852')
     assert c // b == FVal('-10')
     assert -a == FVal('-5.21')
     assert abs(a) == FVal('5.21')
     assert abs(c) == FVal('23.124')
     assert d == FVal('5006337207657766294397')
     assert e == FVal('0.0')
+    assert f == FVal('1492980000000')
+    assert g == FVal('523267356.186572')
 
     a += b
     assert a == FVal('7.33')
@@ -49,7 +55,7 @@ def test_arithmetic_with_int():
     assert 2 + a == FVal('7.21')
     assert 2 - a == FVal('-3.21')
     assert 2 * a == FVal('10.42')
-    assert 2 / a == FVal('0.3838771593090211132437619962')
+    assert 2 / a == FVal('0.383877159309021113243761996161228406909788867562380038387715930902111324376200')  # noqa: E501
     assert 2 // a == FVal('0')
 
 
@@ -110,13 +116,13 @@ def test_representation():
 
 
 def test_encoding():
-    data = {'a': 3.14, 'b': 5, 'c': 'foo', 'd': '5.42323143', 'e': {'u1': '3.221'},
+    data = {'a': math.pi, 'b': 5, 'c': 'foo', 'd': '5.42323143', 'e': {'u1': '3.221'},
             'f': [2.1, 'boo', 3, '4.2324']}
     strdata = rlk_jsondumps(data)
     # stupid test, as it will fail if different python version is used. Should just
     # have used decoding again to make sure they are the same but was lazy
     assert strdata == (
-        '{"a": 3.14, "b": 5, "c": "foo", "d": "5.42323143", '
+        '{"a": 3.141592653589793, "b": 5, "c": "foo", "d": "5.42323143", '
         '"e": {"u1": "3.221"}, "f": [2.1, "boo", 3, "4.2324"]}'
     )
 
@@ -158,3 +164,14 @@ def test_initialize_with_bool_fails():
         FVal(True)
     with pytest.raises(ValueError):
         FVal(False)
+
+
+def test_calculations_with_large_values():
+    assert str(
+        FVal(115792089237316195423570985008687907853269984665640564034996606767801203425279) /
+        FVal(10) ** 18,
+    ) == '115792089237316195423570985008687907853269984665640564034996.606767801203425279'
+    assert str(FVal(2) ** 256) == '115792089237316195423570985008687907853269984665640564039457584007913129639936'  # noqa: E501
+    assert FVal(
+        115792089237316195423570985008687907853269984665640564039457584007913129639936,
+    ) + 1 == FVal(115792089237316195423570985008687907853269984665640564039457584007913129639937)

@@ -28,7 +28,7 @@ from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_proper_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     assert_simple_ok_response,
 )
 from rotkehlchen.types import Location, Timestamp
@@ -301,12 +301,12 @@ def validate_timestamp(
         if display_date_in_localtime:  # Check that it respects the timezone
             expected_datetime = datetime.datetime.fromtimestamp(
                 expected_utc_timestamp,
-                tz=datetime.datetime.now(datetime.timezone.utc).astimezone().tzinfo,
+                tz=datetime.datetime.now(datetime.UTC).astimezone().tzinfo,
             ).strftime('%Y-%m-%d %H:%M:%S')
         else:  # Should be a stringified utc timestamp
             expected_datetime = datetime.datetime.fromtimestamp(
                 expected_utc_timestamp,
-                tz=datetime.timezone.utc,
+                tz=datetime.UTC,
             ).strftime('%Y-%m-%d %H:%M:%S')
 
         assert received_serialized_timestamp == expected_datetime
@@ -723,7 +723,7 @@ def test_get_snapshot_json(rotkehlchen_api_server):
             timestamp=ts,
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['balances_snapshot']) == 2
     assert len(result['location_data_snapshot']) == 3
 
@@ -789,7 +789,7 @@ def test_edit_snapshot(rotkehlchen_api_server):
             timestamp=ts,
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['balances_snapshot']) == 2
     assert len(result['location_data_snapshot']) == 2
     assert result == snapshot_payload
@@ -838,7 +838,7 @@ def test_edit_snapshot(rotkehlchen_api_server):
             timestamp=ts,
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['balances_snapshot']) == 2
     assert len(result['location_data_snapshot']) == 2
     assert result == snapshot_payload

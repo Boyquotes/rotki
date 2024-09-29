@@ -182,7 +182,8 @@ DB_CREATE_ASSET_COLLECTIONS = """
 CREATE TABLE IF NOT EXISTS asset_collections(
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
-    symbol TEXT NOT NULL
+    symbol TEXT NOT NULL,
+    UNIQUE (name, symbol)
 );
 """
 
@@ -211,6 +212,10 @@ INSERT OR IGNORE INTO price_history_source_types(type, seq) VALUES ('D', 4);
 INSERT OR IGNORE INTO price_history_source_types(type, seq) VALUES ('E', 5);
 /* DEFILLAMA */
 INSERT OR IGNORE INTO price_history_source_types(type, seq) VALUES ('F', 6);
+/* UNISWAPV2 */
+INSERT OR IGNORE INTO price_history_source_types(type, seq) VALUES ('G', 7);
+/* UNISWAPV3 */
+INSERT OR IGNORE INTO price_history_source_types(type, seq) VALUES ('H', 8);
 """
 
 DB_CREATE_PRICE_HISTORY = """
@@ -241,14 +246,14 @@ CREATE TABLE IF NOT EXISTS binance_pairs (
 DB_CREATE_ADDRESS_BOOK = """
 CREATE TABLE IF NOT EXISTS address_book (
     address TEXT NOT NULL,
-    blockchain TEXT,
+    blockchain TEXT NOT NULL,
     name TEXT NOT NULL,
     PRIMARY KEY(address, blockchain)
 );
 """
 
 # Similar to the common_asset_details table this table is used for custom assets that the user
-# wants to to track. Also we use the asset identifier to relate this table with the assets table
+# wants to track. Also we use the asset identifier to relate this table with the assets table
 # allowing a cascade on delete. The notes fields allows for adding relevant information about the
 # asset by the user. The type field is a string field that is filled by the user. This allows to
 # createsomething like a label so the user can visually see what kind of assets (s)he has. All the
@@ -287,7 +292,7 @@ CREATE TABLE IF NOT EXISTS unique_cache (
 DB_CREATE_CONTRACT_ABI = """
 CREATE TABLE IF NOT EXISTS contract_abi (
     id INTEGER NOT NULL PRIMARY KEY,
-    value TEXT NOT NULL,
+    value TEXT NOT NULL UNIQUE,
     name TEXT
 );
 """
@@ -300,6 +305,26 @@ CREATE TABLE IF NOT EXISTS contract_data (
     deployed_block INTEGER,
     FOREIGN KEY(abi) REFERENCES contract_abi(id) ON UPDATE CASCADE ON DELETE SET NULL,
     PRIMARY KEY(address, chain_id)
+);
+"""
+
+# Used to store exchange specific asset's symbol mappings with their identifiers.
+# location column is not made as FK like in user DB because it can be NULL,
+# which means the asset mapping is common for all the exchanges.
+DB_CREATE_LOCATION_ASSET_MAPPINGS = """
+CREATE TABLE IF NOT EXISTS location_asset_mappings (
+    location TEXT,
+    exchange_symbol TEXT NOT NULL,
+    local_id TEXT NOT NULL COLLATE NOCASE,
+    UNIQUE (location, exchange_symbol)
+);
+"""
+
+DB_CREATE_LOCATION_UNSUPPORTED_ASSETS = """
+CREATE TABLE IF NOT EXISTS location_unsupported_assets (
+    location CHAR(1) NOT NULL,
+    exchange_symbol TEXT NOT NULL,
+    UNIQUE (location, exchange_symbol)
 );
 """
 
@@ -326,6 +351,8 @@ BEGIN TRANSACTION;
 {DB_CREATE_CONTRACT_ABI}
 {DB_CREATE_CONTRACT_DATA}
 {DB_CREATE_DEFAULT_RPC_NODES}
+{DB_CREATE_LOCATION_ASSET_MAPPINGS}
+{DB_CREATE_LOCATION_UNSUPPORTED_ASSETS}
 COMMIT;
 PRAGMA foreign_keys=on;
 """

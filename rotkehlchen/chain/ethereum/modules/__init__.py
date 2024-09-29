@@ -1,13 +1,13 @@
 __all__ = [
+    'MODULE_NAME_TO_PATH',
     'Balancer',
+    'Liquity',
     'Loopring',
     'MakerdaoDsr',
     'MakerdaoVaults',
+    'PickleFinance',
     'YearnVaults',
     'YearnVaultsV2',
-    'Liquity',
-    'PickleFinance',
-    'MODULE_NAME_TO_PATH',
 ]
 
 # to avoid some circular imports some of the paths are moved in a mapping here
@@ -15,7 +15,7 @@ MODULE_NAME_TO_PATH = {
     'nfts': '.nft.nfts',
     'eth2': '.eth2.eth2',
     'aave': '.aave.aave',
-    'compound': '.compound.v2.compound',
+    'compound': '.compound.compound',
     'sushiswap': '.sushiswap.sushiswap',
     'uniswap': '.uniswap.uniswap',
 }

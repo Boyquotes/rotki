@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { type DefiProtocol } from '@rotki/common/lib/blockchain';
+import type { DefiProtocol } from '@/types/modules';
 
 interface DefiProtocolInfo {
   readonly identifier: string;
@@ -12,20 +12,18 @@ const props = defineProps<{
 }>();
 const { item } = toRefs(props);
 
-const getIcon = ({ protocol }: DefiProtocolInfo): string =>
-  protocol.startsWith('makerdao') ? 'makerdao' : protocol;
+function getIcon({ protocol }: DefiProtocolInfo): string {
+  return protocol.startsWith('makerdao') ? 'makerdao' : protocol;
+}
 </script>
 
 <template>
-  <div class="flex flex-row items-center">
-    <VImg
-      aspect-ratio="1"
+  <div class="flex flex-row items-center gap-2">
+    <AppImage
       contain
-      position="left"
-      width="26px"
-      max-height="24px"
+      size="24px"
       :src="`./assets/images/protocols/${getIcon(item)}.svg`"
     />
-    <span class="ml-2">{{ item.label ?? item.identifier }}</span>
+    {{ item.label ?? item.identifier }}
   </div>
 </template>

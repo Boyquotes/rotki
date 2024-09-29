@@ -1,153 +1,134 @@
 <script setup lang="ts">
-import { type ComputedRef } from 'vue';
-import { type StyleValue } from 'vue/types/jsx';
-import { type GalleryNft } from '@/types/nfts';
+import type { StyleValue } from 'vue';
+import type { GalleryNft } from '@/types/nfts';
 
 const props = defineProps<{
   item: GalleryNft;
 }>();
 
 const { item } = toRefs(props);
-const { shouldRenderImage } = useNfts();
 
 const frontendStore = useFrontendSettingsStore();
 
 const { whitelistedDomainsForNftImages } = storeToRefs(frontendStore);
 const { updateSetting } = frontendStore;
 
-const imageUrlSource: ComputedRef<string | null> = computed(
-  () => get(item).imageUrl
-);
+const imageUrlSource = computed<string | null>(() => get(item).imageUrl);
 
-const name = computed(() =>
-  get(item).name ? get(item).name : get(item).collection.name
-);
+const { shouldRender, isVideo, renderedMedia } = useNftImage(imageUrlSource);
 
-const renderImage: ComputedRef<boolean> = computed(() => {
-  const image = get(imageUrlSource);
-
-  if (!image) {
-    return true;
-  }
-
-  return shouldRenderImage(image);
-});
-
-const imageUrl = computed(() => {
-  const image = get(imageUrlSource);
-
-  if (!image || !get(renderImage)) {
-    return './assets/images/placeholder.svg';
-  }
-
-  return image;
-});
-
-const isMediaVideo = computed(() => isVideo(get(imageUrl)));
+const name = computed(() => (get(item).name ? get(item).name : get(item).collection.name));
 
 const { t } = useI18n();
-const css = useCssModule();
 
-const domain: ComputedRef<string | null> = computed(() =>
-  getDomain(get(imageUrlSource) || '')
-);
+const domain = computed<string | null>(() => getDomain(get(imageUrlSource) || ''));
 
 const { show } = useConfirmStore();
 
-const showAllowDomainConfirmation = () => {
+function showAllowDomainConfirmation() {
   show(
     {
-      title: t(
-        'general_settings.nft_setting.update_whitelist_confirmation.title'
-      ),
+      title: t('general_settings.nft_setting.update_whitelist_confirmation.title'),
       message: t(
         'general_settings.nft_setting.update_whitelist_confirmation.message',
         {
-          domain: get(domain)
+          domain: get(domain),
         },
-        2
-      )
+        2,
+      ),
     },
-    allowDomain
+    allowDomain,
   );
-};
+}
 
-const allowDomain = () => {
+function allowDomain() {
   const domainVal = get(domain);
 
-  if (!domainVal) {
+  if (!domainVal)
     return;
-  }
 
-  const newWhitelisted = [
-    ...get(whitelistedDomainsForNftImages),
-    domainVal
-  ].filter(uniqueStrings);
+  const newWhitelisted = [...get(whitelistedDomainsForNftImages), domainVal].filter(uniqueStrings);
 
   updateSetting({ whitelistedDomainsForNftImages: newWhitelisted });
-};
+}
 
-const mediaStyle: ComputedRef<StyleValue> = computed(() => {
+const mediaStyle = computed<StyleValue>(() => {
   const backgroundColor = get(item).backgroundColor;
-  if (!get(renderImage) || !backgroundColor) {
+  if (!get(shouldRender) || !backgroundColor)
     return {};
-  }
 
   return { backgroundColor };
 });
 </script>
 
 <template>
-  <RuiCard no-padding class="mx-auto overflow-hidden">
-    <div class="relative">
+  <RuiCard
+    no-padding
+    class="mx-auto overflow-hidden"
+  >
+    <div class="relative flex">
       <RuiTooltip
         :popper="{ placement: 'top' }"
-        :disabled="renderImage"
-        open-delay="400"
+        :disabled="shouldRender"
+        :open-delay="400"
         class="w-full"
         tooltip-class="max-w-[10rem]"
       >
         <template #activator>
-          <BaseExternalLink :href="item.externalLink" class="w-full">
+          <ExternalLink
+            :url="item.externalLink"
+            class="w-full"
+            custom
+          >
             <video
-              v-if="isMediaVideo"
+              v-if="isVideo"
               controls
               width="auto"
-              :src="imageUrl"
+              :src="renderedMedia"
               :style="mediaStyle"
+              class="w-full"
+              :class="$style.media"
             />
-            <VImg
+            <AppImage
               v-else
-              :src="imageUrl"
+              :src="renderedMedia"
               contain
-              aspect-ratio="1"
               :style="mediaStyle"
+              width="100%"
+              :class="$style.media"
             />
-          </BaseExternalLink>
+          </ExternalLink>
         </template>
 
         {{ t('nft_balance_table.hidden_hint') }}
       </RuiTooltip>
 
       <RuiTooltip
-        v-if="!renderImage"
+        v-if="!shouldRender"
         :popper="{ placement: 'top' }"
-        open-delay="400"
-        :class="css['unlock-button']"
+        :open-delay="400"
+        :class="$style['unlock-button']"
       >
         <template #activator>
-          <RuiButton class="!p-2" icon @click="showAllowDomainConfirmation()">
-            <RuiIcon name="lock-unlock-line" size="16" />
+          <RuiButton
+            class="!p-2"
+            icon
+            @click="showAllowDomainConfirmation()"
+          >
+            <RuiIcon
+              name="lock-unlock-line"
+              size="16"
+            />
           </RuiButton>
         </template>
         {{ t('nft_gallery.allow_domain') }}
         <strong class="text-rui-warning-lighter">{{ domain }}</strong>
       </RuiTooltip>
     </div>
-    <div class="flex items-center justify-between gap-2 px-4 mt-2">
+    <div class="p-4">
       <RuiTooltip
         :popper="{ placement: 'top' }"
-        open-delay="400"
+        :open-delay="400"
         tooltip-class="max-w-[20rem]"
         class="text-truncate block text-subtitle-1 font-medium"
       >
@@ -156,36 +137,45 @@ const mediaStyle: ComputedRef<StyleValue> = computed(() => {
         </template>
         {{ name }}
       </RuiTooltip>
-      <AmountDisplay
-        class="text-rui-text-secondary text-subtitle-2"
-        :value="item.priceInAsset"
-        :asset="item.priceAsset"
-      />
-    </div>
-    <div class="flex items-center justify-between gap-2 px-4">
       <RuiTooltip
         :popper="{ placement: 'top' }"
-        open-delay="400"
-        tooltip-class="max-w-[20rem]"
-        class="text-truncate block text-subtitle-1 font-medium"
+        :open-delay="400"
+        tooltip-class="max-w-[20rem] text-truncate overflow-hidden"
+        class="pt-1 text-truncate max-w-full"
       >
         <template #activator>
-          {{ item.collection.name }}
+          <RuiChip
+            tile
+            size="sm"
+            class="font-medium text-caption"
+          >
+            {{ item.collection.name }}
+          </RuiChip>
         </template>
         {{ item.collection.description }}
       </RuiTooltip>
-      <AmountDisplay
-        class="text-rui-text-secondary text-subtitle-2"
-        :price-asset="item.priceAsset"
-        :amount="item.priceInAsset"
-        :value="item.priceUsd"
-        show-currency="ticker"
-        fiat-currency="USD"
-      />
+      <div class="pt-4 flex flex-col font-medium">
+        <AmountDisplay
+          :value="item.priceInAsset"
+          :asset="item.priceAsset"
+        />
+        <AmountDisplay
+          class="text-rui-text-secondary"
+          :price-asset="item.priceAsset"
+          :amount="item.priceInAsset"
+          :value="item.priceUsd"
+          show-currency="ticker"
+          fiat-currency="USD"
+        />
+      </div>
     </div>
     <template #footer>
-      <div class="grow" />
-      <IconLink v-if="item.permalink" :url="item.permalink" text="OpenSea" />
+      <IconLink
+        v-if="item.permalink"
+        :url="item.permalink"
+        class="-mt-2 -mx-1"
+        text="OpenSea"
+      />
     </template>
   </RuiCard>
 </template>
@@ -197,5 +187,10 @@ video {
 
 .unlock-button {
   @apply absolute right-2 bottom-2;
+}
+
+.media {
+  @apply object-contain;
+  aspect-ratio: 1 / 1;
 }
 </style>

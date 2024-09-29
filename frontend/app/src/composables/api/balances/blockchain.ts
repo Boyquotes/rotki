@@ -1,95 +1,81 @@
-import { type Blockchain } from '@rotki/common/lib/blockchain';
-import { type ActionResult } from '@rotki/common/lib/data';
-import { type Nullable } from '@rotki/common';
 import { snakeCaseTransformer } from '@/services/axios-tranformers';
 import { api } from '@/services/rotkehlchen-api';
 import {
   handleResponse,
   validStatus,
   validWithParamsSessionAndExternalService,
-  validWithSessionAndExternalService
+  validWithSessionAndExternalService,
 } from '@/services/utils';
-import { type Module } from '@/types/modules';
 import { EvmTokensRecord } from '@/types/balances';
-import { type PendingTask } from '@/types/task';
+import type { ActionResult, Nullable } from '@rotki/common';
+import type { PendingTask } from '@/types/task';
+import type { PurgeableModule } from '@/types/modules';
 
-export const useBlockchainBalancesApi = () => {
+interface UseBlockchainBalancesApiReturn {
+  queryBlockchainBalances: (ignoreCache?: boolean, blockchain?: string) => Promise<PendingTask>;
+  queryLoopringBalances: () => Promise<PendingTask>;
+  fetchDetectedTokens: (chain: string, addresses: string[] | null) => Promise<EvmTokensRecord>;
+  fetchDetectedTokensTask: (chain: string, addresses: string[]) => Promise<PendingTask>;
+  deleteModuleData: (module?: Nullable<PurgeableModule>) => Promise<boolean>;
+}
+
+export function useBlockchainBalancesApi(): UseBlockchainBalancesApiReturn {
   const queryLoopringBalances = async (): Promise<PendingTask> => {
-    const response = await api.instance.get<ActionResult<PendingTask>>(
-      'blockchains/eth/modules/loopring/balances',
-      {
-        params: snakeCaseTransformer({ asyncQuery: true }),
-        validateStatus: validWithSessionAndExternalService
-      }
-    );
+    const response = await api.instance.get<ActionResult<PendingTask>>('blockchains/eth/modules/loopring/balances', {
+      params: snakeCaseTransformer({ asyncQuery: true }),
+      validateStatus: validWithSessionAndExternalService,
+    });
     return handleResponse(response);
   };
 
-  const queryBlockchainBalances = async (
-    ignoreCache = false,
-    blockchain?: Blockchain
-  ): Promise<PendingTask> => {
+  const queryBlockchainBalances = async (ignoreCache = false, blockchain?: string): Promise<PendingTask> => {
     let url = '/balances/blockchains';
-    if (blockchain) {
+    if (blockchain)
       url += `/${blockchain}`;
-    }
+
     const response = await api.instance.get<ActionResult<PendingTask>>(url, {
       params: snakeCaseTransformer({
         asyncQuery: true,
-        ignoreCache: ignoreCache ? true : undefined
+        ignoreCache: ignoreCache ? true : undefined,
       }),
-      validateStatus: validWithParamsSessionAndExternalService
+      validateStatus: validWithParamsSessionAndExternalService,
     });
     return handleResponse(response);
   };
 
   const internalDetectedTokens = async <T>(
-    chain: Blockchain,
+    chain: string,
     addresses: string[] | null,
-    asyncQuery: boolean
+    asyncQuery: boolean,
   ): Promise<T> => {
     const response = await api.instance.post<ActionResult<T>>(
       `/blockchains/${chain}/tokens/detect`,
       snakeCaseTransformer({
         asyncQuery,
         onlyCache: !asyncQuery,
-        addresses
+        addresses,
       }),
       {
-        validateStatus: validWithParamsSessionAndExternalService
-      }
+        validateStatus: validWithParamsSessionAndExternalService,
+      },
     );
 
     return handleResponse(response);
   };
 
-  const fetchDetectedTokensTask = async (
-    chain: Blockchain,
-    addresses: string[]
-  ): Promise<PendingTask> =>
+  const fetchDetectedTokensTask = (chain: string, addresses: string[]): Promise<PendingTask> =>
     internalDetectedTokens<PendingTask>(chain, addresses, true);
 
-  const fetchDetectedTokens = async (
-    chain: Blockchain,
-    addresses: string[] | null
-  ): Promise<EvmTokensRecord> => {
-    const response = await internalDetectedTokens<EvmTokensRecord>(
-      chain,
-      addresses,
-      false
-    );
+  const fetchDetectedTokens = async (chain: string, addresses: string[] | null): Promise<EvmTokensRecord> => {
+    const response = await internalDetectedTokens<EvmTokensRecord>(chain, addresses, false);
 
     return EvmTokensRecord.parse(response);
   };
 
-  const deleteModuleData = async (
-    module: Nullable<Module> = null
-  ): Promise<boolean> => {
-    const url = module
-      ? `/blockchains/eth/modules/${module}/data`
-      : `/blockchains/eth/modules/data`;
+  const deleteModuleData = async (module: Nullable<PurgeableModule> = null): Promise<boolean> => {
+    const url = module ? `/blockchains/eth/modules/${module}/data` : `/blockchains/eth/modules/data`;
     const response = await api.instance.delete<ActionResult<boolean>>(url, {
-      validateStatus: validStatus
+      validateStatus: validStatus,
     });
 
     return handleResponse(response);
@@ -100,6 +86,6 @@ export const useBlockchainBalancesApi = () => {
     queryLoopringBalances,
     fetchDetectedTokens,
     fetchDetectedTokensTask,
-    deleteModuleData
+    deleteModuleData,
   };
-};
+}

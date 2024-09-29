@@ -13,16 +13,12 @@ const updated = () => emit('updated');
 
 const multiplier = ref<string>('0');
 
-const { ssfGraphMultiplier: multiplierSetting, balanceSaveFrequency } =
-  storeToRefs(useGeneralSettingsStore());
+const { ssfGraphMultiplier: multiplierSetting, balanceSaveFrequency } = storeToRefs(useGeneralSettingsStore());
 
 const rules = {
   multiplier: {
-    min: helpers.withMessage(
-      t('statistics_graph_settings.multiplier.validations.positive_number'),
-      minValue(0)
-    )
-  }
+    min: helpers.withMessage(t('statistics_graph_settings.multiplier.validations.positive_number'), minValue(0)),
+  },
 };
 const v$ = useVuelidate(rules, { multiplier }, { $autoDirty: true });
 const { callIfValid } = useValidation(v$);
@@ -34,22 +30,22 @@ const numericMultiplier = computed(() => {
 
 const period = computed(() => {
   const multi = get(numericMultiplier);
-  if (multi <= 0) {
+  if (multi <= 0)
     return 0;
-  }
+
   return multi * get(balanceSaveFrequency);
 });
 
-const resetState = () => {
+function resetState() {
   set(multiplier, get(multiplierSetting).toString());
-};
+}
 
 const transform = () => get(numericMultiplier);
 
-const finished = () => {
+function finished() {
   resetState();
   updated();
-};
+}
 
 onMounted(() => {
   resetState();
@@ -58,37 +54,40 @@ onMounted(() => {
 
 <template>
   <div>
-    <CardTitle class="font-medium mb-2">
-      {{ t('statistics_graph_settings.multiplier.title') }}
-    </CardTitle>
-    <VCardSubtitle class="pa-0 mb-4">
-      {{ t('statistics_graph_settings.multiplier.subtitle') }}
-    </VCardSubtitle>
+    <RuiCardHeader class="p-0 mb-6">
+      <template #header>
+        {{ t('statistics_graph_settings.multiplier.title') }}
+      </template>
+      <template #subheader>
+        {{ t('statistics_graph_settings.multiplier.subtitle') }}
+      </template>
+    </RuiCardHeader>
     <SettingsOption
       #default="{ error, success, update }"
       setting="ssfGraphMultiplier"
       :transform="transform"
       @finished="finished()"
     >
-      <VTextField
+      <RuiTextField
         v-model="multiplier"
-        outlined
+        variant="outlined"
+        color="primary"
         min="0"
         :label="t('statistics_graph_settings.multiplier.label')"
         type="number"
-        :success-messages="success"
+        :messages="success"
         :error-messages="error || toMessages(v$.multiplier)"
-        @change="callIfValid($event, update)"
+        @update:model-value="callIfValid($event, update)"
       />
     </SettingsOption>
 
-    <VCardSubtitle class="pa-0 mt-2">
+    <div class="text-body-2 text-rui-text-secondary mt-2">
       <span v-if="period === 0">
         {{ t('statistics_graph_settings.multiplier.off') }}
       </span>
       <span v-else>
         {{ t('statistics_graph_settings.multiplier.on', { period }) }}
       </span>
-    </VCardSubtitle>
+    </div>
   </div>
 </template>

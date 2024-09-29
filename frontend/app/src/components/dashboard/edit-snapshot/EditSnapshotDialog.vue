@@ -1,11 +1,5 @@
 <script setup lang="ts">
-import { type ComputedRef, type Ref } from 'vue';
-import {
-  type BalanceSnapshot,
-  type LocationDataSnapshot,
-  type Snapshot,
-  type SnapshotPayload
-} from '@/types/snapshots';
+import type { BalanceSnapshot, LocationDataSnapshot, Snapshot, SnapshotPayload } from '@/types/snapshots';
 
 const props = defineProps<{
   timestamp: number;
@@ -18,7 +12,7 @@ const emit = defineEmits<{
 
 const { timestamp } = toRefs(props);
 
-const snapshotData: Ref<Snapshot | null> = ref(null);
+const snapshotData = ref<Snapshot | null>(null);
 const step = ref<number>(1);
 const { fetchNetValue } = useStatisticsStore();
 
@@ -26,19 +20,17 @@ const api = useSnapshotApi();
 
 const { t } = useI18n();
 
-const balancesSnapshot: ComputedRef<BalanceSnapshot[]> = computed(() => {
+const balancesSnapshot = computed<BalanceSnapshot[]>(() => {
   const data = get(snapshotData);
   return !data ? [] : (data.balancesSnapshot as BalanceSnapshot[]);
 });
 
-const locationDataSnapshot: ComputedRef<LocationDataSnapshot[]> = computed(
-  () => {
-    const data = get(snapshotData);
-    return !data ? [] : (data.locationDataSnapshot as LocationDataSnapshot[]);
-  }
-);
+const locationDataSnapshot = computed<LocationDataSnapshot[]>(() => {
+  const data = get(snapshotData);
+  return !data ? [] : (data.locationDataSnapshot as LocationDataSnapshot[]);
+});
 
-const fetchSnapshotData = async () => {
+async function fetchSnapshotData() {
   const result = await api.getSnapshotData(get(timestamp));
 
   const { balancesSnapshot, locationDataSnapshot } = result;
@@ -46,53 +38,50 @@ const fetchSnapshotData = async () => {
   locationDataSnapshot.sort((a, b) => sortDesc(a.usdValue, b.usdValue));
   set(snapshotData, {
     balancesSnapshot,
-    locationDataSnapshot
+    locationDataSnapshot,
   });
-};
+}
 
 onMounted(async () => {
   await fetchSnapshotData();
 });
 
-const close = () => {
+function close() {
   emit('close');
-};
+}
 
 const { notify } = useNotificationsStore();
 
-const updateLocationDataSnapshot = (
-  locationDataSnapshot: LocationDataSnapshot[]
-) => {
+function updateLocationDataSnapshot(locationDataSnapshot: LocationDataSnapshot[]) {
   const data = get(snapshotData);
 
   const newData = {
     balancesSnapshot: data?.balancesSnapshot || [],
-    locationDataSnapshot
+    locationDataSnapshot,
   };
 
   set(snapshotData, newData);
-};
+}
 
-const save = async (): Promise<boolean> => {
+async function save(): Promise<boolean> {
   const data = get(snapshotData);
-  if (!data) {
+  if (!data)
     return false;
-  }
 
   const payload: SnapshotPayload = {
     balancesSnapshot: [],
-    locationDataSnapshot: []
+    locationDataSnapshot: [],
   };
 
   payload.balancesSnapshot = data.balancesSnapshot.map(item => ({
     ...item,
     amount: item.amount.toFixed(),
-    usdValue: item.usdValue.toFixed()
+    usdValue: item.usdValue.toFixed(),
   }));
 
   payload.locationDataSnapshot = data.locationDataSnapshot.map(item => ({
     ...item,
-    usdValue: item.usdValue.toFixed()
+    usdValue: item.usdValue.toFixed(),
   }));
 
   let result = false;
@@ -101,117 +90,135 @@ const save = async (): Promise<boolean> => {
     notify({
       title: t('dashboard.snapshot.edit.dialog.message.title'),
       message: t('dashboard.snapshot.edit.dialog.message.error', {
-        message: e
+        message: e,
       }),
-      display: true
+      display: true,
     });
   };
 
   try {
     result = await api.updateSnapshotData(get(timestamp), payload);
 
-    if (!result) {
+    if (!result)
       notifyError();
-    }
-  } catch (e: any) {
-    notifyError(e);
+  }
+  catch (error: any) {
+    notifyError(error);
   }
 
-  if (result) {
+  if (result)
     await fetchSnapshotData();
-  }
 
   return result;
-};
+}
 
 const { setMessage } = useMessageStore();
 
-const finish = async () => {
+async function finish() {
   const success = await save();
 
   if (success) {
     setMessage({
       title: t('dashboard.snapshot.edit.dialog.message.title'),
       description: t('dashboard.snapshot.edit.dialog.message.success'),
-      success: true
+      success: true,
     });
     await fetchNetValue();
     emit('finish');
   }
-};
+}
 
-const updateAndSave = (event: LocationDataSnapshot[]) => {
+function updateAndSave(event: LocationDataSnapshot[]) {
   updateLocationDataSnapshot(event);
   save();
-};
+}
 
-const updateAndComplete = (event: LocationDataSnapshot[]) => {
+function updateAndComplete(event: LocationDataSnapshot[]) {
   updateLocationDataSnapshot(event);
   finish();
-};
+}
+
+const steps = computed(() => [
+  {
+    title: t('dashboard.snapshot.edit.dialog.balances.title'),
+  },
+  {
+    title: t('dashboard.snapshot.edit.dialog.location_data.title'),
+  },
+  {
+    title: t('common.total'),
+  },
+]);
 </script>
 
 <template>
-  <VDialog persistent :value="true" max-width="1400">
-    <div>
+  <RuiDialog
+    persistent
+    :model-value="true"
+    max-width="1400"
+  >
+    <RuiCard
+      no-padding
+      variant="flat"
+      class="overflow-hidden"
+    >
       <div class="flex bg-rui-primary text-white p-2">
-        <RuiButton variant="text" icon @click="close()">
-          <RuiIcon class="text-white" name="close-line" />
+        <RuiButton
+          variant="text"
+          icon
+          @click="close()"
+        >
+          <RuiIcon
+            class="text-white"
+            name="close-line"
+          />
         </RuiButton>
 
         <h5 class="pl-2 text-h5 flex items-center">
-          <i18n path="dashboard.snapshot.edit.dialog.title">
+          <i18n-t
+            keypath="dashboard.snapshot.edit.dialog.title"
+            tag="span"
+          >
             <template #date>
               <DateDisplay :timestamp="timestamp" />
             </template>
-          </i18n>
+          </i18n-t>
         </h5>
       </div>
 
       <div v-if="snapshotData">
-        <VStepper v-model="step" class="!rounded-none">
-          <VStepperHeader
-            class="border-b-2 border-rui-grey-300 dark:border-rui-grey-800 shadow-none"
-          >
-            <VStepperStep :step="1">
-              {{ t('dashboard.snapshot.edit.dialog.balances.title') }}
-            </VStepperStep>
-            <VStepperStep :step="2">
-              {{ t('dashboard.snapshot.edit.dialog.location_data.title') }}
-            </VStepperStep>
-            <VStepperStep :step="3">
-              {{ t('common.total') }}
-            </VStepperStep>
-          </VStepperHeader>
-          <VStepperItems>
-            <VStepperContent :step="1" class="p-0">
-              <EditBalancesSnapshotTable
-                v-model="snapshotData"
-                :timestamp="timestamp"
-                @update:step="step = $event"
-                @input="save()"
-              />
-            </VStepperContent>
-            <VStepperContent :step="2" class="p-0">
-              <EditLocationDataSnapshotTable
-                :value="locationDataSnapshot"
-                :timestamp="timestamp"
-                @update:step="step = $event"
-                @input="updateAndSave($event)"
-              />
-            </VStepperContent>
-            <VStepperContent :step="3" class="p-0">
-              <EditSnapshotTotal
-                v-if="step === 3"
-                :value="locationDataSnapshot"
-                :balances-snapshot="balancesSnapshot"
-                :timestamp="timestamp"
-                @update:step="step = $event"
-                @input="updateAndComplete($event)"
-              />
-            </VStepperContent>
-          </VStepperItems>
-        </VStepper>
+        <RuiStepper
+          :steps="steps"
+          :step="step"
+          class="py-4 border-b-2 border-default"
+        />
+        <RuiTabItems v-model="step">
+          <RuiTabItem :value="1">
+            <EditBalancesSnapshotTable
+              v-model="snapshotData"
+              :timestamp="timestamp"
+              @update:step="step = $event"
+              @update:model-value="save()"
+            />
+          </RuiTabItem>
+          <RuiTabItem :value="2">
+            <EditLocationDataSnapshotTable
+              :model-value="locationDataSnapshot"
+              :timestamp="timestamp"
+              @update:step="step = $event"
+              @update:model-value="updateAndSave($event)"
+            />
+          </RuiTabItem>
+          <RuiTabItem :value="3">
+            <EditSnapshotTotal
+              :model-value="locationDataSnapshot"
+              :balances-snapshot="balancesSnapshot"
+              :timestamp="timestamp"
+              @update:step="step = $event"
+              @update:model-value="updateAndComplete($event)"
+            />
+          </RuiTabItem>
+        </RuiTabItems>
       </div>
       <div
         v-else
@@ -228,17 +235,6 @@ const updateAndComplete = (event: LocationDataSnapshot[]) => {
           {{ t('dashboard.snapshot.edit.dialog.fetch.loading') }}
         </div>
       </div>
-    </div>
-  </VDialog>
+    </RuiCard>
+  </RuiDialog>
 </template>
-
-<style module lang="scss">
-.asset-select {
-  max-width: 640px;
-}
-
-.raise {
-  position: relative;
-  z-index: 2;
-}
-</style>

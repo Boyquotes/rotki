@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal, NamedTuple, Optional
 
@@ -12,22 +13,32 @@ if TYPE_CHECKING:
     from rotkehlchen.types import EvmTransaction
 
 
-class ActionItem(NamedTuple):
+@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
+class ActionItem:
     """Action items to propagate to other decoders during decoding"""
     action: Literal['transform', 'skip', 'skip & keep']
     from_event_type: 'HistoryEventType'
     from_event_subtype: 'HistoryEventSubType'
     asset: 'Asset'
-    amount: 'FVal'
+    amount: Optional['FVal'] = None
+    location_label: str | None = None
+    address: ChecksumEvmAddress | None = None
     to_event_type: Optional['HistoryEventType'] = None
     to_event_subtype: Optional['HistoryEventSubType'] = None
     to_notes: str | None = None
     to_counterparty: str | None = None
     to_address: ChecksumEvmAddress | None = None
+    to_location_label: str | None = None
     extra_data: dict | None = None
-    # Optional event data that pairs it with the event of the action item
+    # Optional events data that pairs them with the event of the action item
     # Contains a tuple with the paired event and whether it's an out event (True) or in event
-    paired_event_data: tuple['EvmEvent', bool] | None = None
+    # This is a way to control the order of the action item generated event relative
+    # to the paired events.
+    paired_events_data: tuple[Sequence['EvmEvent'], bool] | None = None
+    # Error tolerance that can be used for protocols having rounding errors. Such as with stETH (https://github.com/lidofinance/lido-dao/issues/442)
+    # In those cases the notes should also be formatted to have an amount as format string since at
+    # action item matching this format will populate the note with the actual amount
+    amount_error_tolerance: Optional['FVal'] = None
 
 
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
@@ -57,7 +68,7 @@ class DecodingOutput:
     """
     Output of decoding functions
 
-    - event can be returned if the decodeing method has generated a new event and it needs to be
+    - event can be returned if the decoding method has generated a new event and it needs to be
     added to the list of other decoded events.
     - action_items is a list of actions to be performed later automatically or to be passed
     in further decoding methods.

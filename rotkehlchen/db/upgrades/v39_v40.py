@@ -9,18 +9,17 @@ from rotkehlchen.constants import ZERO
 from rotkehlchen.db.constants import (
     HISTORY_MAPPING_KEY_STATE,
     HISTORY_MAPPING_STATE_CUSTOMIZED,
-    HISTORY_MAPPING_STATE_DECODED,
     NO_ACCOUNTING_COUNTERPARTY,
 )
 from rotkehlchen.db.utils import update_table_schema
 from rotkehlchen.errors.serialization import DeserializationError
-from rotkehlchen.logging import RotkehlchenLogsAdapter
+from rotkehlchen.logging import RotkehlchenLogsAdapter, enter_exit_debug_log
 from rotkehlchen.serialization.deserialize import deserialize_fval
 from rotkehlchen.types import Location
 
 if TYPE_CHECKING:
     from rotkehlchen.db.dbhandler import DBHandler
-    from rotkehlchen.db.drivers.gevent import DBCursor, DBConnection
+    from rotkehlchen.db.drivers.gevent import DBConnection, DBCursor
     from rotkehlchen.db.upgrade_manager import DBUpgradeProgressHandler
 
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
@@ -60,12 +59,12 @@ LEDGER_ACTION_TYPE_TO_NAME = {
 }
 
 
+@enter_exit_debug_log()
 def _migrate_rotki_events(write_cursor: 'DBCursor') -> None:
     """
     Migrate rotki events that were broken due to https://github.com/rotki/rotki/issues/6550.
     and events that need to update their types after the consolidation made in 1.31
     """
-    log.debug('Enter _migrate_rotki_events')
     write_cursor.executemany(  # update types by event identifier
         'UPDATE history_events SET type=?, subtype=? WHERE '
         'event_identifier LIKE ? AND type=? AND subtype=?',
@@ -82,12 +81,11 @@ def _migrate_rotki_events(write_cursor: 'DBCursor') -> None:
         ) for to_type, to_subtype, from_type, from_subtype in TYPES_REMAPPED],
     )
     write_cursor.execute('DELETE from used_query_ranges WHERE name=?', ('last_withdrawals_query_ts',))  # noqa: E501
-    log.debug('Exit _migrate_rotki_events')
 
 
+@enter_exit_debug_log()
 def _upgrade_rotki_events(write_cursor: 'DBCursor') -> None:
     """Upgrade the rotki events schema table to specify location as a type"""
-    log.debug('Enter _upgrade_rotki_events')
     write_cursor.executescript('PRAGMA foreign_keys = OFF;')
     update_table_schema(
         write_cursor=write_cursor,
@@ -109,9 +107,9 @@ def _upgrade_rotki_events(write_cursor: 'DBCursor') -> None:
         UNIQUE(event_identifier, sequence_index)""",
     )
     write_cursor.executescript('PRAGMA foreign_keys = ON;')
-    log.debug('Exit _upgrade_rotki_events')
 
 
+@enter_exit_debug_log()
 def _purge_kraken_events(write_cursor: 'DBCursor') -> None:
     """
     Purge kraken events, after the changes that allows for processing of new assets.
@@ -121,7 +119,6 @@ def _purge_kraken_events(write_cursor: 'DBCursor') -> None:
 
     This just mimics DBHandler::purge_exchange_data
     """
-    log.debug('Enter _reset_kraken_events')
     write_cursor.execute(
         'DELETE FROM used_query_ranges WHERE name LIKE ? ESCAPE ?;',
         (f'{Location.KRAKEN!s}\\_%', '\\'),
@@ -130,19 +127,17 @@ def _purge_kraken_events(write_cursor: 'DBCursor') -> None:
     for table in ('trades', 'asset_movements', 'history_events'):
         write_cursor.execute(f'DELETE FROM {table} WHERE location = ?;', (location,))
 
-    log.debug('Exit _reset_kraken_events')
 
-
+@enter_exit_debug_log()
 def _add_new_supported_chains_locations(write_cursor: 'DBCursor') -> None:
-    log.debug('Enter _add_new_supported_chains_locations')
     write_cursor.executemany(
         'INSERT OR IGNORE INTO location(location, seq) '
         'VALUES (?, ?)',
         (('j', 42), ('k', 43), ('l', 44)),
     )
-    log.debug('Exit _add_new_supported_chains_locations')
 
 
+@enter_exit_debug_log()
 def _migrate_ledger_actions(write_cursor: 'DBCursor', conn: 'DBConnection') -> None:
     """
     Migrate all ledger actions to history events, so that we can get rid of the
@@ -153,7 +148,6 @@ def _migrate_ledger_actions(write_cursor: 'DBCursor', conn: 'DBConnection') -> N
     Part of https://github.com/rotki/rotki/issues/6096. Requires the new tables to be
     already created.
     """
-    log.debug('Enter _migrate_ledger_actions')
     history_events = []
     with conn.read_ctx() as cursor:
         cursor.execute('SELECT timestamp, type, location, amount, asset, rate, rate_asset, link, notes FROM ledger_actions')  # noqa: E501
@@ -250,9 +244,8 @@ def _migrate_ledger_actions(write_cursor: 'DBCursor', conn: 'DBConnection') -> N
     write_cursor.execute('DELETE FROM ignored_actions WHERE type=?', ('D',))
     write_cursor.execute('DELETE FROM action_type WHERE type=?', ('D',))
 
-    log.debug('Exit _migrate_ledger_actions')
 
-
+@enter_exit_debug_log()
 def _migrate_ledger_airdrop_accounting_setting(write_cursor: 'DBCursor') -> None:
     """
     Migrates the accounting setting for airdrops to the new table for accounting
@@ -289,11 +282,11 @@ def _migrate_ledger_airdrop_accounting_setting(write_cursor: 'DBCursor') -> None
     )
 
 
+@enter_exit_debug_log()
 def _add_new_tables(write_cursor: 'DBCursor') -> None:
     """
     Add new tables for this upgrade
     """
-    log.debug('Entered _add_new_tables')
     write_cursor.execute("""CREATE TABLE IF NOT EXISTS skipped_external_events (
     identifier INTEGER NOT NULL PRIMARY KEY,
     data TEXT NOT NULL,
@@ -330,15 +323,14 @@ def _add_new_tables(write_cursor: 'DBCursor') -> None:
         type INTEGER NOT NULL
     );
     """)
-    log.debug('Exit _add_new_tables')
 
 
+@enter_exit_debug_log()
 def _reset_decoded_events(write_cursor: 'DBCursor') -> None:
     """
     Reset all decoded evm events except the customized ones for ethereum mainnet,
     arbitrum, optimism and polygon.
     """
-    log.debug('Enter _reset_decoded_events')
     if write_cursor.execute('SELECT COUNT(*) FROM evm_transactions').fetchone()[0] == 0:
         return
 
@@ -360,11 +352,11 @@ def _reset_decoded_events(write_cursor: 'DBCursor') -> None:
     write_cursor.execute(querystr, bindings)
     write_cursor.execute(
         'DELETE from evm_tx_mappings WHERE tx_id IN (SELECT identifier FROM evm_transactions) AND value=?',  # noqa: E501
-        (HISTORY_MAPPING_STATE_DECODED,),
+        (0,),  # decoded state
     )
-    log.debug('Exit _reset_decoded_events')
 
 
+@enter_exit_debug_log()
 def _replace_velo_identifier(write_cursor: 'DBCursor') -> None:
     """
     Replace VELO with the binance version of the token. This is done as part of a consolidation
@@ -374,7 +366,6 @@ def _replace_velo_identifier(write_cursor: 'DBCursor') -> None:
 
     Code taken from replace_asset_identifier
     """
-    log.debug('Enter _replace_velo_identifier')
     target_asset_identifier = 'eip155:56/erc20:0xf486ad071f3bEE968384D2E39e2D8aF0fCf6fd46'
     source_identifier = 'VELO'
 
@@ -388,9 +379,9 @@ def _replace_velo_identifier(write_cursor: 'DBCursor') -> None:
         'UPDATE assets SET identifier=? WHERE identifier=?;',
         (target_asset_identifier, source_identifier),
     )
-    log.debug('Exit _replace_velo_identifier')
 
 
+@enter_exit_debug_log(name='UserDB v39->v40 upgrade')
 def upgrade_v39_to_v40(db: 'DBHandler', progress_handler: 'DBUpgradeProgressHandler') -> None:
     """Upgrades the DB from v39 to v40. This was in v1.31.0 release.
 
@@ -399,7 +390,6 @@ def upgrade_v39_to_v40(db: 'DBHandler', progress_handler: 'DBUpgradeProgressHand
         - Create new tables
         - Replace VELO asset in favor of the binance chain version
     """
-    log.debug('Entered userdb v39->v40 upgrade')
     progress_handler.set_total_steps(10)
     with db.user_write() as write_cursor:
         _add_new_tables(write_cursor)
@@ -423,5 +413,3 @@ def upgrade_v39_to_v40(db: 'DBHandler', progress_handler: 'DBUpgradeProgressHand
 
     db.conn.execute('VACUUM;')
     progress_handler.new_step()
-
-    log.debug('Finished userdb v39->v40 upgrade')

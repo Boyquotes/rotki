@@ -4,8 +4,8 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Literal
 
-from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.assets.asset import EvmToken
+from rotkehlchen.accounting.structures.balance import Balance, BalanceSheet
+from rotkehlchen.assets.asset import Asset, EvmToken
 from rotkehlchen.chain.ethereum.utils import token_normalized_value
 from rotkehlchen.chain.evm.tokens import get_chunk_size_call_order
 from rotkehlchen.chain.evm.types import WeightedNode, string_to_evm_address
@@ -21,19 +21,34 @@ from rotkehlchen.types import ChecksumEvmAddress, Location
 from rotkehlchen.utils.misc import get_chunks
 
 if TYPE_CHECKING:
+    from rotkehlchen.chain.evm.decoding.decoder import EVMTransactionDecoder
     from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
-    from rotkehlchen.db.dbhandler import DBHandler
     from rotkehlchen.history.events.structures.evm_event import EvmEvent
-    from rotkehlchen.types import CHAIN_IDS_WITH_BALANCE_PROTOCOLS
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
-PROTOCOLS_WITH_BALANCES = Literal['curve', 'convex', 'velodrome', 'thegraph', 'octant']
-BalancesType = dict[ChecksumEvmAddress, dict[EvmToken, Balance]]
+PROTOCOLS_WITH_BALANCES = Literal[
+    'aerodrome',
+    'curve',
+    'convex',
+    'velodrome',
+    'thegraph',
+    'octant',
+    'eigenlayer',
+    'gmx',
+    'compound-v3',
+    'aave',
+    'blur',
+    'hop',
+    'gearbox',
+    'safe',
+    'extrafi',
+]
+BalancesSheetType = dict[ChecksumEvmAddress, BalanceSheet]
 
 
-class ProtocolWithBalance(metaclass=abc.ABCMeta):
+class ProtocolWithBalance(abc.ABC):
     """
     Interface for protocols that allow to lock tokens and don't return a liquid version of the
     token itself. For example curve gauges or yearn stacked eth. It only queries balances for
@@ -43,22 +58,21 @@ class ProtocolWithBalance(metaclass=abc.ABCMeta):
 
     def __init__(
             self,
-            database: 'DBHandler',
             evm_inquirer: 'EvmNodeInquirer',
-            chain_id: 'CHAIN_IDS_WITH_BALANCE_PROTOCOLS',
+            tx_decoder: 'EVMTransactionDecoder',
             counterparty: PROTOCOLS_WITH_BALANCES,
             deposit_event_types: set[tuple[HistoryEventType, HistoryEventSubType]],
     ):
         self.counterparty = counterparty
-        self.event_db = DBHistoryEvents(database)
+        self.event_db = DBHistoryEvents(evm_inquirer.database)
         self.evm_inquirer = evm_inquirer
-        self.chain_id = chain_id
+        self.tx_decoder = tx_decoder
         self.deposit_event_types = deposit_event_types
 
     def addresses_with_activity(
             self,
-            products: list['EvmProduct'] | None,
             event_types: set[tuple[HistoryEventType, HistoryEventSubType]],
+            products: list['EvmProduct'] | None = None,
     ) -> dict[ChecksumEvmAddress, list['EvmEvent']]:
         """
         Query events for addresses having performed a certain activity. It returns
@@ -67,7 +81,7 @@ class ProtocolWithBalance(metaclass=abc.ABCMeta):
         db_filter = EvmEventFilterQuery.make(
             counterparties=[self.counterparty],
             products=products,
-            location=Location.from_chain_id(self.chain_id),
+            location=Location.from_chain_id(self.evm_inquirer.chain_id),
         )
         with self.event_db.db.conn.read_ctx() as cursor:
             events = self.event_db.get_history_events(
@@ -87,16 +101,19 @@ class ProtocolWithBalance(metaclass=abc.ABCMeta):
         return addresses_with_activity
 
     def addresses_with_deposits(self, products: list['EvmProduct'] | None) -> dict[ChecksumEvmAddress, list['EvmEvent']]:  # noqa: E501
-        return self.addresses_with_activity(products, self.deposit_event_types)
+        return self.addresses_with_activity(
+            event_types=self.deposit_event_types,
+            products=products,
+        )
 
     # --- Methods to be implemented by all subclasses
 
     @abc.abstractmethod
-    def query_balances(self) -> BalancesType:
+    def query_balances(self) -> BalancesSheetType:
         """
-        Common method for all the classes implementing this interface that returns a mapping
-        of user addresses to their token balances. This is later called in
-        `query_{chain}_balances`.
+        Common method for all the classes implementing this interface that returns a BalanceSheet
+        with assets and liabilities as mappings of user addresses to their token balances. This is
+        later called in `query_{chain}_balances`.
         """
 
 
@@ -105,18 +122,20 @@ class ProtocolWithGauges(ProtocolWithBalance):
 
     def __init__(
             self,
-            database: 'DBHandler',
             evm_inquirer: 'EvmNodeInquirer',
-            chain_id: 'CHAIN_IDS_WITH_BALANCE_PROTOCOLS',
+            tx_decoder: 'EVMTransactionDecoder',
             counterparty: PROTOCOLS_WITH_BALANCES,
             deposit_event_types: set[tuple[HistoryEventType, HistoryEventSubType]],
             gauge_deposit_event_types: set[tuple[HistoryEventType, HistoryEventSubType]],
     ):
-        super().__init__(database=database, evm_inquirer=evm_inquirer, chain_id=chain_id, counterparty=counterparty, deposit_event_types=deposit_event_types)  # noqa: E501
+        super().__init__(evm_inquirer=evm_inquirer, tx_decoder=tx_decoder, counterparty=counterparty, deposit_event_types=deposit_event_types)  # noqa: E501
         self.gauge_deposit_event_types = gauge_deposit_event_types
 
     def addresses_with_gauge_deposits(self) -> dict[ChecksumEvmAddress, list['EvmEvent']]:
-        return self.addresses_with_activity([EvmProduct.GAUGE], self.gauge_deposit_event_types)
+        return self.addresses_with_activity(
+            event_types=self.gauge_deposit_event_types,
+            products=[EvmProduct.GAUGE],
+        )
 
     def _query_gauges_balances(
             self,
@@ -125,12 +144,12 @@ class ProtocolWithGauges(ProtocolWithBalance):
             call_order: list[WeightedNode],
             chunk_size: int,
             balances_contract: Callable,
-    ) -> dict[EvmToken, Balance]:
+    ) -> defaultdict[Asset, Balance]:
         """
         Query the set of gauges in gauges_to_token and return the balances for each
         lp token deposited in all gauges.
         """
-        balances: dict[EvmToken, Balance] = defaultdict(Balance)
+        balances: defaultdict[Asset, Balance] = defaultdict(Balance)
         gauge_chunks = get_chunks(list(gauges_to_token.keys()), n=chunk_size)
         for gauge_chunk in gauge_chunks:
             tokens = [gauges_to_token[staking_addr] for staking_addr in gauge_chunk]
@@ -143,7 +162,7 @@ class ProtocolWithGauges(ProtocolWithBalance):
 
             # Now map the gauge to the underlying token
             for lp_token, balance in gauges_balances.items():
-                lp_token_price = Inquirer().find_usd_price(lp_token)
+                lp_token_price = Inquirer.find_usd_price(lp_token)
                 balances[lp_token] += Balance(
                     amount=balance,
                     usd_value=lp_token_price * balance,
@@ -196,16 +215,15 @@ class ProtocolWithGauges(ProtocolWithBalance):
 
         return balances
 
-    def query_balances(self) -> BalancesType:
+    def query_balances(self) -> BalancesSheetType:
         """
         Query gauge balances for the addresses that have interacted with known gauges.
         """
-        balances: BalancesType = defaultdict(lambda: defaultdict(Balance))
+        balances: BalancesSheetType = defaultdict(BalanceSheet)
         gauges_to_token: dict[ChecksumEvmAddress, EvmToken] = {}
         # query addresses and gauges where they interacted
         chunk_size, call_order = get_chunk_size_call_order(self.evm_inquirer)
         for address, events in self.addresses_with_gauge_deposits().items():
-            balances[address] = defaultdict(Balance)
             # Create a mapping of a gauge to its token
             for event in events:
                 gauge_address = self.get_gauge_address(event)
@@ -213,7 +231,7 @@ class ProtocolWithGauges(ProtocolWithBalance):
                     continue
                 gauges_to_token[gauge_address] = event.asset.resolve_to_evm_token()
 
-            balances[address] = self._query_gauges_balances(
+            balances[address].assets = self._query_gauges_balances(
                 user_address=address,
                 gauges_to_token=gauges_to_token,
                 call_order=call_order,

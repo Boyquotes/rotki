@@ -1,23 +1,30 @@
 <script setup lang="ts">
-import { type SupportedExchange } from '@/types/exchanges';
-
-const props = defineProps<{
-  exchange: SupportedExchange;
-}>();
+const props = withDefaults(
+  defineProps<{
+    exchange: string;
+    size?: string;
+  }>(),
+  { size: '1.5rem' },
+);
 
 const { exchange } = toRefs(props);
 const { locationData } = useLocations();
 
 const location = locationData(exchange);
 const name = useRefMap(location, location => location?.name);
-const image = useRefMap(location, location => location?.image);
+const image = useRefMap(location, location => location?.image ?? undefined);
 </script>
 
 <template>
-  <div class="flex flex-row items-center shrink">
+  <div class="flex flex-row gap-2 items-center shrink">
     <AdaptiveWrapper>
-      <VImg width="24px" height="24px" contain :src="image" />
+      <AppImage
+        :width="size"
+        :height="size"
+        contain
+        :src="image"
+      />
     </AdaptiveWrapper>
-    <div class="ml-2" v-text="name" />
+    <div v-text="name" />
   </div>
 </template>

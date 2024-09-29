@@ -1,32 +1,62 @@
-import Vue from 'vue';
+import { app } from '@/main';
+import { setupPremium } from '@/premium/setup-premium';
+import type { Component } from 'vue';
 import type * as Chart from 'chart.js';
 
-class ComponentLoadFailedError extends Error {
+class AsyncLock {
+  promise: Promise<void>;
+  disable: () => void;
+
+  private locked: boolean = false;
+
+  get isLocked(): boolean {
+    return this.locked;
+  }
+
   constructor() {
-    super();
+    this.disable = (): void => {};
+    this.promise = Promise.resolve();
+  }
+
+  enable(): void {
+    this.locked = true;
+    this.promise = new Promise(resolve => (this.disable = (): void => {
+      this.locked = false;
+      resolve();
+    }));
+  }
+}
+
+class ComponentLoadFailedError extends Error {
+  constructor(component: string) {
+    super(component);
     this.name = 'ComponentLoadFailedError';
   }
 }
 
-const findComponents = (): string[] =>
-  Object.getOwnPropertyNames(window).filter(value =>
-    value.startsWith('PremiumComponents')
-  );
+function findComponents(): string[] {
+  return Object.getOwnPropertyNames(window).filter(value => value.startsWith('PremiumComponents'));
+}
 
 if (checkIfDevelopment()) {
-  // @ts-ignore
+  // @ts-expect-error component is dynamic and does not exist in the window type
   findComponents().forEach(component => (window[component] = undefined));
 }
 
-const loadComponents = async (): Promise<string[]> =>
-  // eslint-disable-next-line no-async-promise-executor
-  new Promise(async (resolve, reject) => {
-    let components = findComponents();
-    if (components.length > 0) {
-      resolve(components);
-      return;
-    }
+const lock = new AsyncLock();
 
+async function loadComponents(): Promise<string[]> {
+  try {
+    if (lock.isLocked)
+      await lock.promise;
+
+    lock.enable();
+
+    let components = findComponents();
+    if (components.length > 0)
+      return components;
+
+    await setupPremium();
     const api = useStatisticsApi();
     const result = await api.queryStatisticsRenderer();
     const script = document.createElement('script');
@@ -35,106 +65,94 @@ const loadComponents = async (): Promise<string[]> =>
 
     components = findComponents();
 
-    if (components.length === 0) {
-      reject(new Error('There was no component loaded'));
-      return;
-    }
+    if (components.length === 0)
+      throw new Error('There was no component loaded');
 
-    script.addEventListener('error', reject);
-    resolve(components);
-  });
+    script.addEventListener('error', (e) => {
+      console.error(e);
+    });
+    return components;
+  }
+  finally {
+    lock.disable();
+  }
+}
 
-export const loadLibrary = async () => {
+export async function loadLibrary(): Promise<any> {
   const [component] = await loadComponents();
-  // @ts-ignore
+  // @ts-expect-error component is dynamic and not added in the window type
   const library = window[component];
   if (!library.installed) {
-    Vue.use(library.install);
+    app.use(library);
     library.installed = true;
   }
   return library;
-};
+}
 
-const load = async (name: string) => {
+async function load(name: string): Promise<Component> {
   try {
     const library = await loadLibrary();
-    if (library[name]) {
+    if (library[name])
       return library[name];
-    }
-  } catch (e: any) {
-    logger.error(e);
+  }
+  catch (error: any) {
+    logger.error(error);
   }
 
-  throw new ComponentLoadFailedError();
-};
+  throw new ComponentLoadFailedError(name);
+}
 
-const PremiumLoading = async () =>
-  import('@/components/premium/PremiumLoading.vue');
-const PremiumLoadingError = async () =>
-  import('@/components/premium/PremiumLoadingError.vue');
-const ThemeSwitchLock = async () =>
-  import('@/components/premium/ThemeSwitchLock.vue');
+const PremiumLoading = defineAsyncComponent(() => import('@/components/premium/PremiumLoading.vue'));
+const PremiumLoadingError = defineAsyncComponent(() => import('@/components/premium/PremiumLoadingError.vue'));
+const ThemeSwitchLock = defineAsyncComponent(() => import('@/components/premium/ThemeSwitchLock.vue'));
 
-const createFactory = (
-  component: Promise<any>,
-  options?: { loading?: any; error?: any }
-) => ({
-  component,
-  loading: options?.loading ?? PremiumLoading,
-  error: options?.error ?? PremiumLoadingError,
-  delay: 500,
-  timeout: 30000
+function createFactory(component: string, options?: { loading?: Component; error?: Component }): Component {
+  return defineAsyncComponent({
+    loader: () => load(component),
+    loadingComponent: options?.loading ?? PremiumLoading,
+    errorComponent: options?.error ?? PremiumLoadingError,
+    delay: 500,
+    timeout: 30000,
+  });
+}
+
+export const PremiumStatistics = createFactory('PremiumStatistics');
+
+export const CompoundLendingDetails = createFactory('CompoundLendingDetails');
+
+export const CompoundBorrowingDetails = createFactory('CompoundBorrowingDetails');
+
+export const AaveBorrowingDetails = createFactory('AaveBorrowingDetails');
+
+export const AaveEarnedDetails = createFactory('AaveEarnedDetails');
+
+export const EthStaking = createFactory('EthStaking');
+
+export const UniswapDetails = createFactory('UniswapDetails');
+
+export const AssetAmountAndValueOverTime = createFactory('AssetAmountAndValueOverTime');
+
+export const BalancerBalances = createFactory('BalancerBalances');
+
+export const ThemeChecker = createFactory('ThemeChecker');
+
+export const ThemeSwitch = createFactory('ThemeSwitch', {
+  loading: ThemeSwitchLock,
+  error: ThemeSwitchLock,
 });
 
-export const PremiumStatistics = () => createFactory(load('PremiumStatistics'));
+export const ThemeManager = createFactory('ThemeManager');
 
-export const VaultEventsList = () => createFactory(load('VaultEventsList'));
-
-export const LendingHistory = () => createFactory(load('LendingHistory'));
-
-export const CompoundLendingDetails = () =>
-  createFactory(load('CompoundLendingDetails'));
-
-export const CompoundBorrowingDetails = () =>
-  createFactory(load('CompoundBorrowingDetails'));
-
-export const YearnVaultsProfitDetails = () =>
-  createFactory(load('YearnVaultsProfitDetails'));
-
-export const AaveBorrowingDetails = () =>
-  createFactory(load('AaveBorrowingDetails'));
-
-export const AaveEarnedDetails = () => createFactory(load('AaveEarnedDetails'));
-
-export const EthStaking = () => createFactory(load('EthStaking'));
-
-export const UniswapDetails = () => createFactory(load('UniswapDetails'));
-
-export const AssetAmountAndValueOverTime = () =>
-  createFactory(load('AssetAmountAndValueOverTime'));
-
-export const BalancerBalances = () => createFactory(load('BalancerBalances'));
-
-export const ThemeChecker = () => createFactory(load('ThemeChecker'));
-
-export const ThemeSwitch = () =>
-  createFactory(load('ThemeSwitch'), {
-    loading: ThemeSwitchLock,
-    error: ThemeSwitchLock
-  });
-
-export const ThemeManager = () => createFactory(load('ThemeManager'));
-
-export const Sushi = () => createFactory(load('Sushi'));
+export const Sushi = createFactory('Sushi');
 
 declare global {
   interface Window {
-    Vue: any;
-    Chart: typeof Chart;
-    VueUse: any;
-    VueUseShared: any;
+    'Vue': any;
+    'Chart': typeof Chart;
+    'VueUse': any;
+    'VueUseShared': any;
     'chartjs-plugin-zoom': any;
-    zod: any;
-    bn: any;
+    'zod': any;
+    'bn': any;
   }
 }

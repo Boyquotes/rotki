@@ -4,6 +4,7 @@ import re
 import sqlite3
 from contextlib import suppress
 from enum import Enum, auto
+from http import HTTPStatus
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
@@ -92,13 +93,37 @@ def _force_remote_asset(cursor: DBCursor, local_asset: Asset, full_insert: str) 
 
     May raise an sqlite3 error if something fails.
     """
+    # we get the multiasset and underlying asset mappings before removing the asset because
+    # these mappings get deleted when the asset is removed because of foreign key relation
+    multiasset_mappings = cursor.execute(  # get its multiasset mappings
+        'SELECT collection_id, asset FROM multiasset_mappings WHERE asset=?;',
+        (local_asset.identifier,),
+    ).fetchall()
+    underlying_assets = cursor.execute(  # get its underlying_assets mappings
+        'SELECT parent_token_entry, weight, identifier FROM underlying_tokens_list '
+        'WHERE identifier=? OR parent_token_entry=?;',
+        (local_asset.identifier, local_asset.identifier),
+    ).fetchall()
     cursor.execute(
         'DELETE FROM assets WHERE identifier=?;',
         (local_asset.identifier,),
     )
     # Insert new entry. Since identifiers are the same, no foreign key constrains should break
     executeall(cursor, full_insert)
-    AssetResolver().clean_memory_cache(local_asset.identifier.lower())
+
+    # now add the old mappings back into the db
+    if len(multiasset_mappings) > 0:
+        cursor.executemany(  # add the old multiasset mappings
+            'INSERT INTO multiasset_mappings (collection_id, asset) VALUES (?, ?);',
+            multiasset_mappings,
+        )
+    if len(underlying_assets) > 0:
+        cursor.executemany(  # add the old underlying assets
+            'INSERT INTO underlying_tokens_list (parent_token_entry, weight, identifier) '
+            'VALUES (?, ?, ?);',
+            underlying_assets,
+        )
+    AssetResolver.clean_memory_cache(local_asset.identifier.lower())
 
 
 class ParsedAssetData(NamedTuple):
@@ -117,14 +142,14 @@ class AssetsUpdater:
 
     def __init__(self, msg_aggregator: 'MessagesAggregator') -> None:
         self.msg_aggregator = msg_aggregator
-        self.local_assets_version = GlobalDBHandler().get_setting_value(ASSETS_VERSION_KEY, 0)
+        self.local_assets_version = GlobalDBHandler.get_setting_value(ASSETS_VERSION_KEY, 0)
         self.last_remote_checked_version = -1  # integer value that represents no update
-        self.conflicts: list[tuple[AssetData, AssetData]] = []
-        self.assets_re = re.compile(r'.*INSERT +INTO +assets\( *identifier *, *name *, *type *\) +VALUES\(([^\)]*?),([^\)]*?),([^\)]*?)\).*?')  # noqa: E501
-        self.evm_tokens_re = re.compile(r'.*INSERT +INTO +evm_tokens\( *identifier *, *token_kind *, *chain *, *address *, *decimals *, *protocol *\) +VALUES\(([^\)]*?),([^\)]*?),([^\)]*?),([^\)]*?),([^\)]*?),([^\)]*?)\).*')  # noqa: E501
-        self.common_asset_details_re = re.compile(r'.*INSERT +INTO +common_asset_details\( *identifier *, *symbol *, *coingecko *, *cryptocompare *, *forked *, *started *, *swapped_for *\) +VALUES\((.*?),(.*?),(.*?),(.*?),(.*?),([^\)]*?),([^\)]*?)\).*')  # noqa: E501
-        self.assets_collection_re = re.compile(r'.*INSERT +INTO +asset_collections\( *id *, *name *, *symbol *\) +VALUES +\(([^\)]*?),([^\)]*?),([^\)]*?)\).*?')  # noqa: E501
-        self.multiasset_mappings_re = re.compile(r'.*INSERT +INTO +multiasset_mappings\( *collection_id *, *asset *\) +VALUES +\(([^\)]*?), *"([^\)]+?)"\).*?')  # noqa: E501
+        self.conflicts: dict[str, tuple[AssetData, AssetData]] = {}
+        self.assets_re = re.compile(r'.*INSERT +INTO +assets\( *identifier *, *name *, *type *\) *VALUES\(([^,]*?),([^,]*?),([^,]*?)\).*?')  # noqa: E501
+        self.evm_tokens_re = re.compile(r'.*INSERT +INTO +evm_tokens\( *identifier *, *token_kind *, *chain *, *address *, *decimals *, *protocol *\) *VALUES\(([^,]*?),([^,]*?),([^,]*?),([^,]*?),([^,]*?),([^,]*?)\).*')  # noqa: E501
+        self.common_asset_details_re = re.compile(r'.*INSERT +INTO +common_asset_details\( *identifier *, *symbol *, *coingecko *, *cryptocompare *, *forked *, *started *, *swapped_for *\) *VALUES\((.*?),(.*?),(.*?),(.*?),(.*?),([^,]*?),([^,]*?)\).*')  # noqa: E501
+        self.assets_collection_re = re.compile(r'.*INSERT +INTO +asset_collections\( *id *, *name *, *symbol *\) *VALUES +\(([^,]*?),([^,]*?),([^,]*?)\).*?')  # noqa: E501
+        self.multiasset_mappings_re = re.compile(r'.*INSERT +INTO +multiasset_mappings\( *collection_id *, *asset *\) *VALUES +\(([^,]*?), *"([^,]+?)"\).*?')  # noqa: E501
         self.string_re = re.compile(r'.*"(.*?)".*')
         self.branch = 'develop'
         if is_production():
@@ -433,7 +458,15 @@ class AssetsUpdater:
 
         try:
             with connection.savepoint_ctx() as cursor:
-                executeall(cursor, action)
+                # if the action is to update an asset, but it doesn't exist in the DB
+                if action.strip().startswith('UPDATE') and cursor.execute(
+                    'SELECT COUNT(*) FROM assets WHERE identifier=?',
+                    (remote_asset_data.identifier,),
+                ).fetchone()[0] == 0:
+                    executeall(cursor, full_insert)  # we apply the full insert query
+                else:
+                    executeall(cursor, action)
+
                 if local_asset is not None:
                     AssetResolver().clean_memory_cache(identifier=local_asset.identifier)
         except sqlite3.Error:  # https://docs.python.org/3/library/sqlite3.html#exceptions
@@ -471,12 +504,13 @@ class AssetsUpdater:
 
             # else can't resolve. Mark it for the user to resolve.
             # TODO: When assets refactor is finished, remove the usage of AssetData here
-            local_data = GlobalDBHandler().get_all_asset_data(
+            local_data = GlobalDBHandler.get_all_asset_data(
                 mapping=False,
                 serialized=False,
                 specific_ids=[local_asset.identifier],
             )[0]
-            self.conflicts.append((local_data, remote_asset_data))
+            # always take the last one, if there is multiple conflicts for a single asset
+            self.conflicts[local_asset.identifier] = (local_data, remote_asset_data)
 
     def _apply_single_version_update(
             self,
@@ -581,7 +615,7 @@ class AssetsUpdater:
         if self.last_remote_checked_version == -1:
             self.check_for_updates()
 
-        self.conflicts = []  # reset the stored conflicts
+        self.conflicts = {}  # reset the stored conflicts
         infojson = self._get_remote_info_json()
         local_schema_version = GlobalDBHandler().get_schema_version()
         data_directory = GlobalDBHandler()._data_directory
@@ -621,7 +655,7 @@ class AssetsUpdater:
                 if len(self.conflicts) != 0:
                     return [
                         {'identifier': x[0].identifier, 'local': x[0].serialize(), 'remote': x[1].serialize()}  # noqa: E501
-                        for x in self.conflicts
+                        for x in self.conflicts.values()
                     ]
 
                 # otherwise we are sure the DB will work without conflicts so let's
@@ -671,12 +705,30 @@ class AssetsUpdater:
                     update_file_type=UpdateFileType.ASSET_COLLECTIONS_MAPPINGS,
                 )
 
-        if self.conflicts == []:
+        if len(self.conflicts) == 0:
             connection.commit()
             return
 
         # In this case we have conflicts. Everything should also be rolled back
         connection.rollback()
+
+    def _fetch_single_update_file(
+            self,
+            url: str,
+    ) -> str:
+        """Fetch a single update file from github and return its content.
+        If the file is not found then return an empty string.
+
+        May raise:
+        - RemoteError if failed to fetch the file with status code other that 404."""
+        try:
+            return query_file(url=url, is_json=False)
+        except RemoteError as e:
+            if e.error_code == HTTPStatus.NOT_FOUND:
+                log.warning(f'Assets update file not found from {url}: {e!s}')
+                return ''  # this is a no-op when the upgrade doesn't have any mappings
+            else:
+                raise
 
     def _retrieve_update_files(
             self,
@@ -725,13 +777,11 @@ class AssetsUpdater:
             asset_collections_url = ASSET_COLLECTIONS_UPDATES_URL.format(branch=self.branch, version=version)  # noqa: E501
             asset_collections_mappings_url = ASSET_COLLECTIONS_MAPPINGS_UPDATES_URL.format(branch=self.branch, version=version)  # noqa: E501
 
-            assets_file = query_file(url=assets_url, is_json=False)
+            assets_file = self._fetch_single_update_file(url=assets_url)
+
             if version >= FIRST_VERSION_WITH_COLLECTIONS:
-                asset_collections_file = query_file(url=asset_collections_url, is_json=False)
-                asset_collections_mappings_file = query_file(
-                    url=asset_collections_mappings_url,
-                    is_json=False,
-                )
+                asset_collections_file = self._fetch_single_update_file(url=asset_collections_url)
+                asset_collections_mappings_file = self._fetch_single_update_file(url=asset_collections_mappings_url)  # noqa: E501
             else:
                 asset_collections_file, asset_collections_mappings_file = '', ''
 

@@ -1,9 +1,5 @@
 <script setup lang="ts">
-import {
-  type XswapAsset,
-  type XswapBalance
-} from '@rotki/common/lib/defi/xswap';
-import { Zero } from '@/utils/bignumbers';
+import { type XswapAsset, type XswapBalance, Zero } from '@rotki/common';
 
 defineProps<{
   balance: XswapBalance;
@@ -14,22 +10,27 @@ const details = ref<boolean>(false);
 const { currencySymbol } = storeToRefs(useGeneralSettingsStore());
 const { t } = useI18n();
 
-const getTotal = ({ totalAmount, usdPrice }: XswapAsset) =>
-  usdPrice.multipliedBy(totalAmount ?? One);
+function getTotal({ totalAmount, usdPrice }: XswapAsset) {
+  return usdPrice.multipliedBy(totalAmount ?? One);
+}
 </script>
 
 <template>
-  <VDialog v-model="details" scrollable max-width="450px">
-    <template #activator="{ on, attrs }">
-      <RuiTooltip :popper="{ placement: 'top' }" open-delay="400">
+  <RuiDialog
+    v-model="details"
+    max-width="450px"
+  >
+    <template #activator="{ attrs }">
+      <RuiTooltip
+        :popper="{ placement: 'top' }"
+        :open-delay="400"
+      >
         <template #activator>
           <RuiButton
             variant="text"
             color="primary"
             icon
-            size="sm"
             v-bind="attrs"
-            v-on="on"
           >
             <RuiIcon name="external-link-line" />
           </RuiButton>
@@ -38,15 +39,23 @@ const getTotal = ({ totalAmount, usdPrice }: XswapAsset) =>
       </RuiTooltip>
     </template>
     <RuiCard>
-      <template #header>{{ t('liquidity_pool_details.title') }}</template>
-      <template v-for="(token, key) in balance.assets">
+      <template #header>
+        {{ t('liquidity_pool_details.title') }}
+      </template>
+      <template
+        v-for="(token, key) in balance.assets"
+        :key="token.asset"
+      >
         <RuiDivider
           v-if="key > 0"
-          :key="token.asset + 'divider'"
+          :key="`${token.asset}divider`"
           class="my-3"
         />
-        <div :key="token.asset" class="flex items-center gap-4">
-          <AssetIcon :identifier="token.asset" size="24px" />
+        <div class="flex items-center gap-4">
+          <AssetIcon
+            :identifier="token.asset"
+            size="24px"
+          />
           <div class="flex-1">
             <div class="text-rui-text-secondary text-body-2">
               {{ t('liquidity_pool_details.total_amount') }}
@@ -61,7 +70,7 @@ const getTotal = ({ totalAmount, usdPrice }: XswapAsset) =>
             <div class="text-rui-text-secondary text-body-2">
               {{
                 t('liquidity_pool_details.total_value_in_symbol', {
-                  symbol: currencySymbol
+                  symbol: currencySymbol,
                 })
               }}
             </div>
@@ -73,12 +82,18 @@ const getTotal = ({ totalAmount, usdPrice }: XswapAsset) =>
           </div>
         </div>
       </template>
-      <div v-if="balance.totalSupply" class="flex gap-2 items-center pt-6">
+      <div
+        v-if="balance.totalSupply"
+        class="flex gap-2 items-center pt-6"
+      >
         <div class="text-rui-text-secondary text-body-2">
           {{ t('liquidity_pool_details.liquidity') }}:
         </div>
-        <AmountDisplay class="font-bold" :value="balance.totalSupply" />
+        <AmountDisplay
+          class="font-bold"
+          :value="balance.totalSupply"
+        />
       </div>
     </RuiCard>
-  </VDialog>
+  </RuiDialog>
 </template>

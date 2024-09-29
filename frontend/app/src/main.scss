@@ -7,45 +7,39 @@
 html {
   @apply overflow-y-hidden #{!important};
   @apply max-h-screen;
+
+  // Fix the issue where the weird font looks bolder than it is supposed to be.
+  @apply antialiased;
 }
 
 body {
-  overflow-y: auto !important;
-  overflow-x: hidden;
-  scroll-behavior: smooth;
-  scroll-padding-top: 64px;
-  height: calc(100vh - 64px);
-  margin-top: 64px !important;
-  background: var(--v-rotki-light-grey-base);
+  @apply transition-all bg-rui-grey-50 dark:bg-[#121212] overflow-x-hidden h-[calc(100vh-4rem)] scroll-smooth scroll-pt-16;
+  @apply mt-16 overflow-y-auto #{!important};
 
-  @media only screen and (max-width: 960px) {
-    height: calc(100vh - 56px);
-    margin-top: 56px !important;
+  @media only screen and (max-width: 767px) {
+    @apply h-[calc(100vh-3.5rem)];
+    @apply mt-14 #{!important};
   }
 }
 
 .container {
-  max-width: 1500px;
   @apply px-4;
+  max-width: 1500px;
 }
 
 aside {
-  max-height: calc(100vh - 64px);
-  @apply fixed #{!important};
+  @apply top-[3.5rem] md:top-[4rem] max-h-[calc(100vh-3.5rem)] md:max-h-[calc(100vh-4rem)] #{!important};
 }
 
 .table-inside-dialog {
-  scroll-behavior: smooth;
-  max-height: calc(100vh - 340px);
-  overflow: auto;
+  @apply scroll-smooth overflow-auto;
+  max-height: calc(100vh - 21.25rem);
 }
 
 input {
   &::-webkit-outer-spin-button,
   &::-webkit-inner-spin-button {
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
+    @apply appearance-none
   }
 
   &[type='number'] {
@@ -53,89 +47,30 @@ input {
   }
 }
 
-// Override vuetify styles
-
-.theme {
-  &--light {
-    --border-color: rgba(0, 0, 0, 0.12);
-    /* stylelint-disable selector-class-pattern,selector-nested-pattern,scss/selector-nest-combinators */
-
-    .v-btn:not(.v-btn--flat):not(.v-btn--text):not(.v-btn--outlined):not(
-        .primary
-      ) {
-      /* stylelint-enable selector-class-pattern,selector-nested-pattern,scss/selector-nest-combinators */
-      background-color: transparent;
-    }
-  }
-
-  &--dark {
-    --border-color: rgba(255, 255, 255, 0.12);
-  }
-}
-
-.v-application {
-  &--wrap {
-    @apply min-h-0 #{!important};
-  }
-}
-
-.v-btn {
-  &--fixed {
-    @apply z-[4];
-  }
-}
-
-.v-menu {
-  &__content {
-    @apply bg-white dark:bg-neutral-900;
-  }
-}
-
-.v-data-table {
-  @apply bg-transparent dark:bg-neutral-900 #{!important};
-}
-
-.v-tab {
-  @apply uppercase;
-}
-
-.v-card {
-  &__subtitle,
-  &__text,
-  &__title,
-  &__actions {
-    @apply px-6 #{!important};
-  }
-
-  &__title {
-    @apply pt-6 pb-5;
-  }
-
-  &__text {
-    &.no-padding {
-      @apply p-0 #{!important};
-    }
-
-    @apply pb-6;
-  }
-
-  &__actions {
-    @apply pb-6 #{!important};
-  }
-
-  @apply rounded-lg #{!important};
-}
-
-
 .skeleton {
-  @apply animate-pulse bg-gray-200 dark:bg-gray-800
+  @apply animate-pulse bg-gray-200 dark:bg-gray-800;
 }
 
 .icon-bg {
-  @apply dark:rounded-md dark:bg-white;
+  @apply dark:rounded-md dark:bg-white p-[2px];
 }
 
 .blur {
   filter: blur(0.75em);
+}
 
+.break-words {
+  word-break: break-word;
+}
+
+ul, ol {
+  @apply pl-6;
+}
+
+a {
+  @apply cursor-pointer text-rui-blue-800 dark:text-rui-blue-600;
+}
+
+.text-truncate {
+  @apply whitespace-nowrap overflow-hidden text-ellipsis #{!important};
 }

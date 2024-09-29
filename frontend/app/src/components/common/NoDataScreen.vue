@@ -1,26 +1,38 @@
 <script setup lang="ts">
 withDefaults(defineProps<{ full?: boolean }>(), { full: false });
 
-const slots = useSlots();
-const remoteEmptyScreenLogo =
-  'https://raw.githubusercontent.com/rotki/data/main/assets/icons/empty_screen_logo.png';
+const { isMdAndUp } = useBreakpoint();
 </script>
 
 <template>
-  <FullSizeContent class="gap-4" :class="{ '!h-auto !mt-20': !full }">
+  <FullSizeContent
+    class="gap-4"
+    :class="{ '!h-auto !mt-20': !full }"
+  >
     <div class="flex items-center justify-center">
       <div
-        class="w-[8rem] h-[8rem] md:w-[16rem] md:h-[16rem] bg-rui-grey-200 p-8 md:p-16 rounded-full mb-8"
+        class="bg-rui-grey-200 dark:bg-rui-grey-900 rounded-full mb-8"
+        :class="[isMdAndUp ? 'w-64 h-64 p-16' : 'w-32 h-32 p-8']"
       >
         <slot name="logo">
-          <RotkiLogo class="h-full w-full" :url="remoteEmptyScreenLogo" />
+          <RotkiLogo
+            :size="isMdAndUp ? 8 : 4"
+            logo="emptyScreen"
+            unique-key="3"
+          />
         </slot>
       </div>
     </div>
-    <div v-if="slots.title" class="text-h5">
+    <div
+      v-if="$slots.title"
+      class="text-h5"
+    >
       <slot name="title" />
     </div>
-    <div v-if="slots.default" class="text-subtitle-2 text--secondary">
+    <div
+      v-if="$slots.default"
+      class="text-subtitle-2 text-rui-text-secondary"
+    >
       <slot />
     </div>
   </FullSizeContent>

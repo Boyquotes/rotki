@@ -1,57 +1,60 @@
 <script setup lang="ts">
-import { useListeners } from 'vue';
+import useVuelidate from '@vuelidate/core';
+import { helpers, url as urlValidator } from '@vuelidate/validators';
+import { toMessages } from '@/utils/validation';
 
-const props = defineProps<{
-  value: string;
-}>();
+defineOptions({
+  inheritAttrs: false,
+});
 
 const emit = defineEmits<{
-  (e: 'input', value: string): void;
   (e: 'save-data', value?: string): void;
 }>();
 
-const { value } = toRefs(props);
+const { t } = useI18n();
 
-const model = computed({
-  get() {
-    return get(value);
-  },
-  set(value) {
-    emit('input', value);
-  }
-});
+const url = defineModel<string>({ required: true });
 
-const attrs = useAttrs();
-const listeners = useListeners();
-
-const isValid = (entry: string | null): boolean =>
-  !entry ? false : entry.length > 0;
-
-const saveData = (value?: string) => {
+function saveData(value?: string) {
   emit('save-data', value);
+}
+
+const isHttps = (value: string) => !value || value.startsWith('https');
+
+const rules = {
+  url: {
+    urlValidator,
+    https: helpers.withMessage(t('explorer_input.validation.https'), isHttps),
+  },
 };
+
+const v$ = useVuelidate(
+  rules,
+  {
+    url,
+  },
+  { $autoDirty: true },
+);
 </script>
 
 <template>
   <div class="flex items-start gap-4">
-    <VTextField
-      v-model="model"
+    <RuiTextField
+      v-model="url"
       class="flex-1"
-      outlined
+      variant="outlined"
+      color="primary"
       clearable
-      persistent-hint
-      v-bind="attrs"
-      v-on="listeners"
+      :error-messages="toMessages(v$.url)"
+      v-bind="$attrs"
       @click:clear="saveData()"
-    >
-      <template #append-outer />
-    </VTextField>
+    />
     <RuiButton
       variant="text"
       class="mt-1"
       icon
-      :disabled="!isValid(value)"
-      @click="saveData(value)"
+      :disabled="v$.$invalid"
+      @click="saveData(modelValue)"
     >
       <RuiIcon name="save-line" />
     </RuiButton>

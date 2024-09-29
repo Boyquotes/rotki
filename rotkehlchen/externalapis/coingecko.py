@@ -2,7 +2,6 @@ import json
 import logging
 from http import HTTPStatus
 from typing import Any, Literal, NamedTuple, overload
-from urllib.parse import urlencode
 
 import requests
 
@@ -17,7 +16,7 @@ from rotkehlchen.errors.price import NoPriceForGivenTimestamp, PriceQueryUnsuppo
 from rotkehlchen.fval import FVal
 from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.history.types import HistoricalPrice, HistoricalPriceOracle
-from rotkehlchen.interfaces import HistoricalPriceOracleInterface
+from rotkehlchen.interfaces import HistoricalPriceOracleWithCoinListInterface
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import ChainID, EvmTokenKind, Price, Timestamp
 from rotkehlchen.utils.misc import create_timestamp, set_user_agent, timestamp_to_date, ts_now
@@ -434,9 +433,24 @@ DELISTED_ASSETS = {
     'DON',
     'NUT',
     evm_address_to_identifier(address='0x06B884e60794Ce02AafAb13791B59A2e6A07442f', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0x37E8789bB9996CaC9156cD5F5Fd32599E6b91289', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0xE4f726Adc8e89C6a6017F01eadA77865dB22dA14', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0x95aA5d2DbD3c16ee3fdea82D5C6EC3E38CE3314f', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0x114f1388fAB456c4bA31B1850b244Eedcd024136', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0xDa007777D86AC6d989cC9f79A73261b3fC5e0DA0', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0xAC8E13ecC30Da7Ff04b842f21A62a1fb0f10eBd5', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0x0000000000004946c0e9F43F4Dee607b0eF1fA1c', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0x670f9D9a26D3D42030794ff035d35a67AA092ead', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0x1c7E83f8C581a967940DBfa7984744646AE46b29', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0x75C9bC761d88f70156DAf83aa010E84680baF131', chain_id=ChainID.ARBITRUM_ONE, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0x557f20CE25b41640ADe4a3085d42d7e626d7965A', chain_id=ChainID.BINANCE, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0xc56c2b7e71B54d38Aab6d52E94a04Cbfa8F604fA', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0x628eBC64A38269E031AFBDd3C5BA857483B5d048', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0x24086EAb82DBDaa4771d0A5D66B0D810458b0E86', chain_id=ChainID.BINANCE, token_type=EvmTokenKind.ERC20),  # noqa: E501
+    evm_address_to_identifier(address='0xCB5A05beF3257613E984C17DbcF039952B6d883F', chain_id=ChainID.ETHEREUM, token_type=EvmTokenKind.ERC20),  # noqa: E501
 }
 
-COINGECKO_SIMPLE_VS_CURRENCIES = [
+COINGECKO_SIMPLE_VS_CURRENCIES = {
     'btc',
     'eth',
     'ltc',
@@ -495,17 +509,16 @@ COINGECKO_SIMPLE_VS_CURRENCIES = [
     'xdr',
     'xag',
     'xau',
-]
+}
 
 
-class Coingecko(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
+class Coingecko(HistoricalPriceOracleWithCoinListInterface, PenalizablePriceOracleMixin):
 
     def __init__(self) -> None:
-        HistoricalPriceOracleInterface.__init__(self, oracle_name='coingecko')
+        HistoricalPriceOracleWithCoinListInterface.__init__(self, oracle_name='coingecko')
         PenalizablePriceOracleMixin.__init__(self)
         self.session = requests.session()
         set_user_agent(self.session)
-        self.all_coins_cache: dict[str, dict[str, Any]] | None = None
         self.last_rate_limit = 0
 
     @overload
@@ -543,10 +556,11 @@ class Coingecko(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
         if subpath:
             url += subpath
 
-        log.debug(f'Querying coingecko: {url}?{urlencode(options)}')
+        log.debug(f'Querying coingecko: {url=} with {options=}')
         try:
             response = self.session.get(
-                f'{url}?{urlencode(options)}',
+                url=url,
+                params=options,
                 timeout=CachedSettings().get_timeout_tuple(),
             )
         except requests.exceptions.RequestException as e:
@@ -597,7 +611,7 @@ class Coingecko(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
         }
         data = self._query(
             module='coins',
-            subpath=f'{asset_coingecko_id}',
+            subpath=asset_coingecko_id,
             options=options,
         )
 
@@ -622,11 +636,11 @@ class Coingecko(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
         May raise:
         - RemoteError if there is an error with reaching coingecko
         """
-        if self.all_coins_cache is None:
+        if (data := self.maybe_get_cached_coinlist(considered_recent_secs=DAY_IN_SECONDS)) is None:
+            data = {}
             response = self._query(module='coins/list')
-            self.all_coins_cache = {}
             for entry in response:
-                if entry['id'] in self.all_coins_cache:
+                if entry['id'] in data:
                     log.warning(
                         f'Found duplicate coingecko identifier {entry["id"]} when querying '
                         f'the list of coingecko assets. Ignoring...',
@@ -634,9 +648,11 @@ class Coingecko(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
                     continue
 
                 identifier = entry.pop('id')
-                self.all_coins_cache[identifier] = entry
+                data[identifier] = entry
 
-        return self.all_coins_cache
+            self.cache_coinlist(data)
+
+        return data
 
     @staticmethod
     def check_vs_currencies(
@@ -764,7 +780,7 @@ class Coingecko(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
             ) from e
 
         # check DB cache
-        price_cache_entry = GlobalDBHandler().get_historical_price(
+        price_cache_entry = GlobalDBHandler.get_historical_price(
             from_asset=from_asset,
             to_asset=to_asset,
             timestamp=timestamp,
@@ -803,7 +819,7 @@ class Coingecko(HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):
 
         # save result in the DB and return
         date_timestamp = create_timestamp(date, formatstr='%d-%m-%Y')
-        GlobalDBHandler().add_historical_prices(entries=[HistoricalPrice(
+        GlobalDBHandler.add_historical_prices(entries=[HistoricalPrice(
             from_asset=from_asset,
             to_asset=to_asset,
             source=HistoricalPriceOracle.COINGECKO,

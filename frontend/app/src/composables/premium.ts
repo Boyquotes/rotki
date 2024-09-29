@@ -1,18 +1,20 @@
-export const usePremium = () => {
+export function usePremium(): Ref<boolean> {
   const { premium } = storeToRefs(usePremiumStore());
   return premium;
-};
+}
 
-export const usePremiumReminder = () => {
+interface UsePremiumReminderReturn { showGetPremiumButton: () => void }
+
+export function usePremiumReminder(): UsePremiumReminderReturn {
   const premium: Ref<boolean> = usePremium();
 
   const { premiumUserLoggedIn } = useInterop();
 
-  const showGetPremiumButton = () => {
+  const showGetPremiumButton = (): void => {
     premiumUserLoggedIn(get(premium));
   };
 
   return {
-    showGetPremiumButton
+    showGetPremiumButton,
   };
-};
+}

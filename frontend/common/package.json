@@ -2,6 +2,7 @@
   "name": "@rotki/common",
   "version": "1.0.0",
   "description": "Rotki common frontend code",
+  "type": "module",
   "license": "AGPL-3.0",
   "homepage": "https://rotki.com",
   "repository": "https://github.com/rotki/rotki",
@@ -14,22 +15,21 @@
   "types": "lib/index.d.ts",
   "scripts": {
     "postinstall": "pnpm run build",
-    "build": "rimraf lib && tsc -m es6",
-    "watch": "tsc -w -m es6"
+    "build": "tsup",
+    "watch": "tsup --watch"
   },
   "peerDependencies": {
-    "@vueuse/core": "9.6.0",
-    "vue": "2.7.14"
-  },
-  "dependencies": {
-    "bignumber.js": "9.1.1",
-    "zod": "3.22.4"
+    "@vueuse/core": ">=10.11.0",
+    "bignumber.js": "9.1.2",
+    "vue": ">=3.4.0",
+    "zod": "3.23.8"
   },
   "devDependencies": {
-    "@vueuse/core": "10.5.0",
-    "core-js": "3.33.1",
-    "rimraf": "5.0.5",
-    "typescript": "5.2.2",
-    "vue": "2.7.14"
+    "@vueuse/core": "11.0.3",
+    "bignumber.js": "9.1.2",
+    "tsup": "8.3.0",
+    "typescript": "5.5.4",
+    "vue": "3.5.8",
+    "zod": "3.23.8"
   }
 }

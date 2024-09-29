@@ -14,6 +14,7 @@ from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.assets.asset import AssetWithOracles
 from rotkehlchen.assets.converters import asset_from_bitstamp
 from rotkehlchen.constants import ZERO
+from rotkehlchen.db.cache import DBCacheDynamic
 from rotkehlchen.errors.asset import UnknownAsset, UnsupportedAsset
 from rotkehlchen.errors.misc import RemoteError
 from rotkehlchen.errors.serialization import DeserializationError
@@ -39,6 +40,7 @@ from rotkehlchen.types import (
     ApiSecret,
     AssetAmount,
     ExchangeAuthCredentials,
+    Fee,
     Location,
     Timestamp,
 )
@@ -95,6 +97,13 @@ KNOWN_NON_ASSET_KEYS_FOR_MOVEMENTS = {
     'fee',
 }
 
+# We need to query two APIs and then match transactions to get full event history
+# There's a problem with matching withdrawals, because one API returns timestamp
+# from Activity History, one from Transaction History.
+# This is why we added the tolerance to match any transaction that occurred within
+# an hour of each other
+BITSTAMP_MATCHING_TOLERANCE = 3600
+
 
 class TradePairData(NamedTuple):
     pair: str
@@ -125,9 +134,9 @@ class Bitstamp(ExchangeInterface):
             api_key=api_key,
             secret=secret,
             database=database,
+            msg_aggregator=msg_aggregator,
         )
         self.base_uri = 'https://www.bitstamp.net/api'
-        self.msg_aggregator = msg_aggregator
         # NB: X-Auth-Signature, X-Auth-Nonce, X-Auth-Timestamp & Content-Type change per request
         # X-Auth and X-Auth-Version are constant
         self.session.headers.update({
@@ -191,15 +200,20 @@ class Bitstamp(ExchangeInterface):
                     'Check logs for details. Ignoring it.',
                 )
                 continue
-            except (UnknownAsset, UnsupportedAsset) as e:
+            except UnsupportedAsset as e:
                 log.error(str(e))
-                asset_tag = 'unknown' if isinstance(e, UnknownAsset) else 'unsupported'
                 self.msg_aggregator.add_warning(
-                    f'Found {asset_tag} Bistamp asset {e.identifier}. Ignoring its balance query.',
+                    f'Found unsupported Bistamp asset {e.identifier}. Ignoring its balance query.',
+                )
+                continue
+            except UnknownAsset as e:
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='balance query',
                 )
                 continue
             try:
-                usd_price = Inquirer().find_usd_price(asset=asset)
+                usd_price = Inquirer.find_usd_price(asset=asset)
             except RemoteError as e:
                 log.error(str(e))
                 self.msg_aggregator.add_error(
@@ -235,22 +249,140 @@ class Bitstamp(ExchangeInterface):
         }
         if start_ts != Timestamp(0):
             # Get latest link from the DB to know where to resume from
-            cursor = self.db.conn.cursor()
-            query_result = cursor.execute(
-                'SELECT link FROM asset_movements WHERE location=? AND timestamp <= ? ORDER BY timestamp DESC LIMIT 1',  # noqa: E501
-                (Location.BITSTAMP.serialize_for_db(), start_ts),
-            ).fetchone()
-            if query_result is not None:
-                since_id = int(query_result[0]) + 1
-                options.update({'since_id': since_id})
+            with self.db.conn.read_ctx() as cursor:
+                query_result = cursor.execute(
+                    'SELECT link FROM asset_movements WHERE location=? AND timestamp <= ? ORDER BY timestamp DESC LIMIT 1',  # noqa: E501
+                    (Location.BITSTAMP.serialize_for_db(), start_ts),
+                ).fetchone()
+                if query_result is not None:
+                    since_id = int(query_result[0]) + 1
+                    options.update({'since_id': since_id})
 
+        # get user transactions (which is deposits/withdrawals) with fees but not address/txid
         asset_movements: list[AssetMovement] = self._api_query_paginated(
             start_ts=start_ts,
             end_ts=end_ts,
             options=options,
             case='asset_movements',
         )
+
+        # also query crypto transactions, to get address and transaction id (but no fee)
+        with self.db.conn.read_ctx() as cursor:
+            offset = 0
+            if (result := self.db.get_dynamic_cache(
+                cursor=cursor,
+                name=DBCacheDynamic.LAST_CRYPTOTX_OFFSET,
+                location=self.location.serialize(),
+                location_name=self.name,
+            )) is not None:
+                offset = result
+
+        crypto_asset_movements = self._query_crypto_transactions(offset)
+
+        # now the fun part. Figure out which asset movements from user transactions
+        # they correspond to so we can also have the fee taken into account
+        indices_to_delete = []
+        for asset_movement in asset_movements:
+            for idx, crypto_movement in enumerate(crypto_asset_movements):
+                if crypto_movement.category == asset_movement.category and crypto_movement.asset == asset_movement.asset and crypto_movement.amount == asset_movement.amount + asset_movement.fee and abs(crypto_movement.timestamp - asset_movement.timestamp) <= BITSTAMP_MATCHING_TOLERANCE:  # noqa: E501
+                    asset_movement.address = crypto_movement.address
+                    asset_movement.transaction_id = crypto_movement.transaction_id
+                    indices_to_delete.append(idx)
+                    break
+
+        for idx in sorted(indices_to_delete, reverse=True):
+            del crypto_asset_movements[idx]  # remove the crypto asset movements whose data we already correlated  # noqa: E501
+
+        # even more fun. If somehow the endpoint is not called in order then we
+        # may end up with some crypto asset movements here that would need to
+        # check for corresponding asset movement in the DB.
+        serialized_location = Location.BITSTAMP.serialize_for_db()
+        indices_to_delete = []
+        with self.db.user_write() as write_cursor:
+            for idx, crypto_movement in enumerate(crypto_asset_movements):
+                write_cursor.execute(
+                    'SELECT id from asset_movements WHERE location=? AND category=? AND timestamp=? AND asset=?',  # noqa: E501
+                    (serialized_location, crypto_movement.category.serialize_for_db(), crypto_movement.timestamp, crypto_movement.asset.identifier),  # noqa: E501
+                )
+                if (result := write_cursor.fetchone()) is not None:
+                    write_cursor.execute(
+                        'UPDATE asset_movements SET address=?, transaction_id=? WHERE id=?',
+                        (crypto_movement.address, crypto_movement.transaction_id, result[0]),
+                    )
+                    indices_to_delete.append(idx)
+
+        for idx in sorted(indices_to_delete, reverse=True):
+            del crypto_asset_movements[idx]  # remove the crypto asset movements whose data we matched in the DB  # noqa: E501
+
+        log.debug(f'Remaining Bitstamp unmatched {crypto_asset_movements=}')
         return asset_movements
+
+    def _query_crypto_transactions(self, offset: int) -> list[AssetMovement]:
+        """Query crypto transactions to get address and transaction id.
+
+        Pagination here is unfortunately primitive. Can only use offset, so we rememmber the
+        last offset queried in the DB and after the query update it.
+
+        https://www.bitstamp.net/api/#tag/Transactions-private/operation/GetCryptoUserTransactions
+
+        May raise RemoteError
+        """
+        options = {}
+        options['limit'] = API_MAX_LIMIT
+        options['offset'] = offset
+        options['include_ious'] = False
+        total_asset_movements = []
+
+        while True:
+            response = self._api_query(
+                endpoint='crypto-transactions',
+                method='post',
+                options=options,
+            )
+            if response.status_code != HTTPStatus.OK:
+                return self._process_unsuccessful_response(
+                    response=response,
+                    case='crypto-transactions',
+                )
+
+            try:
+                response_dict = jsonloads_dict(response.text)
+            except JSONDecodeError:
+                msg = f'Bitstamp returned invalid JSON response: {response.text}.'
+                log.error(msg)
+                self.msg_aggregator.add_error(
+                    f'Got remote error while querying Bistamp crypto transactions: {msg}',
+                )
+                return []
+
+            asset_movements = [
+                self._deserialize_asset_movement_from_crypto_transaction(
+                    raw_movement=entry,
+                    category=category,
+                )
+                for entry_key, category in [
+                    ('deposits', AssetMovementCategory.DEPOSIT),
+                    ('withdrawals', AssetMovementCategory.WITHDRAWAL),
+                ]
+                for entry in response_dict.get(entry_key, {})
+            ]
+            options['offset'] += API_MAX_LIMIT  # add anyway so we can save new offset at end
+            total_asset_movements.extend(asset_movements)
+            if len(asset_movements) < API_MAX_LIMIT:
+                break
+
+        if options['offset'] != offset:
+            # write the new offset
+            with self.db.user_write() as write_cursor:
+                self.db.set_dynamic_cache(
+                    write_cursor=write_cursor,
+                    name=DBCacheDynamic.LAST_CRYPTOTX_OFFSET,
+                    value=options['offset'],
+                    location=self.location.serialize(),
+                    location_name=self.name,
+                )
+
+        return total_asset_movements
 
     def query_online_trade_history(
             self,
@@ -309,11 +441,13 @@ class Bitstamp(ExchangeInterface):
 
     def _api_query(
             self,
-            endpoint: Literal['balance', 'user_transactions'],
+            endpoint: Literal['balance', 'user_transactions', 'crypto-transactions'],
             method: Literal['post'] = 'post',
             options: dict[str, Any] | None = None,
     ) -> Response:
         """Request a Bistamp API v2 endpoint (from `endpoint`).
+
+        May raise RemoteError
         """
         call_options = options.copy() if options else {}
         data = call_options or None
@@ -391,6 +525,7 @@ class Bitstamp(ExchangeInterface):
             end_ts: Timestamp,
             options: dict[str, Any],
             case: Literal['trades', 'asset_movements'],
+            offset: int = 0,
     ) -> list[Trade] | (list[AssetMovement] | list):
         """Request a Bitstamp API v2 endpoint paginating via an options
         attribute.
@@ -419,7 +554,7 @@ class Bitstamp(ExchangeInterface):
             raw_result_type_filter = USER_TRANSACTION_ASSET_MOVEMENT_TYPE
             response_case = 'asset_movements'
             case_pretty = 'asset movement'
-            deserialization_method = self._deserialize_asset_movement
+            deserialization_method = self._deserialize_asset_movement_from_user_transaction
         else:
             raise AssertionError(f'Unexpected Bitstamp case: {case}.')
 
@@ -507,7 +642,7 @@ class Bitstamp(ExchangeInterface):
         return results
 
     @staticmethod
-    def _deserialize_asset_movement(
+    def _deserialize_asset_movement_from_user_transaction(
             raw_movement: dict[str, Any],
     ) -> AssetMovement:
         """Process a deposit/withdrawal user transaction from Bitstamp and
@@ -559,8 +694,8 @@ class Bitstamp(ExchangeInterface):
             timestamp=timestamp,
             location=Location.BITSTAMP,
             category=category,
-            address=None,  # requires query "crypto_transactions" endpoint
-            transaction_id=None,  # requires query "crypto_transactions" endpoint
+            address=None,  # requires query "crypto-transactions" endpoint
+            transaction_id=None,  # requires query "crypto-transactions" endpoint
             asset=fee_asset,
             amount=abs(amount),
             fee_asset=fee_asset,
@@ -568,6 +703,42 @@ class Bitstamp(ExchangeInterface):
             link=str(raw_movement['id']),
         )
         return asset_movement
+
+    @staticmethod
+    def _deserialize_asset_movement_from_crypto_transaction(
+            raw_movement: dict[str, Any],
+            category: AssetMovementCategory,
+    ) -> AssetMovement:
+        """Process a deposit/withdrawal crypto transaction from Bitstamp and
+        deserialize it.
+
+        Can raise DeserializationError.
+
+        https://www.bitstamp.net/api/#tag/Transactions-private/operation/GetCryptoUserTransactions
+        """
+
+        try:
+            timestamp = Timestamp(raw_movement['datetime'])
+            asset = asset_from_bitstamp(raw_movement['currency'])
+            amount = deserialize_asset_amount(raw_movement['amount'])
+            address = raw_movement['destinationAddress']
+            transaction_id = raw_movement['txid']
+            link = f'A {raw_movement["network"]} {category}'
+        except KeyError as e:
+            raise DeserializationError(f'Could not find key {e} in bitstramp crypto transaction') from e  # noqa: E501
+
+        return AssetMovement(
+            timestamp=timestamp,
+            location=Location.BITSTAMP,
+            category=category,
+            address=address,
+            transaction_id=transaction_id,
+            asset=asset,
+            amount=abs(amount),
+            fee_asset=asset,
+            fee=Fee(ZERO),
+            link=link,
+        )
 
     def _deserialize_trade(
             self,
@@ -680,14 +851,14 @@ class Bitstamp(ExchangeInterface):
     def _process_unsuccessful_response(
             self,
             response: Response,
-            case: Literal['asset_movements'],
+            case: Literal['asset_movements', 'crypto-transactions'],
     ) -> list[AssetMovement]:
         ...
 
     def _process_unsuccessful_response(
             self,
             response: Response,
-            case: Literal['validate_api_key', 'balances', 'trades', 'asset_movements'],
+            case: Literal['validate_api_key', 'balances', 'trades', 'asset_movements', 'crypto-transactions'],  # noqa: E501
     ) -> list | (tuple[bool, str] | ExchangeQueryBalances):
         """This function processes not successful responses for the following
         cases listed in `case`.
@@ -701,7 +872,7 @@ class Bitstamp(ExchangeInterface):
 
             if case in {'validate_api_key', 'balances'}:
                 return False, msg
-            if case in {'trades', 'asset_movements'}:
+            if case in {'trades', 'asset_movements', 'crypto-transactions'}:
                 self.msg_aggregator.add_error(
                     f'Got remote error while querying Bistamp {case_pretty}: {msg}',
                 )
@@ -722,7 +893,7 @@ class Bitstamp(ExchangeInterface):
 
         if case in {'validate_api_key', 'balances'}:
             return False, msg
-        if case in {'trades', 'asset_movements'}:
+        if case in {'trades', 'asset_movements', 'crypto-transactions'}:
             self.msg_aggregator.add_error(
                 f'Got remote error while querying Bistamp {case_pretty}: {msg}',
             )

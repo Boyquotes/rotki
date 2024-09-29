@@ -1,73 +1,57 @@
 <script setup lang="ts">
 import { helpers, required } from '@vuelidate/validators';
 import { convertToTimestamp } from '@/utils/date';
-import { type HistoricalPriceFormPayload } from '@/types/prices';
 import { toMessages } from '@/utils/validation';
+import type { HistoricalPriceFormPayload } from '@/types/prices';
 
 const props = defineProps<{
-  value: HistoricalPriceFormPayload;
+  modelValue: HistoricalPriceFormPayload;
   edit: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: 'input', price: Partial<HistoricalPriceFormPayload>): void;
+  (e: 'update:model-value', price: Partial<HistoricalPriceFormPayload>): void;
 }>();
 
-const { value } = toRefs(props);
 const { assetSymbol } = useAssetInfoRetrieval();
 
-const date = computed(({ value }) =>
-  value.timestamp ? convertFromTimestamp(value.timestamp) : ''
-);
-const fromAsset = computed(({ value }) => get(assetSymbol(value.fromAsset)));
-const toAsset = computed(({ value }) => get(assetSymbol(value.toAsset)));
+const date = computed({
+  get() {
+    const timestamp = props.modelValue.timestamp;
+    return timestamp ? convertFromTimestamp(timestamp) : '';
+  },
+  set(date: string) {
+    emit('update:model-value', {
+      ...props.modelValue,
+      timestamp: convertToTimestamp(date),
+    });
+  },
+});
 
-const price = ref<string>('');
+const fromAsset = useSimplePropVModel(props, 'fromAsset', emit);
+const toAsset = useSimplePropVModel(props, 'toAsset', emit);
+const price = useSimplePropVModel(props, 'price', emit);
+
+const fromAssetSymbol = assetSymbol(fromAsset);
+const toAssetSymbol = assetSymbol(toAsset);
+
 const numericPrice = bigNumberifyFromRef(price);
-
-const input = (price: Partial<HistoricalPriceFormPayload>) => {
-  emit('input', { ...get(value), ...price });
-};
-
-watch(value, val => {
-  set(price, val.price);
-});
-
-watch(price, val => {
-  input({ price: val });
-});
-
-onMounted(() => {
-  set(price, get(value).price);
-});
 
 const { t } = useI18n();
 
 const rules = {
   fromAsset: {
-    required: helpers.withMessage(
-      t('price_form.from_non_empty').toString(),
-      required
-    )
+    required: helpers.withMessage(t('price_form.from_non_empty'), required),
   },
   toAsset: {
-    required: helpers.withMessage(
-      t('price_form.to_non_empty').toString(),
-      required
-    )
+    required: helpers.withMessage(t('price_form.to_non_empty'), required),
   },
   price: {
-    required: helpers.withMessage(
-      t('price_form.price_non_empty').toString(),
-      required
-    )
+    required: helpers.withMessage(t('price_form.price_non_empty'), required),
   },
   date: {
-    required: helpers.withMessage(
-      t('price_form.date_non_empty').toString(),
-      required
-    )
-  }
+    required: helpers.withMessage(t('price_form.date_non_empty'), required),
+  },
 };
 
 const { setValidation } = useHistoricPriceForm();
@@ -75,70 +59,69 @@ const { setValidation } = useHistoricPriceForm();
 const v$ = setValidation(
   rules,
   {
-    fromAsset: computed(() => get(value).fromAsset),
-    toAsset: computed(() => get(value).toAsset),
+    fromAsset,
+    toAsset,
     price,
-    date
+    date,
   },
-  { $autoDirty: true }
+  { $autoDirty: true },
 );
 </script>
 
 <template>
-  <form class="flex flex-col gap-2">
+  <form class="flex flex-col gap-4">
     <div class="grid md:grid-cols-2 gap-x-4 gap-y-2">
       <AssetSelect
-        :value="value.fromAsset"
+        v-model="fromAsset"
         :label="t('price_form.from_asset')"
         outlined
         :disabled="edit"
         :error-messages="toMessages(v$.fromAsset)"
-        @input="input({ fromAsset: $event })"
       />
       <AssetSelect
-        :value="value.toAsset"
+        v-model="toAsset"
         :label="t('price_form.to_asset')"
         :disabled="edit"
         outlined
         :error-messages="toMessages(v$.toAsset)"
-        @input="input({ toAsset: $event })"
       />
     </div>
+    <DateTimePicker
+      v-model="date"
+      :label="t('common.datetime')"
+      :disabled="edit"
+      :error-messages="toMessages(v$.date)"
+    />
     <AmountInput
       v-model="price"
-      outlined
+      variant="outlined"
       :error-messages="toMessages(v$.price)"
       :label="t('common.price')"
     />
-    <i18n
-      v-if="price && fromAsset && toAsset"
+    <i18n-t
+      v-if="price && fromAssetSymbol && toAssetSymbol"
       tag="div"
-      path="price_form.historic.hint"
-      class="text-caption text-rui-success -mt-8 pb-1 pl-3"
+      keypath="price_form.historic.hint"
+      class="text-caption text-rui-success -mt-9 pl-3"
     >
       <template #fromAsset>
         <strong>
-          {{ fromAsset }}
+          {{ fromAssetSymbol }}
         </strong>
       </template>
       <template #toAsset>
         <strong>
-          {{ toAsset }}
+          {{ toAssetSymbol }}
         </strong>
       </template>
       <template #price>
         <strong>
-          <AmountDisplay :value="numericPrice" :tooltip="false" />
+          <AmountDisplay
+            :value="numericPrice"
+            :tooltip="false"
+          />
         </strong>
       </template>
-    </i18n>
-    <DateTimePicker
-      :value="date"
-      outlined
-      :label="t('common.datetime')"
-      :disabled="edit"
-      :error-messages="toMessages(v$.date)"
-      @input="input({ timestamp: convertToTimestamp($event) })"
-    />
+    </i18n-t>
   </form>
 </template>

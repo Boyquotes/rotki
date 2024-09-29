@@ -11,11 +11,9 @@ RAD = 10**RAD_DIGITS
 CPT_VAULT = 'makerdao vault'
 CPT_DSR = 'makerdao dsr'
 CPT_MAKERDAO_MIGRATION = 'makerdao migration'
-CPT_SDAI = 'sDAI'
 
 MAKERDAO_LABEL = 'Makerdao'
 MAKERDAO_ICON = 'makerdao.svg'
-SDAI_LABEL = 'sDAI contract'
-SDAI_ICON = 'sdai.svg'
 
 MAKERDAO_MIGRATION_ADDRESS = string_to_evm_address('0xc73e0383F3Aff3215E6f04B0331D58CeCf0Ab849')
+MKR_ADDRESS = string_to_evm_address('0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2')

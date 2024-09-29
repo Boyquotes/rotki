@@ -4,8 +4,19 @@ from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.assets.asset import CryptoAsset
 from rotkehlchen.chain.ethereum.constants import RAY_DIGITS
 from rotkehlchen.chain.ethereum.defi.defisaver_proxy import HasDSProxy
-from rotkehlchen.chain.ethereum.utils import asset_normalized_value, token_normalized_value
-from rotkehlchen.chain.evm.decoding.constants import ERC20_OR_ERC721_TRANSFER
+from rotkehlchen.chain.ethereum.utils import (
+    asset_normalized_value,
+    token_normalized_value,
+    token_normalized_value_decimals,
+)
+from rotkehlchen.chain.evm.constants import DEFAULT_TOKEN_DECIMALS
+from rotkehlchen.chain.evm.decoding.constants import (
+    CPT_SDAI,
+    ERC20_OR_ERC721_TRANSFER,
+    SDAI_CPT_DETAILS,
+    SDAI_DEPOSIT,
+    SDAI_REDEEM,
+)
 from rotkehlchen.chain.evm.decoding.interfaces import DecoderInterface
 from rotkehlchen.chain.evm.decoding.structures import (
     DEFAULT_DECODING_OUTPUT,
@@ -30,6 +41,7 @@ from rotkehlchen.constants.assets import (
     A_LINK,
     A_LRC,
     A_MANA,
+    A_MKR,
     A_PAX,
     A_RENBTC,
     A_SAI,
@@ -52,13 +64,11 @@ from rotkehlchen.utils.misc import hex_or_bytes_to_address, hex_or_bytes_to_int,
 from .constants import (
     CPT_DSR,
     CPT_MAKERDAO_MIGRATION,
-    CPT_SDAI,
     CPT_VAULT,
     MAKERDAO_ICON,
     MAKERDAO_LABEL,
     MAKERDAO_MIGRATION_ADDRESS,
-    SDAI_ICON,
-    SDAI_LABEL,
+    MKR_ADDRESS,
 )
 
 if TYPE_CHECKING:
@@ -77,8 +87,7 @@ NEWCDP = b"\xd6\xbe\x0b\xc1xe\x8a8/\xf4\xf9\x1c\x8ch\xb5B\xaakqh[\x8f\xe4'\x96k\
 CDPMANAGER_MOVE = b'\xf9\xf3\r\xb6\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'  # noqa: E501
 CDPMANAGER_FROB = b'E\xe6\xbd\xcd\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'  # noqa: E501
 
-SDAI_DEPOSIT = b'\xdc\xbc\x1c\x05$\x0f1\xff:\xd0g\xef\x1e\xe3\\\xe4\x99wbu.:\tR\x84uED\xf4\xc7\t\xd7'  # noqa: E501
-SDAI_REDEEM = b'\xfb\xdey} \x1ch\x1b\x91\x05e)\x11\x9e\x0b\x02@|{\xb9jJ,u\xc0\x1f\xc9fr2\xc8\xdb'
+BURN_MKR = b'\xcc\x16\xf5\xdb\xb4\x872\x80\x81\\\x1e\xe0\x9d\xbd\x06sl\xff\xcc\x18D\x12\xcfzq\xa0\xfd\xb7]9|\xa5'  # noqa: E501
 
 
 class MakerdaoDecoder(DecoderInterface, HasDSProxy):
@@ -553,6 +562,28 @@ class MakerdaoDecoder(DecoderInterface, HasDSProxy):
 
         return DEFAULT_DECODING_OUTPUT
 
+    def _decode_burn_event(self, context: DecoderContext) -> DecodingOutput:
+        if context.tx_log.topics[0] != BURN_MKR:
+            return DEFAULT_DECODING_OUTPUT
+
+        amount = token_normalized_value_decimals(
+            token_amount=hex_or_bytes_to_int(context.tx_log.data[0:32]),
+            token_decimals=DEFAULT_TOKEN_DECIMALS,
+        )
+        event = self.base.make_event_from_transaction(
+            transaction=context.transaction,
+            tx_log=context.tx_log,
+            event_type=HistoryEventType.SPEND,
+            event_subtype=HistoryEventSubType.NONE,
+            asset=A_MKR,
+            balance=Balance(amount=amount),
+            location_label=hex_or_bytes_to_address(context.tx_log.topics[1]),
+            notes=f'Burn {amount} MKR tokens',
+            address=MKR_ADDRESS,
+            counterparty=CPT_MAKERDAO_MIGRATION,
+        )
+        return DecodingOutput(event=event)
+
     # -- DecoderInterface methods
 
     def addresses_to_decoders(self) -> dict[ChecksumEvmAddress, tuple[Any, ...]]:
@@ -588,6 +619,8 @@ class MakerdaoDecoder(DecoderInterface, HasDSProxy):
             string_to_evm_address('0x89d24A6b4CcB1B6fAA2625fE562bDD9a23260359'): (self.decode_saidai_migration,),  # noqa: E501
             self.makerdao_cdp_manager.address: (self.decode_cdp_manager_events,),
             self.sdai.evm_address: (self.decode_sdai_events,),
+            MKR_ADDRESS: (self._decode_burn_event,),
+
         }
 
     @staticmethod
@@ -595,19 +628,15 @@ class MakerdaoDecoder(DecoderInterface, HasDSProxy):
         return (
             CounterpartyDetails(
                 identifier=CPT_VAULT,
-                label=MAKERDAO_LABEL,
+                label=f'{MAKERDAO_LABEL} vault',
                 image=MAKERDAO_ICON,
             ), CounterpartyDetails(
                 identifier=CPT_DSR,
-                label=MAKERDAO_LABEL,
+                label=f'{MAKERDAO_LABEL} DSR',
                 image=MAKERDAO_ICON,
             ), CounterpartyDetails(
                 identifier=CPT_MAKERDAO_MIGRATION,
-                label=MAKERDAO_LABEL,
+                label=f'{MAKERDAO_LABEL} migration',
                 image=MAKERDAO_ICON,
-            ), CounterpartyDetails(
-                identifier=CPT_SDAI,
-                label=SDAI_LABEL,
-                image=SDAI_ICON,
-            ),
+            ), SDAI_CPT_DETAILS,
         )

@@ -1,17 +1,14 @@
 <script setup lang="ts">
-import { type MaybeRef } from '@vueuse/core';
-import { type FrontendSettingsPayload } from '@/types/settings/frontend-settings';
-import { type SettingsUpdate } from '@/types/user';
-import { type SessionSettings } from '@/types/session';
+import type { MaybeRef } from '@vueuse/core';
+import type { FrontendSettingsPayload } from '@/types/settings/frontend-settings';
+import type { SettingsUpdate } from '@/types/user';
+import type { SessionSettings } from '@/types/session';
 
 type TransformMessageCallback<T = any> = (value: any) => T;
 
 const props = withDefaults(
   defineProps<{
-    setting:
-      | keyof SettingsUpdate
-      | keyof FrontendSettingsPayload
-      | keyof SessionSettings;
+    setting: keyof SettingsUpdate | keyof FrontendSettingsPayload | keyof SessionSettings;
     frontendSetting?: boolean;
     sessionSetting?: boolean;
     transform?: TransformMessageCallback | null;
@@ -23,40 +20,29 @@ const props = withDefaults(
     sessionSetting: false,
     transform: null,
     successMessage: '',
-    errorMessage: ''
-  }
+    errorMessage: '',
+  },
 );
 
 const emit = defineEmits(['updated', 'finished']);
 
-const {
-  setting,
-  frontendSetting,
-  sessionSetting,
-  successMessage,
-  errorMessage,
-  transform
-} = toRefs(props);
-const { error, success, clear, wait, stop, setSuccess, setError } =
-  useClearableMessages();
+const { setting, frontendSetting, sessionSetting, successMessage, errorMessage, transform } = toRefs(props);
+const { error, success, clearAll, wait, stop, setSuccess, setError } = useClearableMessages();
 const { updateSetting } = useSettings();
 
 const loading = ref(false);
 
-const getMessage = (
-  ref: MaybeRef<string | TransformMessageCallback<string>>,
-  value: any
-) => {
-  const message = get(ref);
-  if (typeof message === 'string') {
+function getMessage(messageRef: MaybeRef<string | TransformMessageCallback<string>>, value: any) {
+  const message = get(messageRef);
+  if (typeof message === 'string')
     return message;
-  }
-  return message(value);
-};
 
-const update = async (newValue: any) => {
+  return message(value);
+}
+
+async function updateImmediate(newValue: any) {
   stop();
-  clear();
+  clearAll();
   set(loading, true);
   const func = get(transform);
   const settingKey = get(setting);
@@ -65,12 +51,12 @@ const update = async (newValue: any) => {
   const location = get(sessionSetting)
     ? SettingLocation.SESSION
     : get(frontendSetting)
-    ? SettingLocation.FRONTEND
-    : SettingLocation.GENERAL;
+      ? SettingLocation.FRONTEND
+      : SettingLocation.GENERAL;
 
   const result = await updateSetting(settingKey, settingValue, location, {
     success: getMessage(successMessage, newValue),
-    error: getMessage(errorMessage, newValue)
+    error: getMessage(errorMessage, newValue),
   });
 
   set(loading, false);
@@ -78,12 +64,20 @@ const update = async (newValue: any) => {
 
   if ('success' in result) {
     emit('updated');
-    setSuccess(result.success);
-  } else {
-    setError(result.error);
+    setSuccess(result.success, true);
+  }
+  else {
+    setError(result.error, true);
   }
   emit('finished');
-};
+}
+
+const debounceUpdate = useDebounceFn(updateImmediate, 1500);
+
+function update(newValue: any) {
+  clearAll();
+  debounceUpdate(newValue);
+}
 </script>
 
 <template>
@@ -92,6 +86,7 @@ const update = async (newValue: any) => {
       :error="error"
       :success="success"
       :update="update"
+      :update-immediate="updateImmediate"
       :loading="loading"
     />
   </div>

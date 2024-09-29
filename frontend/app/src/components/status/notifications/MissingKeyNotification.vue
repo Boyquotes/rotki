@@ -1,21 +1,34 @@
 <script setup lang="ts">
-import { type I18nParam } from '@rotki/common/lib/messages';
+import type { I18nParam } from '@rotki/common';
 
 defineProps<{
   params: I18nParam;
 }>();
+
+const { t } = useI18n();
 </script>
 
 <template>
-  <i18n :path="params.message" :plural="params.choice" tag="div">
+  <i18n-t
+    :keypath="params.message"
+    :plural="params.choice"
+    tag="div"
+  >
     <template #service>
       {{ params.props.service }}
     </template>
     <template #location>
       {{ params.props.location }}
     </template>
-    <template #url>
-      <BaseExternalLink :href="params.props.url" :text="params.props.url" />
+    <template #docs>
+      <ExternalLink
+        v-if="params.props.docsUrl"
+        class="leading-4"
+        :url="params.props.docsUrl"
+        color="primary"
+      >
+        {{ t('common.here') }}
+      </ExternalLink>
     </template>
-  </i18n>
+  </i18n-t>
 </template>

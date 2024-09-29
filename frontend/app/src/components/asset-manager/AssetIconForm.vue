@@ -4,72 +4,91 @@ const props = withDefaults(
     identifier: string;
     refreshable?: boolean;
   }>(),
-  { refreshable: false }
+  { refreshable: false },
 );
 
 const { identifier } = toRefs(props);
 
 const preview = computed<string | null>(() => get(identifier) ?? null);
-const icon = ref<File | null>(null);
+const icon = ref<File>();
 
 const refreshIconLoading = ref<boolean>(false);
-const timestamp = ref<number | null>(null);
+const refreshKey = ref<number>(0);
 const { notify } = useNotificationsStore();
-const { appSession } = useInterop();
+const { getPath } = useInterop();
 const { setMessage } = useMessageStore();
 const { refreshIcon: refresh, setIcon, uploadIcon } = useAssetIconApi();
 
 const { t } = useI18n();
 
-const refreshIcon = async () => {
+const { setLastRefreshedAssetIcon } = useAssetIconStore();
+
+async function refreshIcon() {
+  if (get(refreshIconLoading))
+    return;
+
   set(refreshIconLoading, true);
   const identifierVal = get(identifier);
   try {
     await refresh(identifierVal);
-  } catch (e: any) {
+    set(refreshKey, get(refreshKey) + 1);
+  }
+  catch (error: any) {
     notify({
       title: t('asset_form.fetch_latest_icon.title'),
       message: t('asset_form.fetch_latest_icon.description', {
         identifier: identifierVal,
-        message: e.message
+        message: error.message,
       }),
-      display: true
+      display: true,
     });
   }
   set(refreshIconLoading, false);
-  set(timestamp, Date.now());
-};
+  setLastRefreshedAssetIcon();
+}
 
-const saveIcon = async (identifier: string) => {
-  if (!get(icon)) {
+async function saveIcon(identifier: string) {
+  const iconVal = get(icon);
+  if (!iconVal)
     return;
-  }
 
-  let success = false;
-  let message = '';
   try {
-    if (appSession) {
-      await setIcon(identifier, get(icon)!.path);
-    } else {
-      await uploadIcon(identifier, get(icon)!);
-    }
-    success = true;
-  } catch (e: any) {
-    message = e.message;
-  }
+    const path = getPath(iconVal);
+    if (path)
+      await setIcon(identifier, path);
+    else
+      await uploadIcon(identifier, iconVal);
 
-  if (!success) {
+    setLastRefreshedAssetIcon();
+  }
+  catch (error: any) {
+    const message = error.message;
+
     setMessage({
       title: t('asset_form.icon_upload.title'),
       description: t('asset_form.icon_upload.description', {
-        message
-      })
+        message,
+      }),
     });
   }
-};
+}
+
+const previewImageSource = ref<string>('');
+watch(icon, (icon) => {
+  if (icon && icon.type.startsWith('image')) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      set(previewImageSource, e.target?.result || '');
+    };
+    reader.readAsDataURL(icon);
+  }
+  else {
+    set(previewImageSource, '');
+  }
+});
 
 defineExpose({
-  saveIcon
+  saveIcon,
 });
 </script>
 
@@ -83,7 +102,7 @@ defineExpose({
         <RuiTooltip
           v-if="preview && refreshable"
           :popper="{ placement: 'right' }"
-          open-delay="400"
+          :open-delay="400"
           class="absolute -top-3 -right-3"
         >
           <template #activator>
@@ -94,18 +113,28 @@ defineExpose({
               :loading="refreshIconLoading"
               @click="refreshIcon()"
             >
-              <RuiIcon size="20" name="refresh-line" />
+              <RuiIcon
+                size="20"
+                name="refresh-line"
+              />
             </RuiButton>
           </template>
           {{ t('asset_form.fetch_latest_icon.title') }}
         </RuiTooltip>
 
+        <AppImage
+          v-if="icon && previewImageSource"
+          :src="previewImageSource"
+          size="4.5rem"
+          contain
+        />
         <AssetIcon
-          v-if="preview"
+          v-else-if="preview"
+          :key="refreshKey"
           :identifier="preview"
           size="72px"
           changeable
-          :timestamp="timestamp"
+          :show-chain="false"
         />
       </RuiCard>
       <FileUpload
@@ -115,8 +144,11 @@ defineExpose({
         file-filter=".png, .svg, .jpeg, .jpg, .webp"
       />
     </div>
-    <div v-if="icon" class="text-caption text-rui-success mt-2">
-      {{ t('asset_form.replaced', { name: icon.name }) }}
+    <div
+      v-if="icon && identifier"
+      class="text-caption text-rui-success mt-2"
+    >
+      {{ t('asset_form.replaced') }}
     </div>
   </div>
 </template>

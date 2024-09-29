@@ -1,10 +1,11 @@
 import logging
+from collections.abc import Sequence
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import requests
-from ens.abis import RESOLVER as ENS_RESOLVER_ABI
+from ens.abis import PUBLIC_RESOLVER_2 as ENS_RESOLVER_ABI
 from ens.utils import normal_name_to_hash
 from eth_utils import to_checksum_address
 from requests.exceptions import RequestException
@@ -37,34 +38,6 @@ logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
 ENS_METADATA_URL = 'https://metadata.ens.domains/mainnet'
-
-
-# TODO: remove this once web3.py updates ENS library for supporting multichain
-# https://github.com/ethereum/web3.py/issues/1839
-ENS_RESOLVER_ABI_MULTICHAIN_ADDRESS = [
-    {
-        'constant': True,
-        'inputs': [
-            {
-                'name': 'node',
-                'type': 'bytes32',
-            },
-            {
-                'name': 'coinType',
-                'type': 'uint256',
-            },
-        ],
-        'name': 'addr',
-        'outputs': [
-            {
-                'name': 'ret',
-                'type': 'bytes',
-            },
-        ],
-        'payable': False,
-        'type': 'function',
-    },
-]
 MULTICALL_CHUNKS = 20
 
 
@@ -101,7 +74,7 @@ def get_decimals(asset: CryptoAsset) -> int:
     except UnknownAsset as e:
         raise UnsupportedAsset(asset.identifier) from e
 
-    return token.decimals
+    return token.get_decimals()
 
 
 def asset_normalized_value(amount: int, asset: CryptoAsset) -> FVal:
@@ -155,11 +128,12 @@ def generate_address_via_create2(
     return to_checksum_address(contract_address)
 
 
-def should_update_protocol_cache(cache_key: CacheType, *args: str) -> bool:
+def should_update_protocol_cache(cache_key: CacheType, args: Sequence[str] | None = None) -> bool:
     """
     Checks if the last time the cache_key was queried is far enough to trigger
     the process of querying it again.
     """
+    args = args if args is not None else []
     with GlobalDBHandler().conn.read_ctx() as cursor:
         if cache_key in UNIQUE_CACHE_KEYS:
             last_update_ts = globaldb_get_unique_cache_last_queried_ts_by_key(
@@ -182,7 +156,10 @@ def _get_response_image(response: requests.adapters.Response) -> bytes:
     if response.status_code != HTTPStatus.OK:
         raise RemoteError(f'{response.url} failed with {response.status_code}')
     content_type = response.headers.get('Content-Type')
-    if content_type is None or content_type.startswith('image') is False:
+    if (
+        content_type is None or
+        (content_type != 'null' and content_type.startswith('image') is False)  # cloudflare removes the content type and sets it to null  # noqa: E501
+    ):
         raise RemoteError(f'{response.url} return non-image content type {content_type}')
 
     return response.content
@@ -245,5 +222,4 @@ def try_download_ens_avatar(
             return
 
     avatars_dir.mkdir(exist_ok=True)  # Ensure that the avatars directory exists
-    with open(avatars_dir / f'{ens_name}.png', 'wb') as f:
-        f.write(avatar)
+    Path(avatars_dir / f'{ens_name}.png').write_bytes(avatar)

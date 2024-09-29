@@ -1,57 +1,50 @@
 <script setup lang="ts">
-import { getIdentifierFromSymbolMap } from '@rotki/common/lib/data';
-import { type ComputedRef } from 'vue';
-import { type StyleValue } from 'vue/types/jsx';
+import { getIdentifierFromSymbolMap } from '@rotki/common';
 import { useCurrencies } from '@/types/currencies';
 import { isBlockchain } from '@/types/blockchain/chains';
+import type { StyleValue } from 'vue';
+import type { AssetResolutionOptions } from '@/composables/assets/retrieval';
 
 const props = withDefaults(
   defineProps<{
     identifier: string;
     size: string;
-    changeable?: boolean;
     styled?: StyleValue;
     noTooltip?: boolean;
-    timestamp?: number | null;
     circle?: boolean;
     padding?: string;
+    chainIconPadding?: string;
     enableAssociation?: boolean;
     showChain?: boolean;
+    flat?: boolean;
+    resolutionOptions?: AssetResolutionOptions;
+    chainIconSize?: string;
   }>(),
   {
-    changeable: false,
     styled: undefined,
     noTooltip: false,
-    timestamp: null,
     circle: false,
     padding: '2px',
+    chainIconPadding: '1px',
     enableAssociation: true,
-    showChain: true
-  }
+    showChain: true,
+    flat: false,
+    resolutionOptions: () => ({}),
+  },
 );
 
 const emit = defineEmits<{ (e: 'click'): void }>();
 
 const { t } = useI18n();
 
-const {
-  changeable,
-  identifier,
-  timestamp,
-  padding,
-  size,
-  enableAssociation,
-  showChain
-} = toRefs(props);
+const { identifier, padding, size, resolutionOptions, showChain, chainIconSize } = toRefs(props);
 
 const error = ref<boolean>(false);
 const pending = ref<boolean>(true);
 
-const css = useCssModule();
-
 const { currencies } = useCurrencies();
 
-const mappedIdentifier: ComputedRef<string> = computed(() => {
+const mappedIdentifier = computed<string>(() => {
   const id = getIdentifierFromSymbolMap(get(identifier));
   return isBlockchain(id) ? id.toUpperCase() : id;
 });
@@ -60,24 +53,22 @@ const currency = computed<string | undefined>(() => {
   const id = get(mappedIdentifier);
 
   const fiatCurrencies = get(currencies).filter(({ crypto }) => !crypto);
-  return fiatCurrencies.find(({ tickerSymbol }) => tickerSymbol === id)
-    ?.unicodeSymbol;
+  return fiatCurrencies.find(({ tickerSymbol }) => tickerSymbol === id)?.unicodeSymbol;
 });
 
 const { assetInfo } = useAssetInfoRetrieval();
-const { getAssetImageUrl } = useAssetIcon();
+const { getAssetImageUrl } = useAssetIconStore();
 
-const asset = assetInfo(mappedIdentifier, enableAssociation);
-const isCustomAsset = computed(() => get(asset)?.isCustomAsset);
+const asset = assetInfo(mappedIdentifier, resolutionOptions);
+const isCustomAsset = computed(() => get(asset)?.isCustomAsset ?? false);
 const chain = computed(() => get(asset)?.evmChain);
 const symbol = computed(() => get(asset)?.symbol);
 const name = computed(() => get(asset)?.name);
 
 const displayAsset = computed<string>(() => {
   const currencySymbol = get(currency);
-  if (currencySymbol) {
+  if (currencySymbol)
     return currencySymbol;
-  }
 
   return get(symbol) ?? get(name) ?? get(mappedIdentifier) ?? '';
 });
@@ -86,36 +77,21 @@ const tooltip = computed(() => {
   if (get(isCustomAsset)) {
     return {
       symbol: get(name),
-      name: ''
+      name: '',
     };
   }
 
   return {
     symbol: get(symbol),
-    name: get(name)
+    name: get(name),
   };
 });
 
-const url = computed<string>(() => {
-  const id = get(mappedIdentifier);
-  if (get(symbol) === 'WETH') {
-    return `./assets/images/protocols/weth.svg`;
-  }
+const url = reactify(getAssetImageUrl)(mappedIdentifier);
 
-  const currentTimestamp = get(timestamp) || Date.now();
-  return getAssetImageUrl(id, get(changeable) ? currentTimestamp : undefined);
-});
-
-const chainIconSize = computed(
-  () => `${(Number.parseInt(get(size)) * 50) / 100}px`
-);
-const chainWrapperSize = computed(
-  () => `${Number.parseInt(get(chainIconSize)) + 4}px`
-);
-const chainIconMargin = computed(() => `-${get(chainIconSize)}`);
-const chainIconPosition = computed(
-  () => `${(Number.parseInt(get(chainIconSize)) * 50) / 100}px`
-);
+const usedChainIconSize = computed(() => get(chainIconSize) || `${(Number.parseInt(get(size)) * 50) / 100}px`);
+const chainIconMargin = computed(() => `-${get(usedChainIconSize)}`);
+const chainIconPosition = computed(() => `${(Number.parseInt(get(usedChainIconSize)) * 50) / 100}px`);
 
 const placeholderStyle = computed(() => {
   const pad = get(padding);
@@ -123,15 +99,12 @@ const placeholderStyle = computed(() => {
   const prop = `calc(${pad} + ${pad} + ${width})`;
   return {
     width: prop,
-    height: prop
+    height: prop,
   };
 });
 
-watch([symbol, changeable, identifier], (curr, prev) => {
+watch([symbol, identifier], () => {
   set(error, false);
-  if (curr[1] !== prev[1]) {
-    set(pending, true);
-  }
 });
 </script>
 
@@ -143,24 +116,28 @@ watch([symbol, changeable, identifier], (curr, prev) => {
   >
     <template #activator>
       <div
-        class="icon-bg relative"
+        class="relative"
         :style="placeholderStyle"
         @click="emit('click')"
       >
         <div
           v-if="showChain && chain"
+          class="chain"
           :class="{
-            [css.circle]: true,
-            [css.chain]: true
+            [$style.circle]: true,
+            [$style.chain]: true,
           }"
         >
-          <EvmChainIcon :chain="chain" :size="chainIconSize" />
+          <EvmChainIcon
+            :chain="chain"
+            :size="usedChainIconSize"
+          />
         </div>
 
         <div
           :style="styled"
-          class="flex items-center justify-center cursor-pointer h-full w-full"
-          :class="{ [css.circle]: circle }"
+          class="flex items-center justify-center cursor-pointer h-full w-full icon-bg"
+          :class="{ [$style.circle]: circle }"
         >
           <RuiIcon
             v-if="!currency && pending"
@@ -174,16 +151,15 @@ watch([symbol, changeable, identifier], (curr, prev) => {
             :custom-asset="isCustomAsset"
             :asset="displayAsset"
             :size="size"
+            :flat="flat"
           />
 
-          <img
+          <AppImage
             v-else
+            contain
             :alt="displayAsset"
             :src="url"
-            class="object-contain"
-            loading="lazy"
-            :width="size"
-            :height="size"
+            :size="size"
             @loadstart="pending = true"
             @load="pending = false"
             @error="
@@ -201,23 +177,15 @@ watch([symbol, changeable, identifier], (curr, prev) => {
 
 <style module lang="scss">
 .circle {
-  border-radius: 50%;
-  overflow: hidden;
+  @apply rounded-full overflow-hidden #{!important};
 }
 
 .chain {
-  border: 1px solid rgb(200, 200, 200);
-  background-color: white;
-  position: absolute;
+  @apply border bg-white absolute z-[1] flex items-center justify-center;
   margin-top: v-bind(chainIconMargin);
   margin-left: v-bind(chainIconMargin);
   top: v-bind(chainIconPosition);
   left: v-bind(chainIconPosition);
-  width: v-bind(chainWrapperSize);
-  height: v-bind(chainWrapperSize);
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  padding: v-bind(chainIconPadding);
 }
 </style>

@@ -7,15 +7,16 @@ import requests
 from rotkehlchen.accounting.structures.types import ActionType
 from rotkehlchen.api.v1.schemas import TradeSchema
 from rotkehlchen.constants import ONE, ZERO
-from rotkehlchen.constants.assets import A_AAVE, A_BTC, A_DAI, A_EUR, A_WETH
+from rotkehlchen.constants.assets import A_AAVE, A_BTC, A_DAI, A_ETH, A_EUR, A_GUSD, A_WETH
 from rotkehlchen.constants.limits import FREE_TRADES_LIMIT
 from rotkehlchen.exchanges.data_structures import Trade
 from rotkehlchen.fval import FVal
+from rotkehlchen.tests.utils.accounting import toggle_ignore_an_asset
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_proper_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     assert_simple_ok_response,
 )
 from rotkehlchen.tests.utils.factories import make_random_trades
@@ -47,7 +48,7 @@ def test_query_trades(rotkehlchen_api_server_with_exchanges, start_with_valid_pr
                 'tradesresource',
             ),
         )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     result = result['entries']
     assert len(result) == 5  # 3 polo and 2 binance trades
     binance_ids = [t['entry']['trade_id'] for t in result if t['entry']['location'] == 'binance']
@@ -71,7 +72,7 @@ def test_query_trades(rotkehlchen_api_server_with_exchanges, start_with_valid_pr
 
     def assert_okay(response):
         """Helper function to run next query and its assertion twice"""
-        result = assert_proper_response_with_result(response)['entries']
+        result = assert_proper_sync_response_with_result(response)['entries']
         assert len(result) == 2  # only 2 binance trades
         assert_binance_trades_result([t['entry'] for t in result if t['entry']['location'] == 'binance'])  # noqa: E501
         msg = 'binance trades should now be ignored for accounting'
@@ -104,7 +105,7 @@ def test_query_trades(rotkehlchen_api_server_with_exchanges, start_with_valid_pr
                 'tradesresource',
             ), json={'from_timestamp': 1512561942, 'to_timestamp': 1539713237},
         )
-    result = assert_proper_response_with_result(response)['entries']
+    result = assert_proper_sync_response_with_result(response)['entries']
     assert len(result) == 3  # 1 binance trade and 2 poloniex trades
     assert_binance_trades_result(
         trades=[t['entry'] for t in result if t['entry']['location'] == 'binance'],
@@ -124,7 +125,7 @@ def test_query_trades(rotkehlchen_api_server_with_exchanges, start_with_valid_pr
                 'tradesresource',
             ), json=data,
         )
-    result = assert_proper_response_with_result(response)['entries']
+    result = assert_proper_sync_response_with_result(response)['entries']
     assert len(result) == 2  # only 2/3 poloniex trades
     assert_poloniex_trades_result(
         trades=[t['entry'] for t in result if t['entry']['location'] == 'poloniex'],
@@ -139,7 +140,7 @@ def test_query_trades(rotkehlchen_api_server_with_exchanges, start_with_valid_pr
             'tradesresource',
         ), json=data,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries_limit'] == -1 if start_with_valid_premium else FREE_TRADES_LIMIT
     assert result['entries_total'] == 5
     assert result['entries_found'] == 3  # for this filter
@@ -159,7 +160,7 @@ def test_query_trades(rotkehlchen_api_server_with_exchanges, start_with_valid_pr
                 'tradesresource',
             ), json=data,
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert result['entries_limit'] == -1 if start_with_valid_premium else FREE_TRADES_LIMIT
         assert result['entries_total'] == 5
         assert result['entries_found'] == 5
@@ -172,7 +173,7 @@ def test_query_trades(rotkehlchen_api_server_with_exchanges, start_with_valid_pr
                 'tradesresource',
             ), json=data,
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert result['entries_limit'] == -1 if start_with_valid_premium else FREE_TRADES_LIMIT
         assert result['entries_total'] == 5
         assert result['entries_found'] == 5
@@ -308,7 +309,7 @@ def test_query_trades_over_limit(rotkehlchen_api_server_with_exchanges, start_wi
                     'tradesresource',
                 ),
             )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
 
         all_trades_num = FREE_TRADES_LIMIT + 50 + 5  # 5 = 3 polo and 2 binance
         if start_with_valid_premium:
@@ -363,7 +364,7 @@ def test_add_trades(rotkehlchen_api_server):
                 'tradesresource',
             ), json=new_trade,
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         # And check that the identifier is correctly generated when returning the trade
         new_trade['trade_id'] = Trade(**TradeSchema().load(new_trade)).identifier
         expected_trade = new_trade.copy()
@@ -378,7 +379,7 @@ def test_add_trades(rotkehlchen_api_server):
                 'tradesresource',
             ),
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         data = response.json()
         assert data['message'] == ''
         assert result['entries'] == [{'entry': x, 'ignored_in_accounting': False} for x in all_expected_trades]  # noqa: E501
@@ -890,7 +891,7 @@ def test_edit_trades(rotkehlchen_api_server_with_exchanges):
                 'tradesresource',
             ), json={'location': 'binance'},
         )
-    trades = assert_proper_response_with_result(response)['entries']
+    trades = assert_proper_sync_response_with_result(response)['entries']
     assert len(trades) == 2  # only 2 binance trades
     for idx, trade in enumerate(trades):
         _check_trade_is_edited(original_trade=original_binance_trades[idx], result_trade=trade['entry'])  # noqa: E501
@@ -924,7 +925,7 @@ def test_edit_trades_errors(rotkehlchen_api_server):
         status_code=HTTPStatus.BAD_REQUEST,
     )
     trade['trade_id'] = 'this_id_does_not_exit'
-    # Check that non-existing trade id is is handled
+    # Check that non-existing trade id is handled
     response = requests.patch(
         api_url_for(
             rotkehlchen_api_server,
@@ -936,7 +937,7 @@ def test_edit_trades_errors(rotkehlchen_api_server):
         contained_in_msg='Tried to edit non existing trade id',
         status_code=HTTPStatus.CONFLICT,
     )
-    # Check that invalid trade_id type is is handled
+    # Check that invalid trade_id type is handled
     trade['trade_id'] = 523
     response = requests.patch(
         api_url_for(
@@ -965,7 +966,7 @@ def test_delete_trades(rotkehlchen_api_server_with_exchanges):
                 'tradesresource',
             ),
         )
-    trades = assert_proper_response_with_result(response)['entries']
+    trades = assert_proper_sync_response_with_result(response)['entries']
 
     # get the poloniex trade ids
     poloniex_trade_ids = [t['entry']['trade_id'] for t in trades if t['entry']['location'] == 'poloniex']  # noqa: E501
@@ -989,13 +990,13 @@ def test_delete_trades(rotkehlchen_api_server_with_exchanges):
                 'tradesresource',
             ), json={'location': 'poloniex'},
         )
-    trades = assert_proper_response_with_result(response)['entries']
+    trades = assert_proper_sync_response_with_result(response)['entries']
     assert len(trades) == 0
 
 
 def test_delete_trades_trades_errors(rotkehlchen_api_server):
     """Test that errors at the deleting a trade endpoint are handled properly"""
-    # Check that omitting the trade id is is handled
+    # Check that omitting the trade id is handled
     response = requests.delete(
         api_url_for(
             rotkehlchen_api_server,
@@ -1008,7 +1009,7 @@ def test_delete_trades_trades_errors(rotkehlchen_api_server):
         status_code=HTTPStatus.BAD_REQUEST,
     )
 
-    # Check that providing invalid value for trade id is is handled
+    # Check that providing invalid value for trade id is handled
     response = requests.delete(
         api_url_for(
             rotkehlchen_api_server,
@@ -1020,7 +1021,7 @@ def test_delete_trades_trades_errors(rotkehlchen_api_server):
         contained_in_msg='Not a valid string',
         status_code=HTTPStatus.BAD_REQUEST,
     )
-    # Check that providing non existing trade id is is handled
+    # Check that providing non existing trade id is handled
     response = requests.delete(
         api_url_for(
             rotkehlchen_api_server,
@@ -1104,7 +1105,7 @@ def test_query_trades_associated_locations(rotkehlchen_api_server_with_exchanges
                 'tradesresource',
             ),
         )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     result = result['entries']
     assert len(result) == 9  # 3 polo, (2 + 1) binance trades, 1 kraken, 1 external, 1 BISQ
     expected_locations = (
@@ -1123,7 +1124,7 @@ def test_query_trades_associated_locations(rotkehlchen_api_server_with_exchanges
             'tradesresource',
         ), json={'location': 'kraken', 'only_cache': True},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     result = result['entries']
     assert len(result) == 1
 
@@ -1133,7 +1134,7 @@ def test_query_trades_associated_locations(rotkehlchen_api_server_with_exchanges
             'tradesresource',
         ), json={'location': 'binance', 'only_cache': True},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     result = result['entries']
     assert len(result) == 3
 
@@ -1143,16 +1144,21 @@ def test_query_trades_associated_locations(rotkehlchen_api_server_with_exchanges
             'tradesresource',
         ), json={'location': 'nexo'},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     result = result['entries']
     assert len(result) == 0
 
 
 def test_ignoring_trades(rotkehlchen_api_server):
-    """Check that ignoring trades filter works as expected."""
+    """Check that ignoring trades and ignoring assets filter works as expected."""
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
     trades = make_random_trades(3)
     trade_to_ignore = trades[0].identifier
+
+    trades[2].base_asset = A_AAVE
+    trades[2].quote_asset = A_GUSD
+    trade_with_asset_ignored = trades[2].identifier
+    asset_to_ignore = A_GUSD
 
     # populate db with trades
     with rotki.data.db.user_write() as cursor:
@@ -1170,14 +1176,14 @@ def test_ignoring_trades(rotkehlchen_api_server):
         result = rotki.data.db.get_ignored_action_ids(cursor, None)
     assert result[ActionType.TRADE] == {trade_to_ignore}
 
-    # now fetch trades and check for the behaviour of the filter
+    # now fetch trades and check for the behaviour of the `include_ignored_trades` filter
     response = requests.get(
         api_url_for(
             rotkehlchen_api_server,
             'tradesresource',
         ), json={'include_ignored_trades': 'True'},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == len(trades)
     assert trade_to_ignore in {entry['entry']['trade_id'] for entry in result['entries']}
 
@@ -1187,15 +1193,43 @@ def test_ignoring_trades(rotkehlchen_api_server):
             'tradesresource',
         ), json={'include_ignored_trades': 'False'},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == len(trades) - 1
     assert trade_to_ignore not in {entry['entry']['trade_id'] for entry in result['entries']}
+
+    # ignore an asset
+    toggle_ignore_an_asset(rotkehlchen_api_server, asset_to_ignore)
+
+    # now fetch trades and check for the behaviour of the `exclude_ignored_assets` filter
+    response = requests.get(
+        api_url_for(
+            rotkehlchen_api_server,
+            'tradesresource',
+        ), json={'exclude_ignored_assets': 'True'},
+    )
+    result = assert_proper_sync_response_with_result(response)
+    assert len(result['entries']) == len(trades) - 1
+    assert trade_with_asset_ignored not in {
+        entry['entry']['trade_id'] for entry in result['entries']
+    }
+
+    response = requests.get(
+        api_url_for(
+            rotkehlchen_api_server,
+            'tradesresource',
+        ), json={'exclude_ignored_assets': 'False'},
+    )
+    result = assert_proper_sync_response_with_result(response)
+    assert len(result['entries']) == len(trades)
+    assert trade_with_asset_ignored in {entry['entry']['trade_id'] for entry in result['entries']}
 
 
 def test_ignoring_trades_with_pagination(rotkehlchen_api_server):
     """Check that pagination is respected when `include_ignored_trades` is True."""
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
-    trades = make_random_trades(10)
+    trades = make_random_trades(5, base_asset=A_ETH)
+    trades.extend(make_random_trades(5, base_asset=A_BTC))
+    trades.sort(key=lambda x: x.timestamp)
     trades_to_ignore = [trades[0].identifier, trades[1].identifier]
 
     # populate db with trades
@@ -1225,7 +1259,7 @@ def test_ignoring_trades_with_pagination(rotkehlchen_api_server):
             'offset': 0,
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 7
     assert result['entries_found'] == 8
     assert result['entries_total'] == len(trades)
@@ -1242,7 +1276,24 @@ def test_ignoring_trades_with_pagination(rotkehlchen_api_server):
             'offset': 0,
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 7
     assert result['entries_found'] == 10
     assert result['entries_total'] == len(trades)
+
+    # ignore an asset and check it works fine with pagination
+    toggle_ignore_an_asset(rotkehlchen_api_server, A_ETH)
+    # now fetch trades and check that `exclude_ignored_assets` filter works with pagination
+    for exclude_ignored_assets, expected_length in ((False, 8), (True, 5)):
+        response = requests.get(
+            api_url_for(
+                rotkehlchen_api_server,
+                'tradesresource',
+            ), json={
+                'exclude_ignored_assets': exclude_ignored_assets,
+                'limit': 8,
+                'offset': 0,
+            },
+        )
+        result = assert_proper_sync_response_with_result(response)
+        assert len(result['entries']) == expected_length

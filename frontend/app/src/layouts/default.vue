@@ -2,27 +2,30 @@
 import { ThemeChecker } from '@/premium/premium';
 
 const { showAbout } = storeToRefs(useAreaVisibilityStore());
-const { showComponents } = storeToRefs(usePremiumStore());
+const premium = usePremium();
 const { isPackaged } = useInterop();
 const { updateDarkMode } = useDarkMode();
 const { load } = useDataLoader();
 
-onMounted(async () => await load());
+onMounted(load);
 </script>
 
 <template>
   <AppHost>
     <AppMessages>
       <ThemeChecker
-        v-if="showComponents"
+        v-if="premium"
         @update:dark-mode="updateDarkMode($event)"
       />
       <AppUpdatePopup />
       <AppCore />
     </AppMessages>
-    <VDialog v-if="showAbout" v-model="showAbout" max-width="500">
+    <RuiDialog
+      v-model="showAbout"
+      max-width="500"
+    >
       <About />
-    </VDialog>
+    </RuiDialog>
     <FrontendUpdateNotifier v-if="!isPackaged" />
   </AppHost>
 </template>

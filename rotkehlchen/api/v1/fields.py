@@ -1,6 +1,7 @@
 import logging
 import urllib
 from collections.abc import Mapping, Sequence
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
@@ -429,11 +430,17 @@ class BlockchainField(fields.Field):
 class SerializableEnumField(fields.Field):
     """A field that takes an enum following the SerializableEnumMixin interface
     """
-    def __init__(self, enum_class: type[SerializableEnumNameMixin | (SerializableEnumIntValueMixin | (DBCharEnumMixIn | DBIntEnumMixIn))], **kwargs: Any) -> None:  # noqa: E501
+    def __init__(
+            self,
+            enum_class: type[SerializableEnumNameMixin | (SerializableEnumIntValueMixin | (DBCharEnumMixIn | DBIntEnumMixIn))],  # noqa: E501
+            exclude_types: Sequence[Enum] | None = None,
+            **kwargs: Any,
+    ) -> None:
         """We give all possible types as unions instead of just type[SerializableEnumMixin]
         due to this bug https://github.com/python/mypy/issues/4717
         Normally it should have sufficed to give just the former.
         """
+        self.exclude_types = exclude_types
         self.enum_class = enum_class
         super().__init__(**kwargs)
 
@@ -457,6 +464,43 @@ class SerializableEnumField(fields.Field):
             result = self.enum_class.deserialize(value)
         except DeserializationError as e:
             raise ValidationError(str(e)) from e
+
+        if self.exclude_types is not None and result in self.exclude_types:
+            raise ValidationError(f'{result} is not one of the valid values for this endpoint')
+
+        return result
+
+
+class StrEnumField(fields.Field):
+    """A field that takes a python 3.11+ StrEnum"""
+    def __init__(self, enum_class: type[StrEnum], **kwargs: Any) -> None:
+        """We give all possible types as unions instead of just type[SerializableEnumMixin]
+        due to this bug https://github.com/python/mypy/issues/4717
+        Normally it should have sufficed to give just the former.
+        """
+        self.enum_class = enum_class
+        super().__init__(**kwargs)
+
+    @staticmethod
+    def _serialize(
+            value: SerializableEnumMixin,
+            attr: str | None,  # pylint: disable=unused-argument
+            obj: Any,
+            **_kwargs: Any,
+    ) -> str:
+        return value.value
+
+    def _deserialize(
+            self,
+            value: str,
+            attr: str | None,  # pylint: disable=unused-argument
+            data: Mapping[str, Any] | None,
+            **_kwargs: Any,
+    ) -> Any:
+        try:
+            result = self.enum_class(value)
+        except ValueError as e:
+            raise ValidationError(f'Illegal value {value} for {self.enum_class}') from e
 
         return result
 
@@ -498,6 +542,44 @@ class EvmChainNameField(fields.Field):
             )
 
         return chain_id
+
+
+class EvmChainLikeNameField(fields.Field):
+    """A special case of serializing to an enum. Using the string name of an evm
+    chain to serialize to SupportedBlockchain. Should be superset of EvmChainNameField"""
+
+    def __init__(self, *, limit_to: list[SupportedBlockchain] | None = None, **kwargs: Any) -> None:  # noqa: E501
+        self.limit_to = limit_to
+        super().__init__(**kwargs)
+
+    @staticmethod
+    def _serialize(
+            value: SupportedBlockchain,
+            attr: str | None,  # pylint: disable=unused-argument
+            obj: Any,
+            **_kwargs: Any,
+    ) -> str | None:
+        return value.name.lower() if value else None
+
+    def _deserialize(
+            self,
+            value: str,
+            attr: str | None,  # pylint: disable=unused-argument
+            data: Mapping[str, Any] | None,
+            **_kwargs: Any,
+    ) -> SupportedBlockchain:
+        try:
+            chain = SupportedBlockchain.deserialize(value)
+        except DeserializationError as e:
+            raise ValidationError(str(e)) from e
+
+        if self.limit_to is not None and chain not in self.limit_to:
+            raise ValidationError(
+                f'Given chain {value} is not one of '
+                f'{",".join([str(x) for x in self.limit_to])} as needed by the endpoint',
+            )
+
+        return chain
 
 
 class AssetField(fields.Field):
@@ -956,3 +1038,30 @@ class NonEmptyList(fields.List):
             raise ValidationError('List cant be empty')
 
         return result
+
+
+class EvmCounterpartyField(fields.Field):
+    """
+    Checks if the value provided is among a set of valid counterparties provided.
+    The set of valid options can be dynamically populated by calling set_counterparties
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.counterparties: set[str] | None = None
+        super().__init__(*args, **kwargs)
+
+    def set_counterparties(self, counterparties: set[str]) -> None:
+        self.counterparties = counterparties
+
+    def _deserialize(
+            self,
+            value: str,
+            attr: str | None,  # pylint: disable=unused-argument
+            data: Mapping[str, Any] | None,
+            **_kwargs: Any,
+    ) -> str:
+        assert self.counterparties is not None, 'Set of counterparties not provided in EvmCounterpartyField'  # noqa: E501
+        if value is not None and value not in self.counterparties:
+            raise ValidationError(f'Unknown counterparty {value} provided')
+
+        return value

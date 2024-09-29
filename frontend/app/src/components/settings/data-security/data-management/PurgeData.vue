@@ -1,149 +1,183 @@
 <script setup lang="ts">
-import { type Ref } from 'vue';
-import { Module, SUPPORTED_MODULES } from '@/types/modules';
-import {
-  ALL_CENTRALIZED_EXCHANGES,
-  ALL_DECENTRALIZED_EXCHANGES,
-  ALL_MODULES,
-  ALL_TRANSACTIONS,
-  PURGABLE,
-  type Purgeable
-} from '@/types/session/purge';
-import { SUPPORTED_EXCHANGES, type SupportedExchange } from '@/types/exchanges';
-import { EXTERNAL_EXCHANGES } from '@/data/defaults';
+import { DECENTRALIZED_EXCHANGES, Module, PurgeableOnlyModule } from '@/types/modules';
+import { Purgeable } from '@/types/session/purge';
 
-const source: Ref<Purgeable> = ref(ALL_TRANSACTIONS);
+const purgeableOnlyModules = Object.values(PurgeableOnlyModule);
+const purgeableModules = [...Object.values(Module), ...purgeableOnlyModules];
+const { allExchanges } = storeToRefs(useLocationStore());
+const { txChains } = useSupportedChains();
 
 const { purgeCache } = useSessionPurge();
-
 const { deleteModuleData } = useBlockchainBalancesApi();
-const { deleteEvmTransactions } = useHistoryEventsApi();
+const { deleteTransactions } = useHistoryEventsApi();
 const { deleteExchangeData } = useExchangeApi();
 
-const purgeSource = async (source: Purgeable) => {
-  if (source === ALL_TRANSACTIONS) {
-    await deleteEvmTransactions(get(evmChainToClear));
-  } else if (source === ALL_MODULES) {
-    await deleteModuleData();
-  } else if (source === ALL_CENTRALIZED_EXCHANGES) {
-    await deleteExchangeData();
-  } else if (source === ALL_DECENTRALIZED_EXCHANGES) {
-    await Promise.all([
-      deleteModuleData(Module.UNISWAP),
-      deleteModuleData(Module.BALANCER)
-    ]);
-  } else if (
-    SUPPORTED_EXCHANGES.includes(source as any) ||
-    EXTERNAL_EXCHANGES.includes(source as any)
-  ) {
-    await deleteExchangeData(source as SupportedExchange);
-  } else if (Object.values(Module).includes(source as any)) {
-    await deleteModuleData(source as Module);
-  }
-  await purgeCache(source);
-};
-
 const { t } = useI18n();
-const { tradeLocations } = useLocations();
 
-const text = (source: Purgeable) => {
-  const location = get(tradeLocations).find(
-    ({ identifier }) => identifier === source
-  );
+const source = ref<Purgeable>(Purgeable.TRANSACTIONS);
 
-  if (location) {
-    return t('purge_selector.exchange', {
-      name: location.name
-    });
+const centralizedExchangeToClear = ref<string>('');
+const decentralizedExchangeToClear = ref<string>('');
+const chainToClear = ref<string>('');
+const moduleToClear = ref<string>('');
+
+const purgable = [
+  {
+    id: Purgeable.CENTRALIZED_EXCHANGES,
+    text: t('purge_selector.centralized_exchanges'),
+    value: centralizedExchangeToClear,
+  },
+  {
+    id: Purgeable.DECENTRALIZED_EXCHANGES,
+    text: t('purge_selector.decentralized_exchanges'),
+    value: decentralizedExchangeToClear,
+  },
+  {
+    id: Purgeable.DEFI_MODULES,
+    text: t('purge_selector.defi_modules'),
+    value: moduleToClear,
+  },
+  {
+    id: Purgeable.TRANSACTIONS,
+    text: t('purge_selector.transactions'),
+    value: chainToClear,
+  },
+];
+
+async function purgeSource(source: Purgeable) {
+  const valueRef = purgable.find(({ id }) => id === source)?.value;
+  const value = valueRef ? get(valueRef) : '';
+  if (source === Purgeable.TRANSACTIONS) {
+    await deleteTransactions(value);
+  }
+  else if (source === Purgeable.DEFI_MODULES) {
+    await deleteModuleData((value as Module) || null);
+  }
+  else if (source === Purgeable.CENTRALIZED_EXCHANGES) {
+    await deleteExchangeData(value);
+  }
+  else if (source === Purgeable.DECENTRALIZED_EXCHANGES) {
+    if (value)
+      await deleteModuleData(value as Module);
+    else
+      await Promise.all(DECENTRALIZED_EXCHANGES.map(deleteModuleData));
   }
 
-  const module = SUPPORTED_MODULES.find(
-    ({ identifier }) => identifier === source
-  );
-  if (module) {
-    return t('purge_selector.module', { name: module.name });
-  }
+  // Purgeable only modules don't have some cache that needs reset.
+  if (Array.prototype.includes.call(purgeableOnlyModules, value))
+    return;
 
-  if (source === ALL_TRANSACTIONS) {
-    return t('purge_selector.evm_transactions');
-  } else if (source === ALL_CENTRALIZED_EXCHANGES) {
-    return t('purge_selector.all_exchanges');
-  } else if (source === ALL_MODULES) {
-    return t('purge_selector.all_modules');
-  } else if (source === ALL_DECENTRALIZED_EXCHANGES) {
-    return t('purge_selector.all_decentralized_exchanges');
-  }
-  return source;
-};
-
-const purgable = PURGABLE.map(id => ({
-  id,
-  text: text(id)
-})).sort((a, b) => (a.text < b.text ? -1 : 1));
+  purgeCache(source, value);
+}
 
 const { status, pending, showConfirmation } = useCacheClear<Purgeable>(
   purgable,
   purgeSource,
   (source: string) => ({
     success: t('data_management.purge_data.success', {
-      source
+      source,
     }),
     error: t('data_management.purge_data.error', {
-      source
-    })
+      source,
+    }),
   }),
-  (source: string) => ({
-    title: t('data_management.purge_data.confirm.title'),
-    message:
-      source === text(ALL_TRANSACTIONS)
-        ? t('data_management.purge_data.evm_transaction_purge_confirm.message')
-        : t('data_management.purge_data.confirm.message', {
-            source
-          })
-  })
+  (textSource, source) => {
+    const valueRef = purgable.find(({ id }) => id === source)?.value;
+    const value = valueRef ? get(valueRef) : '';
+
+    let message = '';
+    if (source === Purgeable.TRANSACTIONS) {
+      message = t('data_management.purge_data.transaction_purge_confirm.message');
+    }
+    else if (value) {
+      message = t('data_management.purge_data.confirm.message', {
+        source: textSource,
+        value: toSentenceCase(value),
+      });
+    }
+    else {
+      message = t('data_management.purge_data.confirm.message_all', {
+        source: textSource,
+      });
+    }
+
+    return {
+      title: t('data_management.purge_data.confirm.title'),
+      message,
+    };
+  },
 );
 
-const evmChainToClear: Ref<string> = ref('');
-
-const { txEvmChainsToLocation } = useSupportedChains();
+const chainsSelection = useArrayMap(txChains, item => item.id);
 </script>
 
 <template>
   <div>
-    <div class="mb-6">
-      <div class="text-h6">
+    <RuiCardHeader class="p-0 mb-4">
+      <template #header>
         {{ t('data_management.purge_data.title') }}
-      </div>
-      <div>
+      </template>
+      <template #subheader>
         {{ t('data_management.purge_data.subtitle') }}
-      </div>
-    </div>
+      </template>
+    </RuiCardHeader>
 
     <div class="flex items-center gap-4">
       <div class="flex flex-col md:flex-row md:gap-4 flex-1">
-        <VAutocomplete
+        <RuiAutoComplete
           v-model="source"
           class="flex-1"
-          outlined
+          variant="outlined"
           :label="t('purge_selector.label')"
-          :items="purgable"
-          item-text="text"
-          item-value="id"
+          :options="purgable"
+          text-attr="text"
+          key-attr="id"
           :disabled="pending"
         />
-        <LocationSelector
-          v-if="source === ALL_TRANSACTIONS"
-          v-model="evmChainToClear"
+        <ChainSelect
+          v-if="source === Purgeable.TRANSACTIONS"
+          v-model="chainToClear"
           class="flex-1"
-          required
-          outlined
           clearable
-          :items="txEvmChainsToLocation"
-          :label="t('purge_selector.evm_chain_to_clear.label')"
-          :hint="t('purge_selector.evm_chain_to_clear.hint')"
+          persistent-hint
+          :items="chainsSelection"
+          :label="t('purge_selector.chain_to_clear.label')"
+          :hint="t('purge_selector.chain_to_clear.hint')"
+        />
+        <LocationSelector
+          v-else-if="source === Purgeable.CENTRALIZED_EXCHANGES"
+          v-model="centralizedExchangeToClear"
+          class="flex-1"
+          clearable
+          persistent-hint
+          :items="allExchanges"
+          :label="t('purge_selector.centralized_exchange_to_clear.label')"
+          :hint="t('purge_selector.centralized_exchange_to_clear.hint')"
+        />
+        <LocationSelector
+          v-else-if="source === Purgeable.DECENTRALIZED_EXCHANGES"
+          v-model="decentralizedExchangeToClear"
+          class="flex-1"
+          clearable
+          persistent-hint
+          :items="DECENTRALIZED_EXCHANGES"
+          :label="t('purge_selector.decentralized_exchange_to_clear.label')"
+          :hint="t('purge_selector.decentralized_exchange_to_clear.hint')"
+        />
+        <DefiModuleSelector
+          v-else-if="source === Purgeable.DEFI_MODULES"
+          v-model="moduleToClear"
+          class="flex-1"
+          :items="purgeableModules"
+          :label="t('purge_selector.defi_module_to_clear.label')"
+          :hint="t('purge_selector.defi_module_to_clear.hint')"
         />
       </div>
-      <RuiTooltip :popper="{ placement: 'top' }" open-delay="400" class="-mt-8">
+      <RuiTooltip
+        :popper="{ placement: 'top' }"
+        :open-delay="400"
+        class="-mt-6"
+      >
         <template #activator>
           <RuiButton
             variant="text"
@@ -159,6 +193,10 @@ const { txEvmChainsToLocation } = useSupportedChains();
       </RuiTooltip>
     </div>
 
-    <ActionStatusIndicator v-if="status" :status="status" />
+    <ActionStatusIndicator
+      v-if="status"
+      class="mt-4"
+      :status="status"
+    />
   </div>
 </template>

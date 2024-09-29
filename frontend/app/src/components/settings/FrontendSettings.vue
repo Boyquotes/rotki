@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ThemeManager } from '@/premium/premium';
 
-const { premium } = storeToRefs(usePremiumStore());
+const premium = usePremium();
 
 const { t } = useI18n();
 </script>
@@ -46,7 +46,13 @@ const { t } = useI18n();
     <RefreshSetting />
     <QueryPeriodSetting />
     <Explorers />
-    <ThemeManager v-if="premium" class="mt-12" />
-    <ThemeManagerLock v-else class="mt-12" />
+    <ThemeManager
+      v-if="premium"
+      class="mt-12"
+    />
+    <ThemeManagerLock
+      v-else
+      class="mt-12"
+    />
   </SettingCategory>
 </template>

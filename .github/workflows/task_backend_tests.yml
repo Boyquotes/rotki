@@ -15,13 +15,15 @@ jobs:
     env:
       CI: true
       TEST_ENVIRONMENT: ${{ inputs.test_environment }}
+      TARGET_BRANCH: ${{ github.base_ref }}
+      SOURCE_BRANCH: ${{ github.head_ref }}
     runs-on: ${{ inputs.os }}
     name: 'Backend tests'
     timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
-        test-group: [api, others]
+        test-group: [api, decoders, others]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,17 +34,45 @@ jobs:
         with:
           repository: rotki/test-caching
           path: test-caching
+          fetch-depth: 0
+      - name: Ensure VCR branch is fully rebased
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          cd $HOME/work/rotki/rotki/test-caching
+          git fetch origin
+          if [[ `git branch --all | grep remotes/origin/$SOURCE_BRANCH` ]]; then
+            echo "Branch $SOURCE_BRANCH exists on origin. Checking it out..."
+            git checkout -b $SOURCE_BRANCH origin/$SOURCE_BRANCH
+          else
+            echo "Branch $SOURCE_BRANCH does not exist on origin. Checking the $AUTHOR's fork..."
+            git remote add author https://github.com/$AUTHOR/test-caching.git
+            git fetch author $SOURCE_BRANCH && git checkout -b $SOURCE_BRANCH author/$SOURCE_BRANCH || exit 0
+
+            if [ "`curl --silent "https://api.github.com/repos/rotki/test-caching/pulls?state=open&head=$AUTHOR:$SOURCE_BRANCH&base=$TARGET_BRANCH" | jq "length"`" == "0" ]; then
+                echo "Found the $SOURCE_BRANCH branch on $AUTHOR's test-caching fork. But no PR found. Aborting."
+                exit 1
+            fi
+          fi
+
+          [ `git rev-parse remotes/origin/$TARGET_BRANCH` = `git merge-base remotes/origin/$TARGET_BRANCH $SOURCE_BRANCH` ] &&
+          echo "VCR setup: $SOURCE_BRANCH fully rebased on $TARGET_BRANCH" && exit ||
+          echo "VCR setup: $SOURCE_BRANCH not fully rebased on $TARGET_BRANCH" && exit 1
       - name: Load env
-        uses: rotki/action-env@v1
+        uses: rotki/action-env@v2
         with:
           env_file: .github/.env.ci
       - name: Setup python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+      - name: Install uv
+        run: |
+          pip install --upgrade uv
       - name: Cache rotkehlchen test directory
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/.rotkehlchen-test-dir
           key: ${{ runner.os }}-testdir
@@ -67,39 +97,42 @@ jobs:
           Get-ChildItem -Path $PYTHON_LOCATION
           (Get-Command python).Path
       - name: Install dependencies
-        run: |          
-          pip install --upgrade pip==${{ env.PIP_VERSION }} wheel
-          pip install pytest-cov
-          pip install -r requirements_dev.txt
-          pip install -e .
+        run: |
+          uv pip install --system --upgrade wheel pytest-cov
+          uv pip install --system -r requirements_dev.txt
+          uv pip install --system -e .
       - name: Install pytest annotation plugin
         run: |     
-          pip install pytest-github-actions-annotate-failures
+          uv pip install --system pytest-github-actions-annotate-failures
       - name: Run tests
         env:
           PYTEST_ARGS: '--durations=150'
           FORCE_COLOR: 1
-          MATIX_JOB: ${{ matrix.test-group }}
+          MATRIX_JOB: ${{ matrix.test-group }}
         run: |
           if [ "${{ runner.os }}" == 'macOS' ];
           then
             COVERAGE_ARGS=''
           else
             COVERAGE_ARGS='--cov=./'
-          fi          
+          fi
 
           export CASSETTES_DIR=$HOME/work/rotki/rotki/test-caching
 
           if [ "${{ matrix.test-group }}" == 'api' ]
           then
             python pytestgeventwrapper.py $PYTEST_ARGS $COVERAGE_ARGS rotkehlchen/tests/api
+          elif [ "${{ matrix.test-group }}" == 'decoders' ]
+          then
+            python pytestgeventwrapper.py $PYTEST_ARGS $COVERAGE_ARGS -n 6 rotkehlchen/tests/unit/decoders -v
           else
-            python pytestgeventwrapper.py $PYTEST_ARGS $COVERAGE_ARGS --ignore=rotkehlchen/tests/api rotkehlchen/tests/
+            python pytestgeventwrapper.py $PYTEST_ARGS $COVERAGE_ARGS --ignore=rotkehlchen/tests/api --ignore=rotkehlchen/tests/unit/decoders rotkehlchen/tests/
           fi
           
           python pytestgeventwrapper.py --dead-fixtures
         shell: bash
       - name: Upload coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           flags: backend
+          token: ${{ secrets.CODECOV_TOKEN }}

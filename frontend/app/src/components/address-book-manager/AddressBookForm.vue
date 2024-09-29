@@ -1,60 +1,52 @@
 <script setup lang="ts">
-import { helpers, required } from '@vuelidate/validators';
-import {
-  type AddressBookLocation,
-  type AddressBookPayload
-} from '@/types/eth-names';
-import { isValidEthAddress, toSentenceCase } from '@/utils/text';
+import { each } from 'lodash-es';
+import { Blockchain } from '@rotki/common';
+import { helpers, required, requiredIf } from '@vuelidate/validators';
 import { toMessages } from '@/utils/validation';
+import type { SelectOptions } from '@/types/common';
+import type { AddressBookLocation, AddressBookPayload } from '@/types/eth-names';
 
-const props = withDefaults(
-  defineProps<{
-    value: AddressBookPayload;
-    edit: boolean;
-    enableForAllChains?: boolean;
-  }>(),
-  {
-    enableForAllChains: false
-  }
-);
+const props = defineProps<{
+  modelValue: AddressBookPayload;
+  edit: boolean;
+  errorMessages: { address?: string[]; name?: string[] };
+}>();
 
 const emit = defineEmits<{
-  (e: 'input', value: AddressBookPayload): void;
+  (e: 'update:model-value', value: AddressBookPayload): void;
   (e: 'valid', valid: boolean): void;
-  (e: 'update:enable-for-all-chains', enable: boolean): void;
 }>();
 
 const { t } = useI18n();
-const { value, enableForAllChains } = toRefs(props);
+const { errorMessages } = toRefs(props);
 
+const name = useSimplePropVModel(props, 'name', emit);
+const address = useSimplePropVModel(props, 'address', emit);
+const location = useSimplePropVModel(props, 'location', emit);
+const chain = useSimplePropVModel(props, 'blockchain', emit);
+const blockchain = nullDefined(chain);
+const enabledForAllChains = defineModel<boolean>('enableForAllChains', { required: true, default: false });
+
+const { addresses } = useBlockchainStore();
 const addressesNamesStore = useAddressesNamesStore();
-const { getAddressesWithoutNames } = addressesNamesStore;
+const { getAddressesWithoutNames, addressNameSelector } = addressesNamesStore;
 
-const addressSuggestions = getAddressesWithoutNames();
-
-const input = (payload: Partial<AddressBookPayload>) => {
-  emit('input', { ...get(value), ...payload });
-};
-
-const locations: AddressBookLocation[] = ['global', 'private'];
+const addressSuggestions = getAddressesWithoutNames(chain);
+const locations = computed<SelectOptions<AddressBookLocation>>(() => [
+  { label: t('address_book.hint.global'), key: 'global' },
+  { label: t('address_book.hint.private'), key: 'private' },
+]);
 
 const rules = {
+  blockchain: {
+    required: helpers.withMessage(t('address_book.form.validation.chain'), requiredIf(logicNot(enabledForAllChains))),
+  },
   address: {
-    required: helpers.withMessage(
-      t('address_book.form.validation.address').toString(),
-      required
-    ),
-    isValidEthAddress: helpers.withMessage(
-      t('address_book.form.validation.valid').toString(),
-      isValidEthAddress
-    )
+    required: helpers.withMessage(t('address_book.form.validation.address'), required),
   },
   name: {
-    required: helpers.withMessage(
-      t('address_book.form.validation.name').toString(),
-      required
-    )
-  }
+    required: helpers.withMessage(t('address_book.form.validation.name'), required),
+  },
 };
 
 const { setValidation } = useAddressBookForm();
@@ -62,85 +54,98 @@ const { setValidation } = useAddressBookForm();
 const v$ = setValidation(
   rules,
   {
-    address: computed(() => get(value).address),
-    name: computed(() => get(value).name)
+    blockchain,
+    address,
+    name,
   },
-  { $autoDirty: true }
+  { $autoDirty: true, $externalResults: errorMessages },
 );
 
-const updateAllChainsState = (enable: boolean) => {
-  emit('update:enable-for-all-chains', enable);
-};
-
 const { getBlockie } = useBlockie();
+
+function fetchNames() {
+  const addressMap = get(addresses);
+
+  each(Blockchain, (chain) => {
+    addressMap[chain]?.forEach(address => get(addressNameSelector(address, chain)));
+  });
+}
+
+/**
+ * if new suggestions does not include last suggested and selected address, reset address
+ */
+watch(addressSuggestions, (suggestions, oldSuggestions) => {
+  const chainAddress = get(address);
+  if (get(blockchain) && oldSuggestions.includes(chainAddress) && !suggestions.includes(chainAddress))
+    set(address, '');
+});
+
+watchEffect(fetchNames);
+onMounted(fetchNames);
 </script>
 
 <template>
-  <form>
-    <VSelect
-      :value="value.location"
-      outlined
+  <form class="flex flex-col gap-4">
+    <RuiMenuSelect
+      v-model="location"
       :label="t('common.location')"
-      :items="locations"
+      :options="locations"
       :disabled="edit"
-      @input="input({ location: $event })"
-    >
-      <template #item="{ item }"> {{ toSentenceCase(item) }} </template>
-      <template #selection="{ item }">
-        {{ toSentenceCase(item) }}
-      </template>
-    </VSelect>
-    <ChainSelect
-      evm-only
-      :model-value="value.blockchain"
-      :disabled="edit || enableForAllChains"
-      @update:model-value="input({ blockchain: $event })"
+      key-attr="key"
+      text-attr="label"
+      variant="outlined"
     />
-    <RuiCheckbox
+    <RuiSwitch
+      v-model="enabledForAllChains"
       :disabled="edit"
       color="primary"
-      class="-my-2"
-      :value="enableForAllChains"
       :label="t('address_book.form.labels.for_all_chain')"
-      @input="updateAllChainsState($event)"
     />
-    <ComboboxWithCustomInput
-      :value="value.address || ''"
-      outlined
-      :label="t('address_book.form.labels.address')"
-      :items="addressSuggestions"
-      :no-data-text="t('address_book.form.no_suggestions_available')"
-      :disabled="edit"
-      :error-messages="toMessages(v$.address)"
-      auto-select-first
-      @input="input({ address: $event })"
-    >
-      <template #prepend-inner>
-        <span>
-          <VAvatar size="24" class="mr-2" color="grey">
-            <VImg
-              v-if="value.address && isValidEthAddress(value.address)"
-              :src="getBlockie(value.address)"
+    <ChainSelect
+      v-model="blockchain"
+      :disabled="edit || enabledForAllChains"
+      exclude-eth-staking
+      :error-messages="toMessages(v$.blockchain)"
+    />
+    <div class="flex gap-2">
+      <div class="m-3 rounded-full overflow-hidden w-8 h-8 bg-rui-grey-300 dark:bg-rui-grey-600">
+        <AppImage
+          v-if="modelValue.address"
+          :src="getBlockie(modelValue.address)"
+          size="2rem"
+        />
+      </div>
+      <AutoCompleteWithSearchSync
+        v-model.trim="address"
+        class="flex-1"
+        :label="t('address_book.form.labels.address')"
+        :items="addressSuggestions"
+        :no-data-text="t('address_book.form.no_suggestions_available')"
+        :disabled="edit"
+        :error-messages="toMessages(v$.address)"
+        clearable
+      >
+        <template #item.prepend="{ item }">
+          <div
+            v-if="item"
+            class="mr-2 rounded-full overflow-hidden w-6 h-6 bg-rui-grey-300 dark:bg-rui-grey-600"
+          >
+            <AppImage
+              v-if="item"
+              :src="getBlockie(item)"
+              size="1.5rem"
             />
-          </VAvatar>
-        </span>
-      </template>
-      <template #item="{ item }">
-        <span v-if="item">
-          <VAvatar size="24" class="mr-2">
-            <VImg :src="getBlockie(item)" />
-          </VAvatar>
-        </span>
-        {{ item }}
-      </template>
-    </ComboboxWithCustomInput>
+          </div>
+        </template>
+      </AutoCompleteWithSearchSync>
+    </div>
     <RuiTextField
-      :value="value.name"
+      v-model="name"
+      class="mt-2"
       variant="outlined"
       color="primary"
       :label="t('common.name')"
       :error-messages="toMessages(v$.name)"
-      @input="input({ name: $event })"
     />
   </form>
 </template>

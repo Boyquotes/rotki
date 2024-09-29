@@ -13,9 +13,9 @@ const { currencies } = useCurrencies();
 const filteredCurrencies = computed<Currency[]>(() => {
   const filterValue = get(filter).toLocaleLowerCase();
   const supportedCurrencies = get(currencies);
-  if (!filterValue) {
+  if (!filterValue)
     return supportedCurrencies;
-  }
+
   return supportedCurrencies.filter(({ name, tickerSymbol }) => {
     const currencyName = name.toLocaleLowerCase();
     const symbol = tickerSymbol.toLocaleLowerCase();
@@ -23,98 +23,92 @@ const filteredCurrencies = computed<Currency[]>(() => {
   });
 });
 
-const onSelected = async (newCurrency: Currency) => {
+async function onSelected(newCurrency: Currency) {
   set(visible, false);
-  if (newCurrency.tickerSymbol === get(currency).tickerSymbol) {
+  if (newCurrency.tickerSymbol === get(currency).tickerSymbol)
     return;
-  }
 
   await update({ mainCurrency: newCurrency.tickerSymbol });
-};
+}
 
 const { start, stop, isPending } = useTimeoutFn(
   () => {
     set(filter, '');
   },
   400,
-  { immediate: false }
+  { immediate: false },
 );
 
-const selectFirst = async () => {
+async function selectFirst() {
   const currencies = get(filteredCurrencies);
-  if (currencies.length === 0) {
+  if (currencies.length === 0)
     return;
-  }
-  await onSelected(currencies[0]);
-  if (get(isPending)) {
-    stop();
-  }
-  start();
-};
 
-const calculateFontSize = (symbol: string) => {
+  await onSelected(currencies[0]);
+  if (get(isPending))
+    stop();
+
+  start();
+}
+
+function calculateFontSize(symbol: string) {
   const length = symbol.length;
   return `${2.4 - length * 0.4}em`;
-};
+}
 </script>
 
 <template>
-  <VMenu
+  <RuiMenu
     v-model="visible"
-    transition="slide-y-transition"
-    max-width="350px"
-    min-width="350px"
-    offset-y
-    :close-on-content-click="false"
+    menu-class="w-[22rem]"
+    :popper="{ placement: 'bottom' }"
   >
-    <template #activator="{ on }">
+    <template #activator="{ attrs }">
       <MenuTooltipButton
         :tooltip="
           t('currency_drop_down.profit_currency', {
-            currency: currency.tickerSymbol
+            currency: currency.tickerSymbol,
           })
         "
-        class-name="secondary--text text--lighten-4 currency-dropdown text-[1.375rem] font-bold"
-        :on-menu="on"
+        class-name="currency-dropdown text-[1.375rem] font-bold"
+        v-bind="attrs"
       >
         {{ currency.unicodeSymbol }}
       </MenuTooltipButton>
     </template>
-    <RuiTextField
-      v-model="filter"
-      variant="outlined"
-      dense
-      autofocus
-      hide-details
-      class="m-3"
-      color="primary"
-      label="Filter"
-      prepend-inner-icon="mdi-magnify"
-      @keypress.enter="selectFirst()"
-    />
-    <RuiDivider />
-    <VList class="max-h-[25rem]">
-      <VListItem
+    <div class="border-b border-default p-3">
+      <RuiTextField
+        v-model="filter"
+        variant="outlined"
+        dense
+        autofocus
+        hide-details
+        clearable
+        color="primary"
+        :label="t('common.actions.filter')"
+        prepend-inner-icon="mdi-magnify"
+        @keyup.enter="selectFirst()"
+      />
+    </div>
+    <div class="max-h-[25rem] overflow-auto">
+      <ListItem
         v-for="item in filteredCurrencies"
         :id="`change-to-${item.tickerSymbol.toLocaleLowerCase()}`"
         :key="item.tickerSymbol"
+        size="lg"
+        :title="item.name"
+        :subtitle="t('currency_drop_down.hint')"
         @click="onSelected(item)"
       >
-        <VListItemAvatar
-          class="font-bold text-rui-primary"
-          :style="{ fontSize: calculateFontSize(item.unicodeSymbol) }"
-        >
-          {{ item.unicodeSymbol }}
-        </VListItemAvatar>
-        <VListItemContent>
-          <VListItemTitle>
-            {{ item.name }}
-          </VListItemTitle>
-          <VListItemSubtitle>
-            {{ t('currency_drop_down.hint') }}
-          </VListItemSubtitle>
-        </VListItemContent>
-      </VListItem>
-    </VList>
-  </VMenu>
+        <template #avatar>
+          <div
+            class="font-bold text-rui-primary"
+            :style="{ fontSize: calculateFontSize(item.unicodeSymbol) }"
+          >
+            {{ item.unicodeSymbol }}
+          </div>
+        </template>
+      </ListItem>
+    </div>
+  </RuiMenu>
 </template>

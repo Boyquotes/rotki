@@ -1,15 +1,13 @@
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field, fields
-from typing import Any, Literal, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Optional
 
 from rotkehlchen.assets.asset import Asset, AssetWithOracles
-from rotkehlchen.chain.constants import LAST_EVM_ACCOUNTS_DETECT_KEY
 from rotkehlchen.constants.assets import A_USD
-from rotkehlchen.constants.misc import LAST_SPAM_ASSETS_DETECT_KEY
 from rotkehlchen.constants.timing import YEAR_IN_SECONDS
 from rotkehlchen.data_migrations.constants import LAST_DATA_MIGRATION
-from rotkehlchen.db.constants import LAST_DATA_UPDATES_KEY, UpdateType
+from rotkehlchen.db.constants import UpdateType
 from rotkehlchen.db.utils import str_to_bool
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.history.types import DEFAULT_HISTORICAL_PRICE_ORACLES_ORDER, HistoricalPriceOracle
@@ -18,16 +16,19 @@ from rotkehlchen.types import (
     AVAILABLE_MODULES_MAP,
     DEFAULT_ADDRESS_NAME_PRIORITY,
     DEFAULT_OFF_MODULES,
+    SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE,
     AddressNameSource,
-    ChainID,
     CostBasisMethod,
     ExchangeLocationID,
     ModuleName,
+    SupportedBlockchain,
     Timestamp,
 )
-from rotkehlchen.user_messages import MessagesAggregator
 
-ROTKEHLCHEN_DB_VERSION = 40
+if TYPE_CHECKING:
+    from rotkehlchen.user_messages import MessagesAggregator
+
+ROTKEHLCHEN_DB_VERSION = 44
 ROTKEHLCHEN_TRANSIENT_DB_VERSION = 1
 DEFAULT_TAXFREE_AFTER_PERIOD = YEAR_IN_SECONDS
 DEFAULT_INCLUDE_CRYPTO2CRYPTO = True
@@ -57,6 +58,13 @@ DEFAULT_INFER_ZERO_TIMED_BALANCES = False  # If True the asset amount and value 
 DEFAULT_QUERY_RETRY_LIMIT = 5
 DEFAULT_CONNECT_TIMEOUT = 30
 DEFAULT_READ_TIMEOUT = 30
+DEFAULT_ORACLE_PENALTY_THRESHOLD_COUNT = 5
+DEFAULT_ORACLE_PENALTY_DURATION = 1800
+DEFAULT_AUTO_DELETE_CALENDAR_ENTRIES = True
+DEFAULT_AUTO_CREATE_CALENDAR_REMINDERS = True
+DEFAULT_ASK_USER_UPON_SIZE_DISCREPANCY = True
+DEFAULT_AUTO_DETECT_TOKENS = True
+DEFAULT_CSV_EXPORT_DELIMITER = ','
 
 JSON_KEYS = (
     'current_price_oracles',
@@ -79,6 +87,10 @@ BOOLEAN_KEYS = (
     'eth_staking_taxable_after_withdrawal_enabled',
     'include_fees_in_cost_basis',
     'infer_zero_timed_balances',
+    'auto_delete_calendar_entries',
+    'auto_create_calendar_reminders',
+    'ask_user_upon_size_discrepancy',
+    'auto_detect_tokens',
 )
 INTEGER_KEYS = (
     'version',
@@ -90,32 +102,34 @@ INTEGER_KEYS = (
     'query_retry_limit',
     'connect_timeout',
     'read_timeout',
+    'oracle_penalty_threshold_count',
+    'oracle_penalty_duration',
 )
 STRING_KEYS = (
     'ksm_rpc_endpoint',
     'dot_rpc_endpoint',
+    'beacon_rpc_endpoint',
     'date_display_format',
     'frontend_settings',
+    'csv_export_delimiter',
 )
-TIMESTAMP_KEYS = ('last_write_ts', 'last_data_upload_ts', 'last_balance_save')
-IGNORED_KEYS = (LAST_EVM_ACCOUNTS_DETECT_KEY, LAST_DATA_UPDATES_KEY, LAST_SPAM_ASSETS_DETECT_KEY) + tuple(x.serialize() for x in UpdateType)  # noqa: E501
 
+UPDATE_TYPES_VERSIONS = {x.serialize() for x in UpdateType}
 
 CachedDBSettingsFieldNames = Literal[
     'have_premium',
     'version',
     'premium_should_sync',
     'include_crypto2crypto',
-    'last_data_upload_ts',
     'ui_floating_precision',
     'taxfree_after_period',
     'balance_save_frequency',
     'include_gas_costs',
     'ksm_rpc_endpoint',
     'dot_rpc_endpoint',
+    'beacon_rpc_endpoint',
     'main_currency',
     'date_display_format',
-    'last_balance_save',
     'submit_usage_analytics',
     'active_modules',
     'frontend_settings',
@@ -140,12 +154,16 @@ CachedDBSettingsFieldNames = Literal[
     'query_retry_limit',
     'connect_timeout',
     'read_timeout',
+    'oracle_penalty_threshold_count',
+    'oracle_penalty_duration',
+    'auto_delete_calendar_entries',
+    'auto_create_calendar_reminders',
+    'ask_user_upon_size_discrepancy',
 ]
 
 DBSettingsFieldTypes = (
     bool |
     int |
-    Timestamp |
     str |
     Asset |
     Sequence[ModuleName] |
@@ -164,16 +182,15 @@ class DBSettings:
     last_write_ts: Timestamp = field(default=Timestamp(0))
     premium_should_sync: bool = DEFAULT_PREMIUM_SHOULD_SYNC
     include_crypto2crypto: bool = DEFAULT_INCLUDE_CRYPTO2CRYPTO
-    last_data_upload_ts: Timestamp = field(default=Timestamp(0))
     ui_floating_precision: int = DEFAULT_UI_FLOATING_PRECISION
     taxfree_after_period: int | None = DEFAULT_TAXFREE_AFTER_PERIOD
     balance_save_frequency: int = DEFAULT_BALANCE_SAVE_FREQUENCY
     include_gas_costs: bool = DEFAULT_INCLUDE_GAS_COSTS
     ksm_rpc_endpoint: str = 'http://localhost:9933'
     dot_rpc_endpoint: str = ''  # same as kusama -- must be set by user
+    beacon_rpc_endpoint: str = ''  # must be set by user
     main_currency: Asset = DEFAULT_MAIN_CURRENCY
     date_display_format: str = DEFAULT_DATE_DISPLAY_FORMAT
-    last_balance_save: Timestamp = field(default=Timestamp(0))
     submit_usage_analytics: bool = DEFAULT_SUBMIT_USAGE_ANALYTICS
     active_modules: Sequence[ModuleName] = field(default=DEFAULT_ACTIVE_MODULES)  # type: ignore
     frontend_settings: str = ''
@@ -188,7 +205,7 @@ class DBSettings:
     ssf_graph_multiplier: int = DEFAULT_SSF_GRAPH_MULTIPLIER
     last_data_migration: int = DEFAULT_LAST_DATA_MIGRATION
     non_syncing_exchanges: Sequence[ExchangeLocationID] = field(default_factory=list)
-    evmchains_to_skip_detection: Sequence[ChainID] = field(default_factory=list)
+    evmchains_to_skip_detection: Sequence[SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE] = field(default_factory=list)  # Both EVM and EVMLike chains # noqa: E501
     cost_basis_method: CostBasisMethod = DEFAULT_COST_BASIS_METHOD
     treat_eth2_as_eth: bool = DEFAULT_TREAT_ETH2_AS_ETH
     eth_staking_taxable_after_withdrawal_enabled: bool = DEFAULT_ETH_STAKING_TAXABLE_AFTER_WITHDRAWAL_ENABLED  # noqa: E501
@@ -198,6 +215,13 @@ class DBSettings:
     query_retry_limit: int = DEFAULT_QUERY_RETRY_LIMIT
     connect_timeout: int = DEFAULT_CONNECT_TIMEOUT
     read_timeout: int = DEFAULT_READ_TIMEOUT
+    oracle_penalty_threshold_count: int = DEFAULT_ORACLE_PENALTY_THRESHOLD_COUNT
+    oracle_penalty_duration: int = DEFAULT_ORACLE_PENALTY_DURATION
+    auto_delete_calendar_entries: bool = DEFAULT_AUTO_DELETE_CALENDAR_ENTRIES
+    auto_create_calendar_reminders: bool = DEFAULT_AUTO_CREATE_CALENDAR_REMINDERS
+    ask_user_upon_size_discrepancy: bool = DEFAULT_ASK_USER_UPON_SIZE_DISCREPANCY
+    auto_detect_tokens: bool = DEFAULT_AUTO_DETECT_TOKENS
+    csv_export_delimiter: str = DEFAULT_CSV_EXPORT_DELIMITER
 
     def serialize(self) -> dict[str, Any]:
         settings_dict = {}
@@ -226,6 +250,7 @@ class ModifiableDBSettings(NamedTuple):
     include_gas_costs: bool | None = None
     ksm_rpc_endpoint: str | None = None
     dot_rpc_endpoint: str | None = None
+    beacon_rpc_endpoint: str | None = None
     main_currency: AssetWithOracles | None = None
     date_display_format: str | None = None
     submit_usage_analytics: bool | None = None
@@ -241,7 +266,7 @@ class ModifiableDBSettings(NamedTuple):
     pnl_csv_have_summary: bool | None = None
     ssf_graph_multiplier: int | None = None
     non_syncing_exchanges: list[ExchangeLocationID] | None = None
-    evmchains_to_skip_detection: list[ChainID] | None = None
+    evmchains_to_skip_detection: list[SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE] | None = None
     cost_basis_method: CostBasisMethod | None = None
     treat_eth2_as_eth: bool | None = None
     eth_staking_taxable_after_withdrawal_enabled: bool | None = None
@@ -251,6 +276,13 @@ class ModifiableDBSettings(NamedTuple):
     query_retry_limit: int | None = None
     connect_timeout: int | None = None
     read_timeout: int | None = None
+    oracle_penalty_threshold_count: int | None = None
+    oracle_penalty_duration: int | None = None
+    auto_delete_calendar_entries: bool | None = None
+    auto_create_calendar_reminders: bool | None = None
+    ask_user_upon_size_discrepancy: bool | None = None
+    auto_detect_tokens: bool | None = None
+    csv_export_delimiter: str | None = None
 
     def serialize(self) -> dict[str, Any]:
         settings_dict = {}
@@ -279,7 +311,7 @@ def read_boolean(value: str | bool) -> bool:
 
 def db_settings_from_dict(
         settings_dict: dict[str, Any],
-        msg_aggregator: MessagesAggregator,
+        msg_aggregator: 'MessagesAggregator',
 ) -> DBSettings:
     specified_args: dict[str, Any] = {}
     for key, value in settings_dict.items():
@@ -289,8 +321,8 @@ def db_settings_from_dict(
             specified_args[key] = int(value)
         elif key in STRING_KEYS:
             specified_args[key] = str(value)
-        elif key in IGNORED_KEYS:  # temp until https://github.com/rotki/rotki/issues/5684 is done
-            continue  # some keys are using the settings table in lieu of a key-value cache
+        elif key in UPDATE_TYPES_VERSIONS:
+            continue  # these are handled separately
         elif key == 'taxfree_after_period':
             # taxfree_after_period can also be None, to signify disabled setting
             if value is None:
@@ -308,7 +340,7 @@ def db_settings_from_dict(
 
         elif key == 'main_currency':
             specified_args[key] = Asset(str(value)).resolve_to_asset_with_oracles()
-        elif key in TIMESTAMP_KEYS:
+        elif key == 'last_write_ts':
             specified_args[key] = Timestamp(int(value))
         elif key == 'active_modules':
             specified_args[key] = json.loads(value)
@@ -323,7 +355,7 @@ def db_settings_from_dict(
             specified_args[key] = [ExchangeLocationID.deserialize(x) for x in values]
         elif key == 'evmchains_to_skip_detection':
             values = json.loads(value)
-            specified_args[key] = [ChainID.deserialize_from_name(x) for x in values]
+            specified_args[key] = [SupportedBlockchain.deserialize(x) for x in values]
         elif key == 'cost_basis_method':
             specified_args[key] = CostBasisMethod.deserialize(value)
         elif key == 'address_name_priority':
@@ -360,11 +392,6 @@ def serialize_db_setting(
         value = value.serialize()  # pylint: disable=no-member
     elif setting == 'address_name_priority' and is_modifiable is True:
         value = json.dumps(value)
-    elif setting == 'evmchains_to_skip_detection':
-        if is_modifiable is True:
-            value = json.dumps([x.to_name() for x in value])
-        else:
-            value = [x.to_name() for x in value]
     elif setting in JSON_KEYS:
         if is_modifiable is True:
             value = json.dumps([x.serialize() for x in value])
@@ -375,9 +402,14 @@ def serialize_db_setting(
 
 class CachedSettings:
     """
-    Singleton class that manages the cached settings. It is initialized with default values on
-    user login and is reset on user logout. This way the cached settings are bound to the user's
-    session and not shared between users. It is updated when a setting is updated.
+    Singleton class that manages the cached settings.
+
+    It is initialized with default settings whenever it is created.
+    When a user is unlocked on login/signup, it will be updated with
+    saved DB settings if any via the initialize method and is reset
+    on user logout. This way the cached settings are bound to the
+    user's session and not shared between users. It is updated when a
+    setting is updated.
 
     Keep in mind:
     - last_write_ts is not cached for performance reasons
@@ -396,6 +428,12 @@ class CachedSettings:
         CachedSettings.__instance = super().__new__(cls)
         return CachedSettings.__instance
 
+    def initialize(self, settings: DBSettings) -> None:
+        """Intialize with saved DB settings
+
+        This overwrites the default db settings set at class instantiation"""
+        self._settings = settings
+
     def reset(self) -> None:
         self._settings = DBSettings()
 
@@ -411,7 +449,7 @@ class CachedSettings:
     def get_entry(self, attr: CachedDBSettingsFieldNames) -> DBSettingsFieldTypes:
         return getattr(self._settings, attr)
 
-    def get_settings(self) -> DBSettings | None:
+    def get_settings(self) -> DBSettings:
         return self._settings
 
     # commonly used settings with their own get function
@@ -422,3 +460,11 @@ class CachedSettings:
 
     def get_query_retry_limit(self) -> int:
         return self.get_entry('query_retry_limit')  # type: ignore
+
+    @property
+    def oracle_penalty_duration(self) -> int:
+        return self._settings.oracle_penalty_duration
+
+    @property
+    def oracle_penalty_threshold_count(self) -> int:
+        return self._settings.oracle_penalty_threshold_count

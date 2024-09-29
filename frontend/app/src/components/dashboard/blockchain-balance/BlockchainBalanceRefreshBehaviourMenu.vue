@@ -1,55 +1,39 @@
 <script setup lang="ts">
 import { BlockchainRefreshButtonBehaviour } from '@/types/settings/frontend-settings';
 
-const { blockchainRefreshButtonBehaviour } = storeToRefs(
-  useFrontendSettingsStore()
-);
+const { blockchainRefreshButtonBehaviour } = storeToRefs(useFrontendSettingsStore());
 
 const { t } = useI18n();
-const css = useCssModule();
 </script>
 
 <template>
-  <VList>
-    <VListItem
-      :class="css['filter-heading']"
-      class="font-bold text-uppercase py-2"
-    >
+  <div class="p-2">
+    <div class="font-bold uppercase p-2 text-sm">
       {{ t('dashboard.blockchain_balances.behaviour.title') }}:
-    </VListItem>
-    <VListItem class="pb-2">
+    </div>
+    <div class="pb-2 px-3">
       <SettingsOption
-        #default="{ update }"
+        #default="{ updateImmediate }"
         setting="blockchainRefreshButtonBehaviour"
         frontend-setting
       >
-        <VRadioGroup
-          :value="blockchainRefreshButtonBehaviour"
+        <RuiRadioGroup
+          :model-value="blockchainRefreshButtonBehaviour"
+          color="primary"
           class="mt-0"
           hide-details
-          @change="update($event)"
+          @update:model-value="updateImmediate($event)"
         >
-          <VRadio
+          <RuiRadio
             :value="BlockchainRefreshButtonBehaviour.ONLY_REFRESH_BALANCES"
-            :label="
-              t('dashboard.blockchain_balances.behaviour.only_refresh_balances')
-            "
+            :label="t('dashboard.blockchain_balances.behaviour.only_refresh_balances')"
           />
-          <VRadio
+          <RuiRadio
             :value="BlockchainRefreshButtonBehaviour.REDETECT_TOKENS"
-            :label="
-              t('dashboard.blockchain_balances.behaviour.redetect_tokens')
-            "
+            :label="t('dashboard.blockchain_balances.behaviour.redetect_tokens')"
           />
-        </VRadioGroup>
+        </RuiRadioGroup>
       </SettingsOption>
-    </VListItem>
-  </VList>
+    </div>
+  </div>
 </template>
-
-<style module lang="scss">
-.filter-heading {
-  font-size: 0.875rem;
-  min-height: auto;
-}
-</style>

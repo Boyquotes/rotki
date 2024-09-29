@@ -1,13 +1,9 @@
 <script setup lang="ts">
-import { type DataTableHeader } from '@/types/vuetify';
-import { type PoapDeliveryDetails } from '@/types/defi/airdrops';
-import { default as images } from './poap.json';
+import images from './poap.json';
+import type { DataTableColumn } from '@rotki/ui-library';
+import type { PoapDeliveryDetails } from '@/types/defi/airdrops';
 
-defineProps<{
-  visible: boolean;
-  colspan: number;
-  items: PoapDeliveryDetails[];
-}>();
+defineProps<{ items: PoapDeliveryDetails[] }>();
 
 const events = [
   'aave_v2_pioneers',
@@ -25,70 +21,82 @@ const events = [
   'resuscitators',
   'yam',
   'ycover',
-  'yfi_og'
+  'yfi_og',
 ] as const;
 
 type EventType = (typeof events)[number];
 
 const { t } = useI18n();
 
-const headers = computed<DataTableHeader[]>(() => [
+const headers = computed<DataTableColumn<PoapDeliveryDetails>[]>(() => [
   {
-    text: t('common.name').toString(),
-    value: 'name'
+    label: t('common.name'),
+    key: 'name',
   },
   {
-    text: '',
-    value: 'link',
+    label: '',
+    key: 'link',
     align: 'end',
-    width: '50px'
-  }
+    width: '50px',
+  },
 ]);
 
-const getImage = (event: EventType): string => {
-  const image = images[event];
-  return image ?? '';
-};
+function isEventType(event: string): event is EventType {
+  return Array.prototype.includes.call(events, event);
+}
+
+function getImage(event: string): string {
+  if (isEventType(event))
+    return images[event];
+
+  return '';
+}
 </script>
 
 <template>
-  <TableExpandContainer :visible="visible" :colspan="colspan" no-padding>
-    <template #title>
+  <RuiCard no-padding>
+    <template #header>
       {{ t('poap_delivery_airdrops.title') }}
     </template>
-    <DataTable :items="items" :headers="headers">
-      <template #item.name="{ item }">
+
+    <RuiDataTable
+      :rows="items"
+      :cols="headers"
+      row-attr="name"
+    >
+      <template #item.name="{ row }">
         <div class="flex items-center gap-4">
           <AdaptiveWrapper>
-            <VImg
-              class="poap-delivery-airdrops__image"
+            <AppImage
+              class="rounded-full"
               width="36px"
               height="36px"
               contain
-              :src="getImage(item.event)"
+              :src="getImage(row.event)"
             />
           </AdaptiveWrapper>
-          <div>{{ item.name }}</div>
+
+          <div>{{ row.name }}</div>
         </div>
       </template>
-      <template #item.link="{ item }">
-        <ExternalLinkButton
-          icon
-          color="primary"
-          :url="item.link"
-          variant="text"
-        >
-          <RuiIcon size="16" name="external-link-line" />
-        </ExternalLinkButton>
-      </template>
-    </DataTable>
-  </TableExpandContainer>
-</template>
 
-<style scoped lang="scss">
-.poap-delivery-airdrops {
-  &__image {
-    border-radius: 50%;
-  }
-}
-</style>
+      <template #item.link="{ row }">
+        <ExternalLink
+          :url="row.link"
+          custom
+        >
+          <RuiButton
+            variant="text"
+            color="primary"
+            icon
+          >
+            <RuiIcon
+              size="16"
+              name="external-link-line"
+            />
+          </RuiButton>
+        </ExternalLink>
+      </template>
+    </RuiDataTable>
+  </RuiCard>
+</template>

@@ -3,10 +3,12 @@ withDefaults(
   defineProps<{
     tooltip: string;
     loading?: boolean;
+    disabled?: boolean;
   }>(),
   {
-    loading: false
-  }
+    loading: false,
+    disabled: false,
+  },
 );
 
 const emit = defineEmits<{
@@ -14,38 +16,44 @@ const emit = defineEmits<{
 }>();
 
 const refresh = () => emit('refresh');
-
-const slots = useSlots();
-const css = useCssModule();
 </script>
 
 <template>
   <RefreshButton
-    v-if="!slots.refreshMenu"
+    v-if="!$slots.refreshMenu"
     :loading="loading"
+    :disabled="disabled"
     :tooltip="tooltip"
     @refresh="refresh()"
   />
-  <div v-else class="relative pr-1">
-    <VMenu offset-y :close-on-content-click="false">
-      <template #activator="{ on }">
+  <div
+    v-else
+    class="relative pr-1"
+  >
+    <RuiMenu :popper="{ placement: 'bottom-start' }">
+      <template #activator="{ attrs }">
         <RefreshButton
           :loading="loading"
+          :disabled="disabled"
           :tooltip="tooltip"
           @refresh="refresh()"
         />
         <RuiButton
-          :class="css.expander"
+          :disabled="disabled"
+          :class="$style.expander"
           icon
           variant="text"
           size="sm"
-          v-on="on"
+          v-bind="attrs"
         >
-          <RuiIcon size="16" name="arrow-down-s-line" />
+          <RuiIcon
+            size="16"
+            name="arrow-down-s-line"
+          />
         </RuiButton>
       </template>
       <slot name="refreshMenu" />
-    </VMenu>
+    </RuiMenu>
   </div>
 </template>
 

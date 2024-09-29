@@ -16,16 +16,24 @@ export interface ExternalTrade {
   readonly location?: string;
 }
 
+export interface FieldMessage {
+  target: string;
+  mustInclude: string;
+  messageContains?: string;
+}
+
 declare global {
   namespace Cypress {
     interface Chainable {
       logout: () => void;
       updateAssets: () => void;
       disableModules: () => void;
+      confirmFieldMessage: (params: FieldMessage) => void;
       createAccount: (username: string, password?: string) => Chainable;
       addExternalTrade: (trade: ExternalTrade) => Chainable;
       addEtherscanKey: (key: string) => Chainable;
       assertNoRunningTasks: () => Chainable;
+      scrollElemToTop: (target: string) => void;
     }
   }
 }

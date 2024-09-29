@@ -1,81 +1,101 @@
 <script setup lang="ts">
-import { type WelcomeMessage } from '@/types/dynamic-messages';
 import { api } from '@/services/rotkehlchen-api';
+import type { WelcomeMessage } from '@/types/dynamic-messages';
 
 const props = defineProps<{
-  message: WelcomeMessage;
+  messages: WelcomeMessage[];
 }>();
-
-const { message } = toRefs(props);
 
 const svg = ref();
 
-const link = useRefMap(message, message => message.action?.url || '');
-const { onLinkClick, linkTarget, href } = useLinks(link);
+const { step, steps, onNavigate, onPause, onResume } = useRandomStepper(props.messages.length);
 
-const fetchSvg = async () => {
-  const url = props.message.icon;
+const activeItem = computed(() => props.messages[get(step) - 1]);
 
-  if (
-    !url ||
-    !(
-      checkIfDevelopment() ||
-      url.startsWith(`https://raw.githubusercontent.com/rotki/data`)
-    )
-  ) {
+async function fetchSvg() {
+  const url = get(activeItem).icon;
+
+  if (!url || !(checkIfDevelopment() || url.startsWith(`https://raw.githubusercontent.com/rotki/data`)))
     return;
-  }
 
   try {
     const response = await api.instance.get(url);
     return response.data;
-  } catch (e: any) {
-    logger.error(e);
+  }
+  catch (error: any) {
+    logger.error(error);
     return null;
   }
-};
+}
 
-watch(message, async (value, oldValue) => {
-  if (value.icon && oldValue.icon !== value.icon) {
+watch(activeItem, async (value, oldValue) => {
+  if (value.icon && oldValue.icon !== value.icon)
     set(svg, await fetchSvg());
-  }
 });
 
 onMounted(async () => {
-  if (props.message.icon) {
+  if (get(activeItem)?.icon)
     set(svg, await fetchSvg());
-  }
 });
-
-const css = useCssModule();
 </script>
 
 <template>
-  <div class="flex flex-col align-start gap-4 w-full p-6" :class="css.card">
-    <div v-if="message.icon" class="bg-white rounded-[0.625rem] p-3">
+  <div
+    v-if="activeItem"
+    class="flex flex-col items-start gap-4 w-full p-6 overflow-hidden rounded-lg"
+    :class="$style.card"
+  >
+    <FadeTransition tag="div">
       <div
-        class="object-contain text-rui-primary h-6 w-6"
-        :class="css.icon"
-        v-html="svg"
+        :key="step"
+        class="flex flex-col items-start gap-4"
+        @mouseover="onPause()"
+        @mouseleave="onResume()"
+      >
+        <div
+          v-if="activeItem.icon"
+          class="bg-white rounded-[0.625rem] p-3"
+        >
+          <div
+            class="object-contain text-rui-primary h-6 w-6"
+            :class="$style.icon"
+            v-html="svg"
+          />
+        </div>
+        <div
+          v-if="activeItem.header"
+          class="text-h6 text-rui-text"
+        >
+          {{ activeItem.header }}
+        </div>
+        <div class="text-body-1 text-rui-text-secondary">
+          {{ activeItem.text }}
+        </div>
+      </div>
+    </FadeTransition>
+
+    <div class="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-x-3 gap-y-6 w-full">
+      <ExternalLink
+        v-if="activeItem.action"
+        :url="activeItem.action.url || ''"
+        custom
+        @mouseover="onPause()"
+        @mouseleave="onResume()"
+      >
+        <RuiButton color="primary">
+          {{ activeItem.action.text }}
+        </RuiButton>
+      </ExternalLink>
+
+      <RuiFooterStepper
+        v-if="steps > 1"
+        :model-value="step"
+        :pages="steps"
+        variant="bullet"
+        hide-buttons
+        @update:model-value="onNavigate($event)"
       />
     </div>
-    <div v-if="message.header" class="text-h6 text-rui-text">
-      {{ message.header }}
-    </div>
-    <div class="text-body-1 text-rui-text-secondary">
-      {{ message.text }}
-    </div>
-
-    <RuiButton
-      v-if="message.action"
-      tag="a"
-      color="primary"
-      :target="linkTarget"
-      :href="href"
-      @click="onLinkClick()"
-    >
-      {{ message.action.text }}
-    </RuiButton>
   </div>
 </template>
 

@@ -6,75 +6,75 @@ export class RotkiApp {
     if (apiKey) {
       cy.log('Using CYPRESS_ETHERSCAN_API_KEY env variable');
       cy.addEtherscanKey(apiKey);
-    } else {
+    }
+    else {
       cy.log('CYPRESS_ETHERSCAN_API_KEY not set');
     }
   }
 
   visit() {
     cy.visit({
-      url: '/',
+      url: '/#/user/login',
       qs: {
-        skip_update: '1'
-      }
+        skip_update: '1',
+      },
     });
   }
 
   createAccount(username: string, password = '1234') {
     cy.logout();
-    // simulate high scaling / low res by making a very small viewport
+    cy.visit({
+      url: '/#/user/create',
+      qs: {
+        skip_update: '1',
+      },
+      timeout: 10000,
+    });
     cy.get('[data-cy=connection-loading__content]').should('not.exist');
     cy.get('[data-cy=account-management-forms]').scrollIntoView();
     cy.get('[data-cy=account-management-forms]').should('be.visible');
-
-    cy.get('[data-cy=account-management]').then($body => {
-      const button = $body.find('[data-cy=new-account]');
-      if (button.length > 0) {
-        cy.get('[data-cy=new-account]').scrollIntoView();
-        cy.get('[data-cy=new-account]').click();
-      }
-    });
 
     cy.get('[data-cy="create-account__introduction__continue"]').click();
     cy.get('[data-cy="create-account__premium__button__continue"]').click();
     cy.get('[data-cy="create-account__fields__username"]').type(username);
     cy.get('[data-cy="create-account__fields__password"]').type(password);
-    cy.get('[data-cy="create-account__fields__password-repeat"]').type(
-      password
-    );
-    cy.get('[data-cy="create-account__boxes__user-prompted"] input').click();
+    cy.get('[data-cy="create-account__fields__password-repeat"]').type(password);
+    cy.get('[data-cy="create-account__boxes__user-prompted"] > label').click();
     cy.get('[data-cy="create-account__credentials__button__continue"]').click();
-    cy.get(
-      '[data-cy="create-account__submit-analytics__button__continue"]'
-    ).click();
+    cy.get('[data-cy="create-account__submit-analytics__button__continue"]').click();
     cy.get('[data-cy=account-management-forms]').should('not.exist');
     cy.updateAssets();
     this.loadEnv();
   }
 
+  clear() {
+    this.logout();
+  }
+
   fasterLogin(username: string, password = '1234', disableModules = false) {
+    cy.logout();
     cy.createAccount(username, password);
-    if (disableModules) {
+    if (disableModules)
       cy.disableModules();
-    }
+
     this.loadEnv();
     this.visit();
     this.login(username, password);
-  }
-
-  fasterLogout() {
-    cy.logout();
-    this.visit();
   }
 
   checkGetPremiumButton() {
     cy.get('[data-cy=get-premium-button]').should('be.visible');
   }
 
+  relogin(username: string, password = '1234'): void {
+    this.clear();
+    this.login(username, password);
+  }
+
   login(username: string, password = '1234') {
-    cy.get('[data-cy=username-input]').should('be.visible');
-    cy.get('[data-cy=username-input]').as('username');
-    cy.get('[data-cy=password-input]').as('password');
+    cy.get('[data-cy=username-input] input').should('be.visible');
+    cy.get('[data-cy=username-input] input').as('username');
+    cy.get('[data-cy=password-input] input').as('password');
     cy.get('@username').clear();
     cy.get('@username').should('be.empty');
     cy.get('@username').type(username);
@@ -91,7 +91,7 @@ export class RotkiApp {
     cy.get('[data-cy=user-dropdown]').should('be.visible');
     cy.get('.user-dropdown__logout').click();
     cy.get('[data-cy=confirm-dialog]').find('[data-cy=button-confirm]').click();
-    cy.get('[data-cy=username-input]').should('be.visible');
+    cy.get('[data-cy=username-input] input').should('be.visible');
   }
 
   changeCurrency(currency: string) {
@@ -102,37 +102,35 @@ export class RotkiApp {
   togglePrivacyMenu(show?: boolean) {
     cy.get('[data-cy=privacy-menu]').as('menu');
     if (show) {
-      cy.get('@menu').click();
-      cy.get('[data-cy="privacy-mode-scramble__toggle"]');
-    } else {
-      cy.get('@menu').click({ force: true });
+      cy.get('@menu').trigger('click');
+      cy.get('.privacy-menu-content').should('exist');
+    }
+    else {
+      cy.get('@menu').trigger('click');
+      cy.get('.privacy-menu-content').should('not.exist');
     }
   }
 
   changePrivacyMode(mode: number) {
     this.togglePrivacyMenu(true);
-    cy.get(
-      '[data-cy="privacy-mode-dropdown__input"] ~ .v-slider__thumb-container'
-    ).as('input');
+    cy.get(`[data-cy="privacy-mode-dropdown__input"] + div > div:nth-child(${mode + 1})`).as('label');
 
-    cy.get('@input').focus();
-    cy.get('@input').type('{downArrow}'.repeat(2));
-
-    if (mode > 0) {
-      cy.get('@input').type('{upArrow}'.repeat(mode));
-    }
+    cy.get('@label').click();
     this.togglePrivacyMenu();
   }
 
   toggleScrambler(enable: boolean) {
-    cy.get(
-      '[data-cy="privacy-mode-scramble__toggle"] input[type="checkbox"]'
-    ).as('input');
+    cy.get('[data-cy="privacy-mode-scramble__toggle"] input[type="checkbox"]').as('input');
 
     if (enable) {
+      cy.get('@input').should('not.be.checked');
       cy.get('@input').check();
-    } else {
+      cy.get('@input').should('be.checked');
+    }
+    else {
+      cy.get('@input').should('be.checked');
       cy.get('@input').uncheck();
+      cy.get('@input').should('not.be.checked');
     }
   }
 
@@ -157,7 +155,7 @@ export class RotkiApp {
    * @param {string} value
    */
   shouldHaveQueryParam(key: string, value: string) {
-    cy.location().should(loc => {
+    cy.location().should((loc) => {
       const query = new URLSearchParams(loc.href);
       expect(query.get(key)).to.equal(value);
     });
@@ -169,33 +167,31 @@ export class RotkiApp {
    * @param {string[]} values
    */
   shouldHaveQueryParams(key: string, values: string[]) {
-    cy.location().should(loc => {
+    cy.location().should((loc) => {
       const query = new URLSearchParams(loc.href);
       expect(query.getAll(key)).to.deep.equal(values);
     });
   }
 
   static navigateTo(menu: string, submenu?: string) {
-    const click = (selector: string) => {
-      cy.get(selector).scrollIntoView();
-      cy.get(selector).should('be.visible');
+    const click = (selector: string, scroll = false) => {
+      if (scroll) {
+        cy.get(selector).scrollIntoView();
+        cy.get(selector).should('be.visible');
+      }
       cy.get(selector).trigger('mouseover');
       cy.get(selector).click();
     };
 
     const menuClass = `.navigation__${menu}`;
-    cy.get(menuClass).then(menu => {
+    cy.get(menuClass).then((menu) => {
       const parent = menu.parent().parent();
-      if (!parent.hasClass('v-list-group--active')) {
-        click(menuClass);
-      }
+      if (!parent.hasClass('submenu-wrapper__expanded'))
+        click(menuClass, true);
 
       if (submenu) {
-        cy.get(menuClass)
-          .parent()
-          .parent()
-          .find('.v-list-group__items')
-          .scrollIntoView();
+        cy.get(menuClass).find('.submenu-wrapper').scrollIntoView();
+        cy.get(menuClass).find('.submenu-wrapper').should('be.visible');
 
         const subMenuClass = `.navigation__${submenu}`;
         click(subMenuClass);

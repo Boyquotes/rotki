@@ -5,9 +5,7 @@ const { animationsEnabled } = storeToRefs(useSessionSettingsStore());
 const route = useRoute();
 
 const isDevelopment = checkIfDevelopment();
-const isPlayground = computed(
-  () => isDevelopment && get(route).name === 'playground'
-);
+const isPlayground = computed(() => isDevelopment && get(route).path === '/playground');
 
 const { locale } = useI18n();
 
@@ -17,28 +15,26 @@ onBeforeMount(() => {
   setLanguage(get(adaptiveLanguage));
 });
 
-const setLanguage = (language: string) => {
-  if (language !== get(locale)) {
+function setLanguage(language: string) {
+  if (language !== get(locale))
     set(locale, language);
-  }
-};
+}
 
-watch(adaptiveLanguage, language => {
+watch(adaptiveLanguage, (language) => {
   setLanguage(language);
 });
 </script>
 
 <template>
-  <VApp
+  <div
     v-if="!isPlayground"
     id="rotki"
     :key="adaptiveLanguage"
-    class="app"
+    class="app !text-rui-text bg-rui-grey-50 dark:bg-[#121212]"
     :class="{ ['app--animations-disabled']: !animationsEnabled }"
   >
     <slot />
-    <AppPremiumManager />
-  </VApp>
+  </div>
   <DevApp v-else />
 </template>
 

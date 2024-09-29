@@ -106,7 +106,7 @@ def test_validate_api_key_err_auth_nonce(mock_bitstamp):
         movements = mock_bitstamp.query_online_deposits_withdrawals(0, 1)
         assert movements == []
         errors = mock_bitstamp.msg_aggregator.consume_errors()
-        assert len(errors) == 1
+        assert len(errors) == 2  # since we do 2 queries underneath
         assert API_ERR_AUTH_NONCE_MESSAGE in errors[0]
 
         trades, _ = mock_bitstamp.query_online_trade_history(0, 1)
@@ -210,13 +210,16 @@ def test_query_balances_skips_inquirer_error(mock_bitstamp):
     """Test an entry that can't get its USD price because of a remote error is
     skipped
     """
-    inquirer = MagicMock()
-    inquirer.find_usd_price.side_effect = RemoteError('test')
-
     def mock_api_query_response(endpoint):  # pylint: disable=unused-argument
         return MockResponse(HTTPStatus.OK, '{"link_balance": "1.00000000"}')
 
-    with patch('rotkehlchen.exchanges.bitstamp.Inquirer', return_value=inquirer), patch.object(mock_bitstamp, '_api_query', side_effect=mock_api_query_response):  # noqa: E501
+    with (
+        patch(
+            'rotkehlchen.exchanges.bitstamp.Inquirer.find_usd_price',
+            side_effect=RemoteError('test'),
+        ),
+        patch.object(mock_bitstamp, '_api_query', side_effect=mock_api_query_response),
+    ):
         assert mock_bitstamp.query_balances() == ({}, '')
 
 
@@ -524,7 +527,7 @@ def test_api_query_paginated_stops_timestamp_gt_end_ts(mock_bitstamp):
     `end_ts`.
     """
     api_limit = 2
-    now = datetime.datetime.now(tz=datetime.timezone.utc).replace(microsecond=0)
+    now = datetime.datetime.now(tz=datetime.UTC).replace(microsecond=0)
     gt_now = now + datetime.timedelta(seconds=1)
     now_ts = int(now.timestamp())
     gt_now_iso = gt_now.isoformat()
@@ -573,7 +576,7 @@ def test_api_query_paginated_stops_timestamp_gt_end_ts(mock_bitstamp):
     assert result == []
 
 
-@pytest.mark.freeze_time(datetime.datetime(2020, 12, 3, 12, 0, 0, tzinfo=datetime.timezone.utc))
+@pytest.mark.freeze_time(datetime.datetime(2020, 12, 3, 12, 0, 0, tzinfo=datetime.UTC))
 def test_api_query_paginated_trades_pagination(mock_bitstamp):
     """Test pagination logic for trades works as expected.
 
@@ -647,7 +650,7 @@ def test_api_query_paginated_trades_pagination(mock_bitstamp):
     }
     """
     api_limit = 2
-    now = datetime.datetime.now(tz=datetime.timezone.utc)
+    now = datetime.datetime.now(tz=datetime.UTC)
     now_ts = int(now.timestamp())
     options = {
         'since_id': USER_TRANSACTION_MIN_SINCE_ID,
@@ -831,7 +834,7 @@ def test_deserialize_asset_movement_deposit(mock_bitstamp):
         fee=Fee(FVal('0.0005')),
         link='2',
     )
-    expected_movement = mock_bitstamp._deserialize_asset_movement(raw_movement)
+    expected_movement = mock_bitstamp._deserialize_asset_movement_from_user_transaction(raw_movement)  # noqa: E501
     assert movement == expected_movement
 
     raw_movement = {
@@ -858,7 +861,7 @@ def test_deserialize_asset_movement_deposit(mock_bitstamp):
         fee=Fee(FVal('0.1')),
         link='3',
     )
-    expected_movement = mock_bitstamp._deserialize_asset_movement(raw_movement)
+    expected_movement = mock_bitstamp._deserialize_asset_movement_from_user_transaction(raw_movement)  # noqa: E501
     assert movement == expected_movement
 
     raw_movement = {
@@ -885,7 +888,7 @@ def test_deserialize_asset_movement_deposit(mock_bitstamp):
         fee=Fee(FVal('0.1')),
         link='3',
     )
-    expected_movement = mock_bitstamp._deserialize_asset_movement(raw_movement)
+    expected_movement = mock_bitstamp._deserialize_asset_movement_from_user_transaction(raw_movement)  # noqa: E501
     assert movement == expected_movement
 
 
@@ -914,7 +917,7 @@ def test_deserialize_asset_movement_withdrawal(mock_bitstamp):
         fee=Fee(FVal('50')),
         link='5',
     )
-    expected_movement = mock_bitstamp._deserialize_asset_movement(raw_movement)
+    expected_movement = mock_bitstamp._deserialize_asset_movement_from_user_transaction(raw_movement)  # noqa: E501
     assert movement == expected_movement
 
     raw_movement = {
@@ -941,7 +944,7 @@ def test_deserialize_asset_movement_withdrawal(mock_bitstamp):
         fee=Fee(FVal('0.1')),
         link='5',
     )
-    expected_movement = mock_bitstamp._deserialize_asset_movement(raw_movement)
+    expected_movement = mock_bitstamp._deserialize_asset_movement_from_user_transaction(raw_movement)  # noqa: E501
     assert movement == expected_movement
 
 
@@ -1002,7 +1005,7 @@ def test_query_online_deposits_withdrawals(mock_bitstamp, start_ts, since_id):
         assert mock_api_query_paginated.call_args == expected_call
 
 
-@pytest.mark.freeze_time(datetime.datetime(2020, 12, 3, 12, 0, 0, tzinfo=datetime.timezone.utc))
+@pytest.mark.freeze_time(datetime.datetime(2020, 12, 3, 12, 0, 0, tzinfo=datetime.UTC))
 @pytest.mark.parametrize('bitstamp_api_key', ['123456'])
 @pytest.mark.parametrize('bitstamp_api_secret', [str.encode('abcdefg')])
 def test_api_query_request_headers_checks(mock_bitstamp):

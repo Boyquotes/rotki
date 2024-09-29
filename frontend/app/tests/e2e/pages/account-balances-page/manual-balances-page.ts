@@ -1,15 +1,14 @@
-import { BigNumber } from '@rotki/common';
-import { type TradeLocation } from '@/types/history/trade/location';
-import { toSentenceCase } from '@/utils/text';
+import { BigNumber, toSentenceCase } from '@rotki/common';
 import { RotkiApp } from '../rotki-app';
 import { formatAmount, updateLocationBalance } from '../../utils/amounts';
+import { selectAsset } from '../../support/utils';
 
 export interface FixtureManualBalance {
   readonly asset: string;
   readonly keyword: string;
   readonly label: string;
   readonly amount: string;
-  readonly location: TradeLocation;
+  readonly location: string;
   readonly tags: string[];
 }
 
@@ -20,28 +19,19 @@ export class ManualBalancesPage {
 
   addBalance(balance: FixtureManualBalance) {
     cy.get('[data-cy=bottom-dialog]').should('be.visible');
-    cy.get('.manual-balances-form__asset').type(balance.keyword);
-    cy.get('[data-cy="no_assets"]').should('not.exist');
-    cy.get(`#asset-${balance.asset.toLowerCase()}`).should('be.visible');
-    cy.get('.v-autocomplete__content .v-list > div').should($list => {
-      expect($list.eq(0)).to.contain(balance.asset);
-      $list.first().trigger('click');
-    });
+    selectAsset('.manual-balances-form__asset', balance.keyword, balance.asset);
     cy.get('.manual-balances-form__label').type(balance.label);
     cy.get('.manual-balances-form__amount').type(balance.amount);
-    for (const tag of balance.tags) {
-      cy.get('.manual-balances-form__tags').type(`${tag}{enter}`);
-    }
+    for (const tag of balance.tags) cy.get('.manual-balances-form__tags').type(`${tag}{enter}`);
 
     cy.get('.manual-balances-form__location').click();
-    cy.get('.manual-balances-form__location').type(
-      `{selectall}{backspace}${balance.location}{enter}`
-    );
-    cy.get('.v-autocomplete__content').should('not.be.visible');
+    cy.get('.manual-balances-form__location').type(balance.location);
+    cy.get('[role=menu-content] button').should('have.length', 1);
+    cy.get('.manual-balances-form__location').type('{enter}');
+    cy.get('[role=menu-content]').should('not.exist');
     cy.get('[data-cy=bottom-dialog] [data-cy=confirm]').click();
-    cy.get('[data-cy=bottom-dialog]', { timeout: 120000 }).should(
-      'not.be.visible'
-    );
+    cy.get('[data-cy=bottom-dialog]', { timeout: 120000 }).should('not.exist');
+    cy.get('[data-cy=price-refresh]').should('not.be.disabled');
   }
 
   visibleEntries(visible: number) {
@@ -56,9 +46,7 @@ export class ManualBalancesPage {
     for (const balance of balances) {
       cy.get('[data-cy="manual-balances"] tbody').find('tr').eq(i).as('row');
 
-      cy.get('@row')
-        .find('[data-cy=manual-balances__amount]')
-        .should('contain', formatAmount(balance.amount));
+      cy.get('@row').find('[data-cy=manual-balances__amount]').should('contain', formatAmount(balance.amount));
 
       i += 1;
     }
@@ -69,55 +57,39 @@ export class ManualBalancesPage {
     for (const balance of balances) {
       cy.get('[data-cy="manual-balances"] tbody').find('tr').eq(i).as('row');
 
-      cy.get('@row')
-        .find('[data-cy=manual-balances__amount]')
-        .should('not.contain', formatAmount(balance.amount));
+      cy.get('@row').find('[data-cy=manual-balances__amount]').should('not.contain', formatAmount(balance.amount));
 
       i += 1;
     }
   }
 
   isVisible(position: number, balance: FixtureManualBalance) {
-    cy.get('[data-cy="manual-balances"] tbody')
-      .find('tr')
-      .eq(position)
-      .as('row');
+    cy.get('[data-cy="manual-balances"] tbody').find('tr').eq(position).as('row');
 
     cy.get('@row').find('[data-cy=label]').should('contain', balance.label);
 
-    cy.get('@row')
-      .find('[data-cy=manual-balances__amount]')
-      .should('contain', formatAmount(balance.amount));
+    cy.get('@row').find('[data-cy=manual-balances__amount]').should('contain', formatAmount(balance.amount));
 
     cy.get('[data-cy="manual-balances"] thead').first().scrollIntoView();
 
-    cy.get('@row')
-      .find('[data-cy=manual-balances__location]')
-      .should('contain', toSentenceCase(balance.location));
+    cy.get('@row').find('[data-cy=manual-balances__location]').should('contain', toSentenceCase(balance.location));
 
-    cy.get('@row')
-      .find('[data-cy=details-symbol]')
-      .should('contain.text', balance.asset);
+    cy.get('@row').find('[data-cy=list-title]').should('contain.text', balance.asset);
 
-    for (const tag of balance.tags) {
-      cy.get('@row').find('.tag').contains(tag).should('be.visible');
-    }
+    for (const tag of balance.tags) cy.get('@row').find('.tag').contains(tag).should('be.visible');
   }
 
   private getLocationBalances() {
     const balances: Map<string, BigNumber> = new Map();
 
-    cy.get('[data-cy=manual-balances__location]').each($element => {
+    cy.get('[data-cy=manual-balances__location]').each(($element) => {
       const location = $element.attr('data-location');
       if (!location) {
         cy.log('missing location for element ', $element);
         return true;
       }
 
-      const amount = $element
-        .closest('tr')
-        .find('td:nth-child(6) [data-cy="display-amount"]')
-        .text();
+      const amount = $element.closest('tr').find('td:nth-child(6) [data-cy="display-amount"]').text();
       updateLocationBalance(amount, balances, location);
     });
 
@@ -125,7 +97,7 @@ export class ManualBalancesPage {
   }
 
   getTotals() {
-    return this.getLocationBalances().then($balances => {
+    return this.getLocationBalances().then(($balances) => {
       let total = new BigNumber(0);
       const balances: { location: string; value: BigNumber }[] = [];
 
@@ -136,7 +108,7 @@ export class ManualBalancesPage {
 
       return cy.wrap({
         total,
-        balances
+        balances,
       });
     });
   }
@@ -146,20 +118,22 @@ export class ManualBalancesPage {
       .find('tr')
       .eq(position)
       .find('button[data-cy="row-edit"]')
-      .click();
+      .as('edit-button');
+
+    cy.get('@edit-button').should('be.visible');
+    cy.get('@edit-button').should('not.be.disabled');
+    cy.get('@edit-button').click();
 
     cy.get('[data-cy="manual-balance-form"]').as('edit-form');
     cy.get('@edit-form').find('.manual-balances-form__amount input').clear();
     cy.get('@edit-form').find('.manual-balances-form__amount').type(amount);
     cy.get('[data-cy=bottom-dialog] [data-cy=confirm]').click();
+    cy.get('[data-cy=bottom-dialog]', { timeout: 120000 }).should('not.exist');
+    cy.get('[data-cy=price-refresh]').should('not.be.disabled');
   }
 
   deleteBalance(position: number) {
-    cy.get('[data-cy="manual-balances"] tbody')
-      .find('tr')
-      .eq(position)
-      .find('button[data-cy="row-delete"]')
-      .click();
+    cy.get('[data-cy="manual-balances"] tbody').find('tr').eq(position).find('button[data-cy="row-delete"]').click();
 
     this.confirmDelete();
   }
@@ -175,5 +149,11 @@ export class ManualBalancesPage {
     cy.get('[data-cy="manual-balances"]').scrollIntoView();
     cy.get('[data-cy="manual-balances"]').contains(`${currency} Value`);
     cy.get('[data-cy="manual-balances"]').should('be.visible');
+  }
+
+  openAddDialog() {
+    cy.get('.manual-balances__add-balance').should('be.visible');
+    cy.get('.manual-balances__add-balance').should('not.be.disabled');
+    cy.get('.manual-balances__add-balance').click();
   }
 }

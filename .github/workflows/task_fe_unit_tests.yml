@@ -13,24 +13,24 @@ jobs:
         with:
           fetch-depth: 2
       - name: Load env
-        uses: rotki/action-env@v1
+        uses: rotki/action-env@v2
         with:
           env_file: .github/.env.ci
       - name: Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: 'frontend/.nvmrc'
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v3
         with:
-          version: ${{ env.PNPM_VERSION }}
+          package_json_file: frontend/package.json
       - name: Get pnpm store directory
         id: pnpm-cache
         shell: bash
         run: |
           echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
       - name: Setup pnpm cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cache/Cypress
@@ -46,6 +46,7 @@ jobs:
         working-directory: ./frontend/app
         run: pnpm run --filter rotki test:unit
       - name: Upload coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           flags: frontend_unit
+          token: ${{ secrets.CODECOV_TOKEN }}

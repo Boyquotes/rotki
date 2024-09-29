@@ -1,5 +1,5 @@
 import logging
-from abc import ABCMeta
+from abc import ABC
 from collections import defaultdict
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -9,11 +9,12 @@ from gevent.lock import Semaphore
 
 from rotkehlchen.api.websockets.typedefs import TransactionStatusStep, WSMessageType
 from rotkehlchen.assets.asset import EvmToken
-from rotkehlchen.chain.evm.constants import GENESIS_HASH
+from rotkehlchen.chain.evm.constants import GENESIS_HASH, LAST_SPAM_TXS_CACHE
 from rotkehlchen.chain.evm.decoding.constants import ERC20_OR_ERC721_TRANSFER
 from rotkehlchen.chain.evm.types import EvmAccount
 from rotkehlchen.chain.structures import TimestampOrBlockRange
 from rotkehlchen.constants.resolver import evm_address_to_identifier
+from rotkehlchen.db.cache import DBCacheDynamic
 from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.db.filtering import EvmTransactionsFilterQuery
 from rotkehlchen.db.ranges import DBQueryRanges
@@ -22,7 +23,16 @@ from rotkehlchen.errors.misc import AlreadyExists, InputError, RemoteError
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.serialization.deserialize import deserialize_evm_address
-from rotkehlchen.types import SPAM_PROTOCOL, ChecksumEvmAddress, EvmTokenKind, EVMTxHash, Timestamp
+from rotkehlchen.tasks.assets import MULTISEND_SPAM_THRESHOLD
+from rotkehlchen.types import (
+    CHAINID_TO_SUPPORTED_BLOCKCHAIN,
+    SPAM_PROTOCOL,
+    ChecksumEvmAddress,
+    EvmInternalTransaction,
+    EvmTokenKind,
+    EVMTxHash,
+    Timestamp,
+)
 from rotkehlchen.utils.hexbytes import hexstring_to_bytes
 from rotkehlchen.utils.misc import ts_now
 
@@ -38,7 +48,7 @@ logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
 
-class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
+class EvmTransactions(ABC):  # noqa: B024
 
     def __init__(
             self,
@@ -224,7 +234,7 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
                 )
 
             except RemoteError as e:
-                self.msg_aggregator.add_error(
+                log.error(
                     f'Got error "{e!s}" while querying {self.evm_inquirer.chain_name} '
                     f'transactions from Etherscan. Some transactions not added to the DB '
                     f'address: {address} '
@@ -243,8 +253,8 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
 
     def _query_and_save_internal_transactions_for_range_or_parent_hash(
             self,
-            address: ChecksumEvmAddress | None,
             period_or_hash: TimestampOrBlockRange | EVMTxHash,
+            address: ChecksumEvmAddress | None = None,
             location_string: str | None = None,
     ) -> None:
         """Helper function to abstract internal tx querying for different range types
@@ -330,7 +340,7 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
                     location_string=location_string,
                 )
             except RemoteError as e:
-                self.msg_aggregator.add_error(
+                log.error(
                     f'Got error "{e!s}" while querying internal {self.evm_inquirer.chain_name} '
                     f'transactions from Etherscan. Transactions not added to the DB '
                     f'address: {address} '
@@ -401,7 +411,7 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
                             },
                         )
             except RemoteError as e:
-                self.msg_aggregator.add_error(
+                log.error(
                     f'Got error "{e!s}" while querying {self.evm_inquirer.chain_name} '
                     f'token transactions from Etherscan. Transactions not added to the DB '
                     f'address: {address} '
@@ -424,7 +434,18 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
         as early as possible. If any transfer had an unknown asset mark the address as not spammed
         since we can't do more to classify it.
         """
-        start_ts, end_ts = Timestamp(0), ts_now()
+        with self.database.conn.read_ctx() as cursor:
+            start_ts = Timestamp(0)
+            if (result := self.database.get_dynamic_cache(
+                cursor=cursor,
+                name=DBCacheDynamic.LAST_QUERY_TS,
+                location=self.evm_inquirer.chain_name,
+                location_name=LAST_SPAM_TXS_CACHE,
+                account_id=address,
+            )) is not None:
+                start_ts = Timestamp(result)
+
+        end_ts = ts_now()
         checked_tokens = set()
         with self.database.conn.read_ctx() as cursor:
             ignored_assets = self.database.get_ignored_asset_ids(cursor)
@@ -438,7 +459,8 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
             ):
                 for tx_hash in erc20_tx_hashes:
                     raw_receipt_data = self.evm_inquirer.get_transaction_receipt(tx_hash)
-                    for log_entry in raw_receipt_data['logs']:
+                    detected_transfers = 0
+                    for idx, log_entry in enumerate(raw_receipt_data['logs']):
                         if len(log_entry['topics']) == 0:
                             continue
 
@@ -452,6 +474,7 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
                         if topic != ERC20_OR_ERC721_TRANSFER:
                             continue
 
+                        detected_transfers += 1
                         log_address = deserialize_evm_address(log_entry['address'])
                         if log_address in checked_tokens:
                             continue
@@ -469,7 +492,18 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
                         try:
                             token = EvmToken(identifier)
                         except UnknownAsset:
-                            return False
+                            # since we don't track the token, check if the logs after this
+                            # log event are transfer log events only.
+                            for following_log_entry in raw_receipt_data['logs'][idx:]:
+                                if hexstring_to_bytes(following_log_entry['topics'][0]) == ERC20_OR_ERC721_TRANSFER:  # noqa: E501
+                                    detected_transfers += 1
+
+                                if detected_transfers > MULTISEND_SPAM_THRESHOLD:
+                                    break  # break this inner loop. Spam detected
+                            else:  # if we didn't break we mark it as not spammed
+                                return False
+
+                            break  # the transaction is spam and we continue to the next
 
                         if token.protocol == SPAM_PROTOCOL:
                             checked_tokens.add(log_address)
@@ -479,12 +513,26 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
                         return False
 
                     log.debug(f'Address detection: queried {self.evm_inquirer.chain_name} ERC20 Transfers for {address} -> range {start_ts} - {end_ts}')  # noqa: E501
-        except RemoteError as e:
-            self.msg_aggregator.add_error(
-                f'Got error "{e!s}" while querying {self.evm_inquirer.chain_name} '
+        except (RemoteError, KeyError) as e:
+            str_e = str(e)
+            if isinstance(e, KeyError):
+                str_e = f'Missing key {e}'
+
+            log.error(
+                f'Got error "{str_e}" while querying {self.evm_inquirer.chain_name} '
                 f'token transactions from Etherscan. address: {address} spam detection failed',
             )
             return False
+
+        with self.database.user_write() as write_cursor:
+            self.database.set_dynamic_cache(
+                write_cursor=write_cursor,
+                name=DBCacheDynamic.LAST_QUERY_TS,
+                value=end_ts,
+                location=self.evm_inquirer.chain_name,
+                location_name=LAST_SPAM_TXS_CACHE,
+                account_id=address,
+            )
 
         return True
 
@@ -525,6 +573,59 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
         tx_data = cursor.execute(query, bindings).fetchone()
         tx_receipt = self.dbevmtx.get_receipt(cursor, tx_hash, self.evm_inquirer.chain_id)
         return tx_data, tx_receipt  # type: ignore  # tx_data can't be None here
+
+    def get_and_ensure_internal_txns_of_parent_in_db(
+            self,
+            tx_hash: 'EVMTxHash',
+            to_address: 'ChecksumEvmAddress',
+            user_address: 'ChecksumEvmAddress',
+            from_address: 'ChecksumEvmAddress | None' = None,
+    ) -> list[EvmInternalTransaction]:
+        """Queries the internal transactions of a parent tx_hash, saves them in the DB and returns
+        them. `to_address` and `user_address` are used to check if they have been queried before,
+        to avoid querying them again if there was no internal transaction.
+
+        May raise:
+        - RemoteError if there is a problem querying the data sources or transaction hash does
+        not exist."""
+        db_internal_txs = self.dbevmtx.get_evm_internal_transactions(
+            parent_tx_hash=tx_hash,
+            blockchain=CHAINID_TO_SUPPORTED_BLOCKCHAIN[self.evm_inquirer.chain_id],
+            from_address=from_address,
+            to_address=to_address,
+        )
+        if len(db_internal_txs) > 0:
+            return db_internal_txs
+
+        # check cache if this parent hash was queried before for this receiver and affected address
+        with self.database.conn.read_ctx() as cursor:
+            affected_address = self.database.get_dynamic_cache(
+                cursor=cursor,
+                name=DBCacheDynamic.EXTRA_INTERNAL_TX,
+                tx_hash=tx_hash.hex(),
+                receiver=to_address,
+            )
+        if affected_address == user_address:  # if we have queried them before
+            return []
+
+        # else query again and save the DB cache to avoid querying it again
+        self._query_and_save_internal_transactions_for_range_or_parent_hash(
+            period_or_hash=tx_hash,
+        )
+        with self.database.user_write() as write_cursor:
+            self.database.set_dynamic_cache(
+                write_cursor=write_cursor,
+                name=DBCacheDynamic.EXTRA_INTERNAL_TX,
+                tx_hash=tx_hash.hex(),
+                receiver=to_address,
+                value=user_address,
+            )
+        return self.dbevmtx.get_evm_internal_transactions(
+            parent_tx_hash=tx_hash,
+            blockchain=CHAINID_TO_SUPPORTED_BLOCKCHAIN[self.evm_inquirer.chain_id],
+            from_address=from_address,
+            to_address=to_address,
+        )
 
     def get_or_create_transaction(
             self,
@@ -671,7 +772,7 @@ class EvmTransactions(metaclass=ABCMeta):  # noqa: B024
                 try:
                     tx_receipt_data = self.evm_inquirer.get_transaction_receipt(tx_hash=entry)
                 except RemoteError as e:
-                    self.msg_aggregator.add_warning(f'Failed to query information for {self.evm_inquirer.chain_name} transaction {entry.hex()} due to {e!s}. Skipping...')  # noqa: E501
+                    log.warning(f'Failed to query information for {self.evm_inquirer.chain_name} transaction {entry.hex()} due to {e!s}. Skipping...')  # noqa: E501
                     continue
 
                 with self.database.user_write() as write_cursor:

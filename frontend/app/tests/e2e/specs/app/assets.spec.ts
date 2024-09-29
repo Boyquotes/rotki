@@ -15,19 +15,17 @@ describe('assets', () => {
 
     cy.intercept({
       method: 'GET',
-      url: '/api/1/assets/ignored'
+      url: '/api/1/assets/ignored',
     }).as('getIgnoredAsset');
 
-    cy.wait('@getIgnoredAsset', { timeout: 15000 })
-      .its('response.statusCode')
-      .should('equal', 200);
+    cy.wait('@getIgnoredAsset', { timeout: 15000 }).its('response.statusCode').should('equal', 200);
   });
 
   describe('ignored asset settings', () => {
     let ignoredAssets = 0;
     before(() => {
       page.visit('asset-manager-managed');
-      page.ignoredAssets().then(ignored => {
+      page.ignoredAssets().then((ignored) => {
         ignoredAssets = Number.parseInt(ignored);
       });
       page.selectShowAll();
@@ -49,7 +47,7 @@ describe('assets', () => {
     });
   });
 
-  describe('add managed asset', () => {
+  describe('add asset', () => {
     before(() => {
       page.visit('asset-manager-managed');
     });
@@ -62,7 +60,7 @@ describe('assets', () => {
       page.addAnEvmAsset();
     });
 
-    it('adds an non EVM asset', () => {
+    it('adds a non EVM asset', () => {
       page.showAddAssetModal();
       page.addOtherAsset();
     });

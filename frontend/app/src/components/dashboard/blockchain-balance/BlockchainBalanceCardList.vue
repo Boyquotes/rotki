@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import Fragment from '@/components/helper/Fragment';
+import { Blockchain } from '@rotki/common';
 import { Routes } from '@/router/routes';
-import {
-  type BlockchainTotal,
-  SupportedSubBlockchainProtocolData
-} from '@/types/blockchain';
-import { toSentenceCase } from '@/utils/text';
-import { type ActionDataEntry } from '@/types/action';
+import { type BlockchainTotal, SupportedSubBlockchainProtocolData } from '@/types/blockchain';
+import type { RouteLocationRaw } from 'vue-router';
+import type { ActionDataEntry } from '@/types/action';
 
 const props = defineProps<{
   total: BlockchainTotal;
@@ -14,55 +11,82 @@ const props = defineProps<{
 
 const { total } = toRefs(props);
 
-const { getChainName } = useSupportedChains();
-
-const chain = useRefMap(total, ({ chain }) => chain);
-const name = getChainName(chain);
-
-const childData = (identifier: string): ActionDataEntry | null =>
-  SupportedSubBlockchainProtocolData.find(
-    item => item.identifier === identifier
-  ) || null;
+const { getChainName, getChainAccountType } = useSupportedChains();
 
 const amount = useRefMap(total, ({ usdValue }) => usdValue);
 const loading = useRefMap(total, ({ loading }) => loading);
+const chain = useRefMap(total, ({ chain }) => chain);
+const name = getChainName(chain);
 
-const balanceBlockchainRoute = Routes.ACCOUNTS_BALANCES_BLOCKCHAIN;
+const { unifyAccountsTable } = storeToRefs(useFrontendSettingsStore());
+
+const navTarget = computed<RouteLocationRaw>(() => {
+  let target: string;
+  const balanceChain = get(chain);
+  if (balanceChain === Blockchain.ETH2) {
+    target = 'validators';
+  }
+  else {
+    if (get(unifyAccountsTable))
+      target = 'all';
+    else
+      target = getChainAccountType(balanceChain) ?? 'evm';
+  }
+
+  return {
+    path: `${Routes.ACCOUNTS_BALANCES_BLOCKCHAIN}/${target}`,
+    hash: '#accounts-section',
+  };
+});
+
+function childData(identifier: string): ActionDataEntry | null {
+  return SupportedSubBlockchainProtocolData.find(item => item.identifier === identifier) || null;
+}
 </script>
 
 <template>
-  <Fragment>
-    <VListItem
-      data-cy="blockchain-balance__summary"
-      :data-location="total.chain"
-      class="min-h-[2.25rem] group"
-      :to="`${balanceBlockchainRoute}#blockchain-balances-${total.chain}`"
-    >
-      <VListItemAvatar tile class="grayscale group-hover:grayscale-0 m-0 mr-1">
-        <ChainIcon size="26px" :chain="chain" />
-      </VListItemAvatar>
-      <VListItemContent>
-        <div class="flex flex-wrap justify-between gap-2">
-          <span>
-            {{ toSentenceCase(name) }}
-          </span>
-          <AmountDisplay
-            show-currency="symbol"
-            fiat-currency="USD"
-            :value="amount"
-            :loading="loading"
-          />
+  <div>
+    <RouterLink :to="navTarget">
+      <ListItem
+        data-cy="blockchain-balance__summary"
+        :data-location="total.chain"
+        class="group py-1 px-6"
+      >
+        <template #avatar>
+          <div class="grayscale group-hover:grayscale-0">
+            <ChainIcon
+              size="24px"
+              :chain="chain"
+            />
+          </div>
+        </template>
+        <div class="flex flex-wrap justify-between gap-1 text-rui-text">
+          {{ toSentenceCase(name) }}
+
+          <div class="flex gap-2 items-center">
+            <Eth2ValidatorLimitTooltip v-if="chain === Blockchain.ETH2" />
+
+            <AmountDisplay
+              show-currency="symbol"
+              fiat-currency="USD"
+              :value="amount"
+              :loading="loading"
+              class="font-medium"
+            />
+          </div>
         </div>
-      </VListItemContent>
-    </VListItem>
-    <VList v-if="total.children.length > 0" class="pa-0">
-      <template v-for="child in total.children">
+      </ListItem>
+    </RouterLink>
+    <div v-if="total.children.length > 0">
+      <template
+        v-for="child in total.children"
+        :key="child.protocol"
+      >
         <BlockchainBalanceCardDetails
-          :key="child.protocol"
           :child="child"
           :details="childData(child.protocol)"
         />
       </template>
-    </VList>
-  </Fragment>
+    </div>
+  </div>
 </template>

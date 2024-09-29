@@ -1,4 +1,4 @@
-import { BackendCode } from '@/electron-main/backend-code';
+import { BackendCode } from '@shared/ipc';
 
 export const useBackendMessagesStore = defineStore('backendMessages', () => {
   const startupErrorMessage = ref('');
@@ -14,19 +14,18 @@ export const useBackendMessagesStore = defineStore('backendMessages', () => {
   const { showAbout } = storeToRefs(useAreaVisibilityStore());
   const { logged } = storeToRefs(useSessionAuthStore());
 
-  onBeforeMount(async () => {
+  onBeforeMount(() => {
     setupListeners({
       onError: (backendOutput: string | Error, code: BackendCode) => {
         logger.error(backendOutput, code);
         if (code === BackendCode.TERMINATED) {
-          const message =
-            typeof backendOutput === 'string'
-              ? backendOutput
-              : backendOutput.message;
+          const message = typeof backendOutput === 'string' ? backendOutput : backendOutput.message;
           set(startupErrorMessage, message);
-        } else if (code === BackendCode.MACOS_VERSION) {
+        }
+        else if (code === BackendCode.MACOS_VERSION) {
           set(isMacOsVersionUnsupported, true);
-        } else if (code === BackendCode.WIN_VERSION) {
+        }
+        else if (code === BackendCode.WIN_VERSION) {
           set(isWinVersionUnsupported, true);
         }
       },
@@ -35,36 +34,32 @@ export const useBackendMessagesStore = defineStore('backendMessages', () => {
         set(startupErrorMessage, '');
         await restartBackend();
       },
-      onProcessDetected: pids => {
+      onProcessDetected: (pids) => {
         set(
           startupErrorMessage,
           t('error.process_running', {
-            pids: pids.join(', ')
-          }).toString()
+            pids: pids.join(', '),
+          }).toString(),
         );
-      }
+      },
     });
 
-    await connect();
-    if (isDevelopment && get(logged)) {
+    connect();
+    if (isDevelopment && get(logged))
       start();
-    }
+
     const search = window.location.search;
     const skipUpdate = search.includes('skip_update');
-    if (skipUpdate) {
+    if (skipUpdate)
       sessionStorage.setItem('skip_update', '1');
-    }
   });
 
   return {
     startupErrorMessage,
     isMacOsVersionUnsupported,
-    isWinVersionUnsupported
+    isWinVersionUnsupported,
   };
 });
 
-if (import.meta.hot) {
-  import.meta.hot.accept(
-    acceptHMRUpdate(useBackendMessagesStore, import.meta.hot)
-  );
-}
+if (import.meta.hot)
+  import.meta.hot.accept(acceptHMRUpdate(useBackendMessagesStore, import.meta.hot));

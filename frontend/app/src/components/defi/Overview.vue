@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { type DefiProtocolSummary } from '@/types/defi/overview';
+import type { DefiProtocolSummary } from '@/types/defi/overview';
 
 const props = defineProps<{
   summary: DefiProtocolSummary;
@@ -11,31 +11,19 @@ const { t } = useI18n();
 
 const assets = computed(() => {
   const { assets } = get(summary);
-  return assets.sort(
-    ({ balance: { usdValue } }, { balance: { usdValue: otherUsdValue } }) => {
-      if (usdValue.eq(otherUsdValue)) {
-        return 0;
-      }
-      return usdValue.gt(otherUsdValue) ? -1 : 1;
-    }
-  );
+  return assets.sort(({ balance: { usdValue } }, { balance: { usdValue: otherUsdValue } }) => {
+    if (usdValue.eq(otherUsdValue))
+      return 0;
+
+    return usdValue.gt(otherUsdValue) ? -1 : 1;
+  });
 });
 
-const { getDefiName, getDefiImage } = useDefiMetadata();
+const { getDefiName, getDefiImage, loading } = useDefiMetadata();
 
 const protocol = useRefMap(summary, i => i.protocol);
-const reactiveDecoder = reactify(decodeHtmlEntities);
-
-const name = reactiveDecoder(getDefiName(protocol));
-const image = getDefiImage(protocol);
-
-const imageUrl = computed(() => {
-  const imageVal = get(image);
-  if (!imageVal) {
-    return '';
-  }
-  return `./assets/images/protocols/${imageVal}`;
-});
+const name = getDefiName(protocol);
+const imageUrl = getDefiImage(protocol);
 </script>
 
 <template>
@@ -44,13 +32,27 @@ const imageUrl = computed(() => {
     :title="name"
     :protocol-icon="imageUrl"
     bordered
+    :loading="loading"
   >
     <div v-if="summary.liabilities">
       <div class="text-subtitle-1 font-bold pb-2 flex flex-row justify-between">
         {{ t('overview.stat_card.headers.borrowing') }}
-        <RouterLink v-if="summary.liabilitiesUrl" :to="summary.liabilitiesUrl">
-          <RuiButton icon variant="text" size="sm" class="!p-2" color="primary">
-            <RuiIcon size="16" color="primary" name="external-link-line" />
+        <RouterLink
+          v-if="summary.liabilitiesUrl"
+          :to="summary.liabilitiesUrl"
+        >
+          <RuiButton
+            icon
+            variant="text"
+            size="sm"
+            class="!p-2"
+            color="primary"
+          >
+            <RuiIcon
+              size="16"
+              color="primary"
+              name="external-link-line"
+            />
           </RuiButton>
         </RouterLink>
       </div>
@@ -68,13 +70,24 @@ const imageUrl = computed(() => {
       <RuiDivider class="my-4" />
     </div>
     <div v-if="summary.deposits">
-      <div
-        class="pb-2 flex flex-row justify-between text-subtitle-1 font-medium"
-      >
+      <div class="pb-2 flex flex-row justify-between text-subtitle-1 font-medium">
         {{ t('common.deposits') }}
-        <RouterLink v-if="summary.depositsUrl" :to="summary.depositsUrl">
-          <RuiButton icon variant="text" size="sm" class="!p-2" color="primary">
-            <RuiIcon size="16" color="primary" name="external-link-line" />
+        <RouterLink
+          v-if="summary.depositsUrl"
+          :to="summary.depositsUrl"
+        >
+          <RuiButton
+            icon
+            variant="text"
+            size="sm"
+            class="!p-2"
+            color="primary"
+          >
+            <RuiIcon
+              size="16"
+              color="primary"
+              name="external-link-line"
+            />
           </RuiButton>
         </RouterLink>
       </div>
@@ -85,50 +98,78 @@ const imageUrl = computed(() => {
       />
     </div>
   </StatCard>
-  <StatCard v-else bordered :title="name" :protocol-icon="imageUrl">
-    <span v-if="summary.tokenInfo" class="text-subtitle-1 font-bold pb-2">
+  <StatCard
+    v-else
+    bordered
+    :title="name"
+    :protocol-icon="imageUrl"
+    :loading="loading"
+  >
+    <span
+      v-if="summary.tokenInfo"
+      class="text-subtitle-1 font-bold pb-2"
+    >
       {{ summary.tokenInfo.tokenName }}
     </span>
-    <InfoRow :title="t('common.balance')" fiat :value="summary.balanceUsd" />
+    <InfoRow
+      :title="t('common.balance')"
+      fiat
+      :value="summary.balanceUsd"
+    />
 
     <RuiDivider class="my-4" />
 
     <div class="flex justify-end">
-      <VDialog v-model="details" scrollable max-width="450px">
-        <template #activator="{ on }">
-          <RuiButton size="sm" variant="text" color="primary" v-on="on">
+      <RuiDialog
+        v-model="details"
+        max-width="450px"
+      >
+        <template #activator="{ attrs }">
+          <RuiButton
+            size="sm"
+            variant="text"
+            color="primary"
+            v-bind="attrs"
+          >
             {{ t('common.details') }}
             <template #append>
-              <RuiIcon size="16" color="primary" name="external-link-line" />
+              <RuiIcon
+                size="16"
+                color="primary"
+                name="external-link-line"
+              />
             </template>
           </RuiButton>
         </template>
-        <RuiCard>
+        <RuiCard divide>
           <template #custom-header>
             <div class="flex items-center p-4 gap-4">
-              <VImg
-                aspect-ratio="1"
+              <AppImage
+                :loading="loading"
                 :src="imageUrl"
-                max-width="32px"
-                max-height="32px"
+                size="32px"
                 contain
               />
-              <div>
-                <div class="text-h5">{{ name }}</div>
-                <div class="text-body-1 text-rui-text-secondary">
+
+              <RuiCardHeader class="p-0">
+                <template #header>
+                  {{ name }}
+                </template>
+                <template #subheader>
                   {{ t('overview.details_dialog.subtitle') }}
-                </div>
-              </div>
+                </template>
+              </RuiCardHeader>
             </div>
           </template>
-          <div class="h-[300px]">
-            <div v-for="(asset, index) in assets" :key="index">
-              <RuiDivider />
-              <DefiAsset :asset="asset" />
-            </div>
+          <div class="h-[300px] flex flex-col gap-2">
+            <DefiAsset
+              v-for="(asset, index) in assets"
+              :key="index"
+              :asset="asset"
+            />
           </div>
         </RuiCard>
-      </VDialog>
+      </RuiDialog>
     </div>
   </StatCard>
 </template>

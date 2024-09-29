@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { type Suggestion } from '@/types/filtering';
+import { getAddressFromEvmIdentifier, isEvmIdentifier } from '@rotki/common';
 import { truncateAddress } from '@/utils/truncate';
+import type { Suggestion } from '@/types/filtering';
 
 const props = withDefaults(
   defineProps<{
@@ -8,13 +9,11 @@ const props = withDefaults(
     chip?: boolean;
   }>(),
   {
-    chip: false
-  }
+    chip: false,
+  },
 );
 
 const { suggestion } = toRefs(props);
-
-const { assetInfo } = useAssetInfoRetrieval();
 
 const isBoolean = computed(() => {
   const item = get(suggestion);
@@ -23,35 +22,50 @@ const isBoolean = computed(() => {
   return typeof value === 'boolean';
 });
 
+const { assetInfo } = useAssetInfoRetrieval();
+const { getChainName } = useSupportedChains();
+
+const asset = computed<{ identifier: string; symbol: string } | undefined>(() => {
+  const item = get(suggestion);
+  const value = item.value;
+
+  if (!item.asset)
+    return undefined;
+
+  let usedAsset, identifier;
+  if (typeof value === 'string') {
+    identifier = value;
+    usedAsset = get(assetInfo(value));
+  }
+  else {
+    identifier = value.identifier;
+    usedAsset = value;
+  }
+
+  if (!usedAsset)
+    return undefined;
+
+  let symbol = usedAsset.symbol;
+  if (usedAsset.evmChain && !props.chip)
+    symbol += ` (${get(getChainName(usedAsset.evmChain))})`;
+  else if (usedAsset.isCustomAsset)
+    symbol = usedAsset.name;
+
+  return {
+    identifier,
+    symbol,
+  };
+});
+
 const displayValue = computed(() => {
   const item = get(suggestion);
   const value = item.value;
 
-  if (get(isBoolean)) {
+  if (get(isBoolean))
     return `${value}`;
-  }
 
-  if (!item.asset) {
-    return value;
-  }
-
-  let usedAsset = value;
-  if (typeof usedAsset === 'string') {
-    usedAsset = get(assetInfo(value));
-  }
-
-  if (!usedAsset) {
-    return value;
-  }
-
-  if (usedAsset.evmChain) {
-    return `${usedAsset.symbol} (${usedAsset.evmChain})`;
-  }
-
-  return usedAsset.isCustomAsset ? usedAsset.name : usedAsset.symbol;
+  return value;
 });
-
-const css = useCssModule();
 </script>
 
 <template>
@@ -62,14 +76,47 @@ const css = useCssModule();
     <template v-if="!(chip && isBoolean)">
       <span
         :class="{
-          [css.comparator]: chip,
-          ['text-rui-primary']: !chip
+          [$style.comparator]: chip,
+          ['text-rui-primary']: !chip,
         }"
         class="px-1"
       >
         <span>{{ suggestion.exclude ? '!=' : '=' }}</span>
       </span>
-      <span class="font-normal">
+      <div
+        v-if="suggestion.asset && asset"
+        class="flex items-center gap-2"
+        :class="{ 'ml-2': !chip }"
+      >
+        <AssetIcon
+          :identifier="asset.identifier"
+          padding="1.5px"
+          :size="chip ? '16px' : '18px'"
+          :chain-icon-size="chip ? '9px' : '11px'"
+          chain-icon-padding="0.5px"
+        />
+        <span class="font-normal text-sm">
+          {{ asset.symbol }}
+        </span>
+        <RuiTooltip
+          :popper="{ placement: 'right' }"
+          :open-delay="200"
+          :close-delay="0"
+        >
+          <template #activator>
+            <RuiIcon
+              class="cursor-pointer p-1 -ml-1"
+              name="information-line"
+              size="20"
+            />
+          </template>
+          {{ (isEvmIdentifier(asset.identifier) ? getAddressFromEvmIdentifier(asset.identifier) : asset.identifier) }}
+        </RuiTooltip>
+      </div>
+      <span
+        v-else-if="displayValue"
+        class="font-normal"
+      >
         {{ truncateAddress(displayValue, 10) }}
       </span>
     </template>
@@ -78,7 +125,7 @@ const css = useCssModule();
 
 <style lang="scss" module>
 .comparator {
-  @apply py-1.5 border-l border-r border-white mx-1.5 flex items-center;
+  @apply py-0.5 border-l border-r border-white mx-1.5 flex items-center;
 }
 
 :global(.dark) {

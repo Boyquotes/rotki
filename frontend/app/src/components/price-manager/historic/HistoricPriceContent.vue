@@ -1,99 +1,94 @@
 <script setup lang="ts">
-import { type DataTableHeader } from '@/types/vuetify';
-import {
-  type HistoricalPrice,
-  type HistoricalPriceFormPayload
-} from '@/types/prices';
-import { type Nullable } from '@/types';
+import type { DataTableColumn, DataTableSortData } from '@rotki/ui-library';
+import type { HistoricalPrice, HistoricalPriceFormPayload } from '@/types/prices';
 
 const { t } = useI18n();
 
-const headers = computed<DataTableHeader[]>(() => [
+const sort = ref<DataTableSortData<HistoricalPrice>>([
   {
-    text: t('price_table.headers.from_asset'),
-    value: 'fromAsset'
+    column: 'timestamp',
+    direction: 'desc' as const,
+  },
+]);
+
+const headers = computed<DataTableColumn<HistoricalPrice>[]>(() => [
+  {
+    label: t('price_table.headers.from_asset'),
+    key: 'fromAsset',
+    sortable: true,
   },
   {
-    text: '',
-    value: 'wasWorth',
-    sortable: false
+    label: '',
+    key: 'wasWorth',
+    cellClass: '!text-xs !text-rui-text-secondary',
   },
   {
-    text: t('common.price'),
-    value: 'price',
-    align: 'end'
+    label: t('common.price'),
+    key: 'price',
+    align: 'end',
+    sortable: true,
   },
   {
-    text: t('price_table.headers.to_asset'),
-    value: 'toAsset'
+    label: t('price_table.headers.to_asset'),
+    key: 'toAsset',
+    sortable: true,
   },
   {
-    text: '',
-    value: 'on',
-    sortable: false
+    label: '',
+    key: 'on',
+    cellClass: '!text-xs !text-rui-text-secondary',
   },
   {
-    text: t('common.datetime'),
-    value: 'timestamp'
+    label: t('common.datetime'),
+    key: 'timestamp',
+    sortable: true,
   },
   {
-    text: '',
-    value: 'actions',
-    sortable: false
-  }
+    label: '',
+    key: 'actions',
+    class: 'w-[3rem]',
+  },
 ]);
 
 const emptyPrice: () => HistoricalPriceFormPayload = () => ({
   fromAsset: '',
   toAsset: '',
-  price: '0',
-  timestamp: 0
+  price: '',
+  timestamp: 0,
 });
 
 const price = ref<HistoricalPriceFormPayload>(emptyPrice());
-const filter = reactive<{
-  fromAsset: Nullable<string>;
-  toAsset: Nullable<string>;
-}>({
-  fromAsset: null,
-  toAsset: null
-});
+const filter = ref<{ fromAsset?: string; toAsset?: string }>({});
+const fromAsset = useRefPropVModel(filter, 'fromAsset');
+const toAsset = useRefPropVModel(filter, 'toAsset');
+
 const update = ref(false);
 
 const router = useRouter();
 const route = useRoute();
 
-const { items, loading, save, deletePrice, refresh } = useHistoricPrices(
-  filter,
-  t
-);
+const { items, loading, save, deletePrice, refresh } = useHistoricPrices(filter, t);
 
-const {
-  openDialog,
-  setOpenDialog,
-  submitting,
-  closeDialog,
-  setSubmitFunc,
-  trySubmit,
-  setPostSubmitFunc
-} = useHistoricPriceForm();
+const { openDialog, setOpenDialog, submitting, closeDialog, setSubmitFunc, trySubmit, setPostSubmitFunc }
+  = useHistoricPriceForm();
 
-const openForm = (hPrice: HistoricalPrice | null = null) => {
+function openForm(hPrice: HistoricalPrice | null = null) {
   set(update, !!hPrice);
   if (hPrice) {
     set(price, {
       ...hPrice,
-      price: hPrice.price.toFixed() ?? ''
+      price: hPrice.price.toFixed() ?? '',
     });
-  } else {
+  }
+  else {
     set(price, {
       ...emptyPrice(),
-      fromAsset: filter.fromAsset ?? '',
-      toAsset: filter.toAsset ?? ''
+      fromAsset: get(fromAsset) ?? '',
+      toAsset: get(toAsset) ?? '',
     });
   }
   setOpenDialog(true);
-};
+}
 
 const hideForm = function () {
   closeDialog();
@@ -102,15 +97,15 @@ const hideForm = function () {
 
 const { show } = useConfirmStore();
 
-const showDeleteConfirmation = (item: HistoricalPrice) => {
+function showDeleteConfirmation(item: HistoricalPrice) {
   show(
     {
       title: t('price_table.delete.dialog.title'),
-      message: t('price_table.delete.dialog.message')
+      message: t('price_table.delete.dialog.message'),
     },
-    () => deletePrice(item)
+    () => deletePrice(item),
   );
-};
+}
 
 onMounted(async () => {
   setSubmitFunc(() => save(get(price), get(update)));
@@ -127,10 +122,7 @@ setPostSubmitFunc(() => refresh({ modified: true }));
 
 <template>
   <TablePageLayout
-    :title="[
-      t('navigation_menu.manage_prices'),
-      t('navigation_menu.manage_prices_sub.historic_prices')
-    ]"
+    :title="[t('navigation_menu.manage_prices'), t('navigation_menu.manage_prices_sub.historic_prices')]"
   >
     <template #buttons>
       <RuiTooltip :open-delay="400">
@@ -149,7 +141,10 @@ setPostSubmitFunc(() => refresh({ modified: true }));
         </template>
         {{ t('price_table.refresh_tooltip') }}
       </RuiTooltip>
-      <RuiButton color="primary" @click="openForm()">
+      <RuiButton
+        color="primary"
+        @click="openForm()"
+      >
         <template #prepend>
           <RuiIcon name="add-line" />
         </template>
@@ -159,7 +154,7 @@ setPostSubmitFunc(() => refresh({ modified: true }));
     <RuiCard>
       <div class="flex flex-row flex-wrap mb-4 gap-2">
         <AssetSelect
-          v-model="filter.fromAsset"
+          v-model="fromAsset"
           outlined
           :label="t('price_management.from_asset')"
           clearable
@@ -171,7 +166,7 @@ setPostSubmitFunc(() => refresh({ modified: true }));
           </template>
         </AssetSelect>
         <AssetSelect
-          v-model="filter.toAsset"
+          v-model="toAsset"
           outlined
           class="flex-1"
           :label="t('price_management.to_asset')"
@@ -183,50 +178,56 @@ setPostSubmitFunc(() => refresh({ modified: true }));
           </template>
         </AssetSelect>
       </div>
-      <DataTable
-        :items="items"
-        :headers="headers"
+      <RuiDataTable
+        v-model:sort="sort"
+        outlined
+        dense
+        :cols="headers"
         :loading="loading"
-        sort-by="timestamp"
+        :rows="items"
+        row-attr="fromAsset"
       >
-        <template #item.fromAsset="{ item }">
-          <AssetDetails :asset="item.fromAsset" />
+        <template #item.fromAsset="{ row }">
+          <AssetDetails :asset="row.fromAsset" />
         </template>
-        <template #item.toAsset="{ item }">
-          <AssetDetails :asset="item.toAsset" />
+        <template #item.toAsset="{ row }">
+          <AssetDetails :asset="row.toAsset" />
         </template>
-        <template #item.timestamp="{ item }">
-          <DateDisplay :timestamp="item.timestamp" />
+        <template #item.timestamp="{ row }">
+          <DateDisplay :timestamp="row.timestamp" />
         </template>
-        <template #item.price="{ item }">
-          <AmountDisplay :value="item.price" />
+        <template #item.price="{ row }">
+          <AmountDisplay :value="row.price" />
         </template>
-        <template #item.wasWorth>{{ t('price_table.was_worth') }}</template>
-        <template #item.on>{{ t('price_table.on') }}</template>
-        <template #item.actions="{ item }">
+        <template #item.wasWorth>
+          {{ t('price_table.was_worth') }}
+        </template>
+        <template #item.on>
+          {{ t('price_table.on') }}
+        </template>
+        <template #item.actions="{ row }">
           <RowActions
             :disabled="loading"
             :delete-tooltip="t('price_table.actions.delete.tooltip')"
             :edit-tooltip="t('price_table.actions.edit.tooltip')"
-            @delete-click="showDeleteConfirmation(item)"
-            @edit-click="openForm(item)"
+            @delete-click="showDeleteConfirmation(row)"
+            @edit-click="openForm(row)"
           />
         </template>
-      </DataTable>
+      </RuiDataTable>
     </RuiCard>
 
     <BigDialog
       :display="openDialog"
-      :title="
-        update
-          ? t('price_management.dialog.edit_title')
-          : t('price_management.dialog.add_title')
-      "
+      :title="update ? t('price_management.dialog.edit_title') : t('price_management.dialog.add_title')"
       :loading="submitting"
       @confirm="trySubmit()"
       @cancel="hideForm()"
     >
-      <HistoricPriceForm v-model="price" :edit="update" />
+      <HistoricPriceForm
+        v-model="price"
+        :edit="update"
+      />
     </BigDialog>
   </TablePageLayout>
 </template>

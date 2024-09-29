@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import useVuelidate from '@vuelidate/core';
 import { helpers, required } from '@vuelidate/validators';
-import { type Tag, type TagEvent } from '@/types/tags';
 import { toMessages } from '@/utils/validation';
+import type { Tag, TagEvent } from '@/types/tags';
 
 const props = defineProps<{
   tag: Tag;
@@ -10,79 +10,89 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: 'changed', tag: Tag): void;
-  (e: 'save', tag: Tag): void;
+  (e: 'update:tag', tag: Tag): void;
+  (e: 'save', data: { tag: Tag; close?: boolean }): void;
   (e: 'cancel'): void;
 }>();
+
 const { t } = useI18n();
 
-const { tag } = toRefs(props);
+const name = usePropVModel(props, 'tag', 'name', emit);
+const description = usePropVModel(props, 'tag', 'description', emit);
+
+const { tag, editMode } = toRefs(props);
+const tagPreview = ref();
 
 const rules = {
   name: {
-    required: helpers.withMessage(
-      t('tag_creator.validation.empty_name'),
-      required
-    )
+    required: helpers.withMessage(t('tag_creator.validation.empty_name'), required),
   },
   description: {
-    optional: () => true
-  }
+    optional: () => true,
+  },
 };
 
 const v$ = useVuelidate(
   rules,
   {
-    name: useRefMap(tag, tag => tag.name),
-    description: useRefMap(tag, tag => tag.description)
+    name,
+    description,
   },
-  { $autoDirty: true }
+  { $autoDirty: true },
 );
 
-const changed = (event: TagEvent) => {
-  emit('changed', {
+function changed(event: TagEvent) {
+  emit('update:tag', {
     ...props.tag,
-    ...event
+    ...event,
   });
-};
+}
 
-const save = async () => {
+async function save(close?: boolean) {
   const v = get(v$);
-  if (!(await v.$validate())) {
+  if (!(await v.$validate()))
     return;
-  }
-  emit('save', props.tag);
-};
 
-const cancel = async () => {
+  emit('save', { tag: props.tag, close });
+}
+
+function cancel() {
   emit('cancel');
-};
+}
 
-const randomize = () => {
+function randomize() {
   const backgroundColor = randomColor();
   changed({
     backgroundColor,
-    foregroundColor: invertColor(backgroundColor)
+    foregroundColor: invertColor(backgroundColor),
   });
-};
+}
 
 watch(tag, () => {
   get(v$).$reset();
+});
+
+watchImmediate(editMode, (edit) => {
+  if (edit)
+    get(tagPreview).$el.scrollIntoView({ behavior: 'smooth' });
 });
 </script>
 
 <template>
   <div class="flex flex-col gap-4">
     <div class="flex items-center gap-4">
-      <TagIcon class="min-w-[7rem]" :tag="tag" />
+      <TagIcon
+        ref="tagPreview"
+        class="[&>div]:min-w-[7rem]"
+        :tag="tag"
+      />
       <RuiTooltip :popper="{ placement: 'bottom' }">
-        <template #activator="{ on }">
+        <template #activator>
           <RuiButton
             icon
             size="sm"
             variant="text"
             color="primary"
-            v-on="on"
             @click="randomize()"
           >
             <RuiIcon name="shuffle-line" />
@@ -93,68 +103,68 @@ watch(tag, () => {
     </div>
     <div class="mt-4">
       <RuiTextField
+        v-model="name"
         variant="outlined"
+        color="primary"
         class="tag_creator__name"
         :label="t('common.name')"
         :error-messages="toMessages(v$.name)"
-        :value="tag.name"
         :disabled="editMode"
-        @input="changed({ name: $event })"
       />
       <RuiTextField
+        v-model="description"
         variant="outlined"
+        color="primary"
         class="tag_creator__description"
-        :value="tag.description"
         :label="t('common.description')"
-        @input="changed({ description: $event })"
       />
     </div>
     <div class="grid md:grid-cols-2 gap-4">
-      <div class="flex flex-col items-center gap-4">
-        <div class="text-h6 text-center">
+      <RuiCard class="flex flex-col items-center">
+        <template #header>
           {{ t('tag_creator.labels.foreground') }}
-        </div>
-        <div>
-          <VColorPicker
-            flat
-            data-cy="tag-creator__color-picker__foreground"
-            mode="hexa"
-            hide-mode-switch
-            :value="`#${tag.foregroundColor}`"
-            @update:color="
-              changed({ foregroundColor: $event.hex.replace('#', '') })
-            "
-          />
-        </div>
-      </div>
-      <div class="flex flex-col items-center gap-4">
-        <div class="mb-3 text-h6 text-center">
+        </template>
+        <RuiColorPicker
+          class="w-full"
+          data-cy="tag-creator__color-picker__foreground"
+          :model-value="tag.foregroundColor"
+          @update:model-value="changed({ foregroundColor: $event })"
+        />
+      </RuiCard>
+      <RuiCard class="flex flex-col items-center">
+        <template #header>
           {{ t('tag_creator.labels.background') }}
-        </div>
-        <div>
-          <VColorPicker
-            flat
-            data-cy="tag-creator__color-picker__background"
-            hide-mode-switch
-            mode="hexa"
-            :value="`#${tag.backgroundColor}`"
-            @update:color="
-              changed({ backgroundColor: $event.hex.replace('#', '') })
-            "
-          />
-        </div>
-      </div>
+        </template>
+        <RuiColorPicker
+          class="w-full"
+          data-cy="tag-creator__color-picker__background"
+          :model-value="tag.backgroundColor"
+          @update:model-value="changed({ backgroundColor: $event })"
+        />
+      </RuiCard>
     </div>
 
-    <div class="flex justify-end gap-4 p-4">
-      <RuiButton v-if="editMode" width="100" @click="cancel()">
+    <div class="flex justify-end gap-4">
+      <RuiButton
+        v-if="editMode"
+        width="100"
+        @click="cancel()"
+      >
         {{ t('common.actions.cancel') }}
+      </RuiButton>
+      <RuiButton
+        data-cy="tag-creator__buttons__save_continue"
+        color="primary"
+        :disabled="v$.$invalid"
+        @click="save()"
+      >
+        {{ t('common.actions.save_continue') }}
       </RuiButton>
       <RuiButton
         data-cy="tag-creator__buttons__save"
         color="primary"
         :disabled="v$.$invalid"
-        @click="save()"
+        @click="save(true)"
       >
         {{ t('common.actions.save') }}
       </RuiButton>

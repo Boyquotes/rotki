@@ -30,7 +30,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Run check action
-        uses: rotki/action-job-checker@v2
+        uses: rotki/action-job-checker@v3
         id: checker
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -57,13 +57,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v2
+        uses: github/codeql-action/init@v3
         with:
           languages: 'javascript'
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v2
+        uses: github/codeql-action/autobuild@v3
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v2
+        uses: github/codeql-action/analyze@v3
         with:
           category: "/language:javascript"
 
@@ -78,24 +78,24 @@ jobs:
         with:
           fetch-depth: 2
       - name: Load env
-        uses: rotki/action-env@v1
+        uses: rotki/action-env@v2
         with:
           env_file: .github/.env.ci
       - name: Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: 'frontend/.nvmrc'
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v3
         with:
-          version: ${{ env.PNPM_VERSION }}
+          package_json_file: frontend/package.json
       - name: Get pnpm store directory
         id: pnpm-cache
         shell: bash
         run: |
           echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
       - name: Setup pnpm cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cache/Cypress
@@ -105,7 +105,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
       - name: Store eslint cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             frontend/.eslintcache
@@ -141,19 +141,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Load env
-        uses: rotki/action-env@v1
+        uses: rotki/action-env@v2
         with:
           env_file: .github/.env.ci
       - name: Setup python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
       - name: Install dependencies
         run: |
-          pip install --upgrade pip==${{ env.PIP_VERSION }}
-          pip install -r requirements_docs.txt
-          pip install -e .
+          pip install --upgrade uv
+          uv pip install --system -r requirements_docs.txt
+          uv pip install --system -e .
           git rev-parse HEAD
       - name: Build html docs
         run: cd docs && make html
@@ -171,13 +171,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v2
+        uses: github/codeql-action/init@v3
         with:
           languages: 'python'
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v2
+        uses: github/codeql-action/autobuild@v3
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v2
+        uses: github/codeql-action/analyze@v3
         with:
           category: "/language:python"
 
@@ -190,19 +190,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Load env
-        uses: rotki/action-env@v1
+        uses: rotki/action-env@v2
         with:
           env_file: .github/.env.ci
       - name: Setup python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
+      - name: Set up uv
+        run: |
+          pip install --upgrade pip
+          pip install --no-cache uv
       - name: Install dependencies
         run: |
-          pip install --upgrade pip==${{ env.PIP_VERSION }}
-          pip install -r requirements_lint.txt
-          pip install -e .
+          uv pip install --system -r requirements_lint.txt
+          uv pip install --system -e .
           git rev-parse HEAD
       - name: Lint
         run: make lint

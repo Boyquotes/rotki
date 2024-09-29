@@ -3,60 +3,34 @@ from __future__ import print_function  # isort:skip
 import os
 import platform
 import sys
-from distutils.spawn import find_executable
+from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
 from rotkehlchen.constants.misc import GLOBALDB_NAME
 from rotkehlchen.exchanges.constants import SUPPORTED_EXCHANGES
-from rotkehlchen.types import Location
+from rotkehlchen.types import EVM_CHAINS_WITH_TRANSACTIONS, Location
 from rotkehlchen.utils.misc import get_system_spec
 
 """
 PyInstaller spec file to build single file or dir distributions
-
-Currently only tested on macOS
 """
 
 # Set to false to produce an exploded single-dir
 ONEFILE = int(os.environ.get('ONEFILE', True))
-MACOS_BUILD_ARCH = os.environ.get('MACOS_BUILD_ARCH', None)
+MACOS_IDENTITY = os.environ.get('IDENTITY', None)
 
 
-def Entrypoint(dist, group, name, scripts=None, pathex=None, hiddenimports=None, hookspath=None,
-               excludes=None, runtime_hooks=None, datas=None):
-    import pkg_resources
-
-    # get toplevel packages of distribution from metadata
-    def get_toplevel(dist):
-        distribution = pkg_resources.get_distribution(dist)
-        if distribution.has_metadata('top_level.txt'):
-            return list(distribution.get_metadata('top_level.txt').split())
-        else:
-            return []
-
-    hiddenimports = hiddenimports or []
-    packages = []
-    for distribution in hiddenimports:
-        try:
-            packages += get_toplevel(distribution)
-        except:
-            pass
-
+def Entrypoint(dist, group, name, scripts=None, pathex=None, hiddenimports=None, hookspath=None, excludes=None, runtime_hooks=None, datas=None):  # noqa: E501
     scripts = scripts or []
     pathex = pathex or []
-    # get the entry point
-    ep = pkg_resources.get_entry_info(dist, group, name)
     # insert path of the egg at the verify front of the search path
-    pathex = [ep.dist.location] + pathex
+    pathex = [Path.cwd()] + pathex
     # script name must not be a valid module name to avoid name clashes on import
     script_path = os.path.join(workpath, name + '-script.py')
-    print("creating script for entry point", dist, group, name)
     with open(script_path, 'w') as fh:
-        print("import", ep.module_name, file=fh)
-        print("%s.%s()" % (ep.module_name, '.'.join(ep.attrs)), file=fh)
-        for package in packages:
-            print("import", package, file=fh)
+        fh.write('import rotkehlchen.__main__\n')
+        fh.write('rotkehlchen.__main__.main()')
 
     return Analysis(
         [script_path] + scripts,
@@ -71,9 +45,13 @@ def Entrypoint(dist, group, name, scripts=None, pathex=None, hiddenimports=None,
 # We don't need Tk and friends
 sys.modules['FixTk'] = None
 
+if (platform_name := platform.system().lower()) == 'darwin':
+    platform_name = f"macos-{'arm64' if platform.machine() == 'arm64' else 'x64'}"
+
 executable_name = 'rotki-core-{}-{}'.format(
     get_system_spec()['rotkehlchen'],
-    'macos' if platform.system() == 'Darwin' else platform.system().lower())
+    platform_name,
+)
 
 hiddenimports = ['cytoolz.utils', 'cytoolz._signatures']
 # Since the exchanges are loaded dynamically and some of them may not be detected
@@ -84,15 +62,8 @@ for exchange_name in SUPPORTED_EXCHANGES:
         continue
     hiddenimports.append(f'rotkehlchen.exchanges.{exchange_name}')
 
-# TODO: Make this dynamic you dummy
-ethereum_modules = collect_submodules('rotkehlchen.chain.ethereum.modules')
-optimism_modules = collect_submodules('rotkehlchen.chain.optimism.modules')
-polygon_pos_modules = collect_submodules('rotkehlchen.chain.polygon_pos.modules')
-arbitrum_one_modules = collect_submodules('rotkehlchen.chain.arbitrum_one.modules')
-gnosis_modules = collect_submodules('rotkehlchen.chain.gnosis.modules')
-base_modules = collect_submodules('rotkehlchen.chain.base.modules')
-dynamic_modules = ethereum_modules + optimism_modules + polygon_pos_modules + arbitrum_one_modules + gnosis_modules + base_modules
-hiddenimports.extend(dynamic_modules)
+for chain in EVM_CHAINS_WITH_TRANSACTIONS:  # load modules from the evm chains
+    hiddenimports.extend(collect_submodules(f'rotkehlchen.chain.{chain.name.lower()}.modules'))
 
 a = Entrypoint(
     'rotkehlchen',
@@ -110,6 +81,8 @@ a = Entrypoint(
         ('rotkehlchen/data/nodes_as_of_1-26-1.json', 'rotkehlchen/data'),
         ('rotkehlchen/data/populate_asset_collections.sql', 'rotkehlchen/data'),
         ('rotkehlchen/data/populate_multiasset_mappings.sql', 'rotkehlchen/data'),
+        ('rotkehlchen/data/populate_location_asset_mappings.sql', 'rotkehlchen/data'),
+        ('rotkehlchen/data/populate_location_unsupported_assets.sql', 'rotkehlchen/data'),
         # TODO
         # We probably should have a better way to specify some data should be loaded
         # by a module in pyinstaller. Should be loaded dynamically by rotki and not
@@ -139,6 +112,13 @@ if ONEFILE:
         console=True,
     )
 else:
+
+    identity = None
+    entitlements = None
+    if MACOS_IDENTITY is not None:
+        identity = MACOS_IDENTITY
+        entitlements = 'packaging/entitlements.plist'
+
     exe = EXE(
         pyz,
         a.scripts,
@@ -148,7 +128,8 @@ else:
         strip=False,
         upx=False,
         console=True,
-        target_arch=MACOS_BUILD_ARCH
+        codesign_identity=identity,
+        entitlements_file=entitlements,
     )
 
     coll = COLLECT(
@@ -159,4 +140,6 @@ else:
         strip=False,
         upx=False,
         name='rotki-core',
+        codesign_identity=identity,
+        entitlements_file=entitlements,
     )

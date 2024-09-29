@@ -3,6 +3,8 @@ import pytest
 from rotkehlchen.greenlets.manager import GreenletManager
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture
 def greenlet_manager(messages_aggregator):
-    return GreenletManager(msg_aggregator=messages_aggregator)
+    manager = GreenletManager(msg_aggregator=messages_aggregator)
+    yield manager
+    manager.clear()

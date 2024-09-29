@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { type Trade } from '@/types/history/trade';
+import type { Trade } from '@/types/history/trade';
 
 const props = withDefaults(
   defineProps<{
@@ -8,8 +8,8 @@ const props = withDefaults(
   }>(),
   {
     editableItem: null,
-    loading: false
-  }
+    loading: false,
+  },
 );
 
 const { editableItem } = toRefs(props);
@@ -18,14 +18,12 @@ const { openDialog, submitting, closeDialog, trySubmit } = useTradesForm();
 
 const { t } = useI18n();
 
-const title: ComputedRef<string> = computed(() =>
-  get(editableItem)
-    ? t('closed_trades.dialog.edit.title')
-    : t('closed_trades.dialog.add.title')
+const title = computed<string>(() =>
+  get(editableItem) ? t('closed_trades.dialog.edit.title') : t('closed_trades.dialog.add.title'),
 );
 
-const subtitle: ComputedRef<string> = computed(() =>
-  get(editableItem) ? t('closed_trades.dialog.edit.subtitle') : ''
+const subtitle = computed<string>(() =>
+  get(editableItem) ? t('closed_trades.dialog.edit.subtitle') : '',
 );
 </script>
 

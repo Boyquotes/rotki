@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { type DataTableColumn } from '@rotki/ui-library-compat';
 import { type Tag, defaultTag } from '@/types/tags';
+import type { DataTableColumn } from '@rotki/ui-library';
 
 withDefaults(
   defineProps<{
     dialog?: boolean;
   }>(),
   {
-    dialog: false
-  }
+    dialog: false,
+  },
 );
 
 const emit = defineEmits<{
@@ -25,68 +25,67 @@ const search = ref<string>('');
 
 const { t } = useI18n();
 
-const headers = computed<DataTableColumn[]>(() => [
+const headers = computed<DataTableColumn<Tag>[]>(() => [
   {
     label: t('common.name'),
-    key: 'name'
+    key: 'name',
   },
   {
     label: t('common.description'),
     key: 'description',
-    cellClass: 'w-full'
+    cellClass: 'w-full !text-sm !text-rui-text-secondary',
   },
   {
     label: t('common.actions_text'),
     key: 'action',
-    sortable: false
-  }
+    sortable: false,
+  },
 ]);
 
 const close = () => emit('close');
 
-const onChange = (newTag: Tag) => {
-  set(tag, newTag);
-};
+async function save({ tag: newTag, close: closeModal }: { tag: Tag; close?: boolean }) {
+  const status = await (get(editMode) ? editTag(newTag) : addTag(newTag));
 
-const save = async (newTag: Tag) => {
-  set(tag, defaultTag());
-  if (get(editMode)) {
+  if (status.success) {
+    set(tag, defaultTag());
     set(editMode, false);
-    await editTag(newTag);
-  } else {
-    await addTag(newTag);
+    closeModal && close();
   }
-};
+}
 
-const cancel = () => {
+function cancel() {
   set(tag, defaultTag());
   set(editMode, false);
-};
+}
 
-const editItem = (newTag: Tag) => {
+function editItem(newTag: Tag) {
+  set(editMode, false);
   set(tag, newTag);
-  set(editMode, true);
-};
+  nextTick(() => {
+    set(editMode, true);
+  });
+}
 
 const { show } = useConfirmStore();
 
-const showDeleteConfirmation = (selectedTag: Tag) => {
+function showDeleteConfirmation(selectedTag: Tag) {
   show(
     {
       title: t('tag_manager.confirmation.title'),
       message: t('tag_manager.confirmation.message', {
-        tagToDelete: selectedTag.name
-      })
+        tagToDelete: selectedTag.name,
+      }),
     },
-    () => deleteTag(selectedTag.name)
+    () => deleteTag(selectedTag.name),
   );
-};
+}
 </script>
 
 <template>
   <RuiCard>
     <template #custom-header>
-      <div class="p-4">
+      <div class="p-4 text-rui-text">
         <div class="flex items-center gap-4">
           <div class="text-h6">
             {{ t('tag_manager.title') }}
@@ -113,12 +112,12 @@ const showDeleteConfirmation = (selectedTag: Tag) => {
     <TagCreator
       :tag="tag"
       :edit-mode="editMode"
-      @changed="onChange($event)"
+      @update:tag="tag = $event"
       @cancel="cancel()"
       @save="save($event)"
     />
 
-    <RuiDivider class="p-4" />
+    <RuiDivider class="my-6" />
 
     <div class="flex flex-col gap-4">
       <div class="text-h6">
@@ -128,6 +127,7 @@ const showDeleteConfirmation = (selectedTag: Tag) => {
         <RuiTextField
           v-model="search"
           variant="outlined"
+          color="primary"
           dense
           class="w-[22rem]"
           prepend-icon="search-line"
@@ -136,6 +136,7 @@ const showDeleteConfirmation = (selectedTag: Tag) => {
         />
       </div>
       <RuiDataTable
+        dense
         :rows="tags"
         row-attr="name"
         :cols="headers"
@@ -143,22 +144,17 @@ const showDeleteConfirmation = (selectedTag: Tag) => {
         outlined
       >
         <template #item.name="{ row }">
-          <TagIcon :tag="row" />
+          <TagIcon
+            :tag="row"
+            small
+          />
         </template>
         <template #item.action="{ row }">
-          <div v-if="!row.readOnly" class="flex items-center gap-4">
-            <RuiButton variant="text" icon size="sm" @click="editItem(row)">
-              <RuiIcon name="pencil-line" />
-            </RuiButton>
-            <RuiButton
-              variant="text"
-              icon
-              size="sm"
-              @click="showDeleteConfirmation(row)"
-            >
-              <RuiIcon name="delete-bin-5-line" />
-            </RuiButton>
-          </div>
+          <RowActions
+            v-if="!row.readOnly"
+            @edit-click="editItem(row)"
+            @delete-click="showDeleteConfirmation(row)"
+          />
         </template>
       </RuiDataTable>
     </div>

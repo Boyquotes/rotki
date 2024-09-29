@@ -1,58 +1,52 @@
-import { Blockchain } from '@rotki/common/lib/blockchain';
+import { Blockchain } from '@rotki/common';
 import flushPromises from 'flush-promises';
-import { RouterAccountsSchema } from '@/types/route';
+import { afterEach, assertType, beforeAll, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { type LocationQuery, RouterAccountsSchema } from '@/types/route';
 import { useMainStore } from '@/store/main';
 import { FilterBehaviour } from '@/types/filtering';
 import type { Filters, Matcher } from '@/composables/filters/events';
 import type { Collection } from '@/types/collection';
-import type {
-  HistoryEvent,
-  HistoryEventRequestPayload
-} from '@/types/history/events';
-import type { LocationQuery } from '@/types/route';
-import type { GeneralAccount } from '@rotki/common/src/account';
+import type { HistoryEvent, HistoryEventRequestPayload } from '@/types/history/events';
+import type { Account } from '@rotki/common/src/account';
 import type { MaybeRef } from '@vueuse/core';
 import type Vue from 'vue';
 
-vi.mock('vue-router/composables', () => ({
-  useRoute: vi.fn().mockReturnValue(
-    reactive({
-      query: {}
-    })
-  ),
-  useRouter: vi.fn().mockReturnValue({
-    push: vi.fn(({ query }) => {
-      useRoute().query = query;
-      return true;
-    })
-  })
-}));
+vi.mock('vue-router', () => {
+  const route = ref({
+    query: {},
+  });
+  return {
+    useRoute: vi.fn().mockReturnValue(route),
+    useRouter: vi.fn().mockReturnValue({
+      push: vi.fn(({ query }) => {
+        set(route, { query });
+        return true;
+      }),
+    }),
+  };
+});
 
 vi.mock('vue', async () => {
-  const mod = await vi.importActual<Vue>('vue');
+  const mod = await vi.importActual<typeof Vue>('vue');
 
   return {
     ...mod,
-    onBeforeMount: vi.fn()
+    onBeforeMount: vi.fn().mockImplementation((fn: Function) => fn()),
   };
 });
 
 describe('composables::history/filter-paginate', () => {
-  let fetchHistoryEvents: (
-    payload: MaybeRef<HistoryEventRequestPayload>
-  ) => Promise<Collection<HistoryEvent>>;
+  let fetchHistoryEvents: (payload: MaybeRef<HistoryEventRequestPayload>) => Promise<Collection<HistoryEvent>>;
   const locationOverview: MaybeRef<string | null> = null;
-  const mainPage: Ref<boolean> = ref(false);
-  const protocols: Ref<string[]> = ref([]);
-  const eventTypes: Ref<string[]> = ref([]);
-  const eventSubTypes: Ref<string[]> = ref([]);
-  const accounts: Ref<GeneralAccount[]> = ref([
+  const mainPage = ref<boolean>(false);
+  const protocols = ref<string[]>([]);
+  const eventTypes = ref<string[]>([]);
+  const eventSubTypes = ref<string[]>([]);
+  const accounts = ref<Account[]>([
     {
       address: '0x2F4c0f60f2116899FA6D4b9d8B979167CE963d25',
       chain: Blockchain.ETH,
-      label: '',
-      tags: []
-    }
+    },
   ]);
   const router = useRouter();
   const route = useRoute();
@@ -71,41 +65,28 @@ describe('composables::history/filter-paginate', () => {
   describe('components::history/trades/HistoryEventsView', () => {
     const onUpdateFilters = (query: LocationQuery) => {
       const parsedAccounts = RouterAccountsSchema.parse(query);
-      if (parsedAccounts.accounts) {
+      if (parsedAccounts.accounts)
         set(accounts, parsedAccounts.accounts);
-      }
     };
 
     const extraParams = computed(() => ({
-      accounts: get(accounts).map(
-        account => `${account.address}#${account.chain}`
-      )
+      accounts: get(accounts).map(account => `${account.address}#${account.chain}`),
     }));
 
-    const customPageParams = computed<Partial<HistoryEventRequestPayload>>(
-      () => ({
-        protocols: get(protocols),
-        eventTypes: get(eventTypes),
-        eventSubtypes: get(eventSubTypes),
-        location: 'ethereum',
-        locationLabels: get(accounts)[0].address
-      })
-    );
+    const customPageParams = computed<Partial<HistoryEventRequestPayload>>(() => ({
+      protocols: get(protocols),
+      eventTypes: get(eventTypes),
+      eventSubtypes: get(eventSubTypes),
+      location: 'ethereum',
+      locationLabels: get(accounts)[0].address,
+    }));
 
     beforeEach(() => {
       set(mainPage, true);
     });
 
-    test('initialize composable correctly', async () => {
-      const {
-        userAction,
-        filters,
-        options,
-        state,
-        fetchData,
-        applyRouteFilter,
-        isLoading
-      } = usePaginationFilters<
+    it('initialize composable correctly', async () => {
+      const { userAction, filters, sort, state, fetchData, applyRouteFilter, isLoading } = usePaginationFilters<
         HistoryEvent,
         HistoryEventRequestPayload,
         HistoryEvent,
@@ -120,15 +101,15 @@ describe('composables::history/filter-paginate', () => {
         {
           onUpdateFilters,
           extraParams,
-          customPageParams
-        }
+          customPageParams,
+        },
       );
 
-      expect(get(userAction)).toBe(false);
+      expect(get(userAction)).toBe(true);
       expect(get(isLoading)).toBe(false);
       expect(get(filters)).to.toStrictEqual({});
-      expect(get(options).sortBy).toHaveLength(1);
-      expect(get(options).sortDesc).toHaveLength(1);
+      expect(Array.isArray(get(sort))).toBe(true);
+      expect(get(sort)).toHaveLength(1);
       expect(get(state).data).toHaveLength(0);
       expect(get(state).total).toEqual(0);
 
@@ -137,10 +118,12 @@ describe('composables::history/filter-paginate', () => {
       fetchData().catch(() => {});
       expect(get(isLoading)).toBe(true);
       await flushPromises();
+      await flushPromises();
+      expect(get(isLoading)).toBe(false);
       expect(get(state).total).toEqual(6);
     });
 
-    test('check the return types', async () => {
+    it('check the return types', () => {
       const { isLoading, state, filters, matchers } = usePaginationFilters<
         HistoryEvent,
         HistoryEventRequestPayload,
@@ -156,8 +139,8 @@ describe('composables::history/filter-paginate', () => {
         {
           onUpdateFilters,
           extraParams,
-          customPageParams
-        }
+          customPageParams,
+        },
       );
 
       expect(get(isLoading)).toBe(false);
@@ -169,7 +152,7 @@ describe('composables::history/filter-paginate', () => {
       expectTypeOf(get(matchers)).toEqualTypeOf<Matcher[]>();
     });
 
-    test('modify filters and fetch data correctly', async () => {
+    it('modify filters and fetch data correctly', async () => {
       const pushSpy = vi.spyOn(router, 'push');
       const query = { sortBy: ['timestamp'], sortDesc: ['false'] };
 
@@ -188,17 +171,17 @@ describe('composables::history/filter-paginate', () => {
         {
           onUpdateFilters,
           extraParams,
-          customPageParams
-        }
+          customPageParams,
+        },
       );
 
       await router.push({
-        query
+        query,
       });
 
       expect(pushSpy).toHaveBeenCalledOnce();
       expect(pushSpy).toHaveBeenCalledWith({ query });
-      expect(route.query).toEqual(query);
+      expect(get(route).query).toEqual(query);
       expect(get(isLoading)).toBe(true);
       await flushPromises();
       expect(get(isLoading)).toBe(false);
@@ -216,13 +199,13 @@ describe('composables::history/filter-paginate', () => {
       expect(get(state).total).toEqual(6);
     });
 
-    test('add protocols to filters and expect the value to be set', async () => {
-      set(protocols, ['gas', 'ens']);
+    it('add protocols to filters and expect the value to be set', async () => {
+      set(protocols, ['ga s', 'ens']);
 
       const query = {
         sortBy: ['timestamp'],
         sortDesc: ['false'],
-        counterparties: get(protocols)
+        counterparties: get(protocols),
       };
 
       const { isLoading, filters } = usePaginationFilters<
@@ -240,12 +223,12 @@ describe('composables::history/filter-paginate', () => {
         {
           onUpdateFilters,
           extraParams,
-          customPageParams
-        }
+          customPageParams,
+        },
       );
 
       await router.push({
-        query
+        query,
       });
 
       expect(get(isLoading)).toBe(true);
@@ -255,32 +238,31 @@ describe('composables::history/filter-paginate', () => {
       expect(get(filters).counterparties).toStrictEqual(get(protocols));
     });
 
-    test('exclusion filters', async () => {
+    it('exclusion filters', async () => {
       const fetchHistoryEvents = vi.fn();
 
-      const { userAction, fetchData, isLoading, updateFilter } =
-        usePaginationFilters<
-          HistoryEvent,
-          HistoryEventRequestPayload,
-          HistoryEvent,
-          Collection<HistoryEvent>,
-          Filters,
-          Matcher
-        >(
-          locationOverview,
-          mainPage,
-          () => useHistoryEventFilter({ protocols: get(protocols).length > 0 }),
-          fetchHistoryEvents,
-          {
-            onUpdateFilters,
-            extraParams,
-            customPageParams
-          }
-        );
+      const { userAction, fetchData, isLoading, updateFilter } = usePaginationFilters<
+        HistoryEvent,
+        HistoryEventRequestPayload,
+        HistoryEvent,
+        Collection<HistoryEvent>,
+        Filters,
+        Matcher
+      >(
+        locationOverview,
+        mainPage,
+        () => useHistoryEventFilter({ protocols: get(protocols).length > 0 }),
+        fetchHistoryEvents,
+        {
+          onUpdateFilters,
+          extraParams,
+          customPageParams,
+        },
+      );
 
       updateFilter({
         location: 'protocols',
-        entryTypes: ['!evm event']
+        entryTypes: ['!evm event'],
       });
 
       set(userAction, true);
@@ -294,10 +276,10 @@ describe('composables::history/filter-paginate', () => {
           value: expect.objectContaining({
             entryTypes: {
               behaviour: FilterBehaviour.EXCLUDE,
-              values: ['evm event']
-            }
-          })
-        })
+              values: ['evm event'],
+            },
+          }),
+        }),
       );
     });
   });

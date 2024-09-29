@@ -1,11 +1,11 @@
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 from unittest.mock import patch
 
 from rotkehlchen.assets.asset import Asset, AssetWithOracles
-from rotkehlchen.assets.converters import KRAKEN_TO_WORLD, asset_from_kraken
+from rotkehlchen.assets.converters import asset_from_kraken
 from rotkehlchen.constants import ONE, ZERO
 from rotkehlchen.constants.assets import A_BTC, A_DAI, A_ETH, A_ETH2, A_EUR
 from rotkehlchen.db.dbhandler import DBHandler
@@ -16,12 +16,12 @@ from rotkehlchen.exchanges.bitfinex import Bitfinex
 from rotkehlchen.exchanges.bitmex import Bitmex
 from rotkehlchen.exchanges.bitpanda import Bitpanda
 from rotkehlchen.exchanges.bitstamp import Bitstamp
-from rotkehlchen.exchanges.bittrex import Bittrex
+from rotkehlchen.exchanges.bybit import Bybit
 from rotkehlchen.exchanges.coinbase import Coinbase
-from rotkehlchen.exchanges.coinbasepro import Coinbasepro
 from rotkehlchen.exchanges.data_structures import AssetMovement, Trade
 from rotkehlchen.exchanges.exchange import ExchangeInterface
 from rotkehlchen.exchanges.gemini import Gemini
+from rotkehlchen.exchanges.htx import Htx
 from rotkehlchen.exchanges.iconomi import Iconomi
 from rotkehlchen.exchanges.independentreserve import Independentreserve
 from rotkehlchen.exchanges.kucoin import Kucoin
@@ -31,6 +31,7 @@ from rotkehlchen.exchanges.poloniex import Poloniex
 from rotkehlchen.exchanges.utils import create_binance_symbols_to_pair
 from rotkehlchen.exchanges.woo import Woo
 from rotkehlchen.fval import FVal
+from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.tests.utils.constants import A_XMR
 from rotkehlchen.tests.utils.factories import (
     make_api_key,
@@ -52,7 +53,7 @@ from rotkehlchen.types import (
 )
 from rotkehlchen.user_messages import MessagesAggregator
 
-POLONIEX_MOCK_DEPOSIT_WITHDRAWALS_RESPONSE = """{
+POLONIEX_MOCK_DEPOSIT_WITHDRAWALS_RESPONSE: Final = """{
   "adjustments": [],
   "withdrawals": [
     {
@@ -118,7 +119,7 @@ POLONIEX_MOCK_DEPOSIT_WITHDRAWALS_RESPONSE = """{
   }]
 }"""
 
-POLONIEX_BALANCES_RESPONSE = """[{
+POLONIEX_BALANCES_RESPONSE: Final = """[{
     "accountId": 1337,
     "accountType": "SPOT",
     "balances": [{
@@ -133,7 +134,7 @@ POLONIEX_BALANCES_RESPONSE = """[{
 }]
 """
 
-POLONIEX_TRADES_RESPONSE = """[{
+POLONIEX_TRADES_RESPONSE: Final = """[{
     "symbol": "BCH_BTC",
     "id": 394131412,
     "createTime": 1539713117000,
@@ -157,7 +158,7 @@ POLONIEX_TRADES_RESPONSE = """[{
     "accountType": "SPOT"
 }]"""
 
-BINANCE_BALANCES_RESPONSE = """
+BINANCE_BALANCES_RESPONSE: Final = """
 {
   "makerCommission": 15,
   "takerCommission": 15,
@@ -187,7 +188,7 @@ BINANCE_BALANCES_RESPONSE = """
 }]}"""
 
 
-BINANCE_FUTURES_WALLET_RESPONSE = """{
+BINANCE_FUTURES_WALLET_RESPONSE: Final = """{
     "totalCrossCollateral":"5.8238577133",
     "totalBorrowed":"5.07000000",
     "totalInterest":"0.0",
@@ -211,7 +212,7 @@ BINANCE_FUTURES_WALLET_RESPONSE = """{
     ]
 }"""
 
-BINANCE_POOL_BALANCES_RESPONSE = """[
+BINANCE_POOL_BALANCES_RESPONSE: Final = """[
     {
         "poolId": 2,
         "poolName": "BUSD/USDT",
@@ -248,13 +249,13 @@ BINANCE_POOL_BALANCES_RESPONSE = """[
     }
 ]"""
 
-BINANCE_USDT_FUTURES_BALANCES_RESPONSE = """[
+BINANCE_USDT_FUTURES_BALANCES_RESPONSE: Final = """[
 {"accountAlias": "foo", "asset": "USDT", "availableBalance": "125.55", "balance": "125.55", "crossUnPnl": "0", "crossWalletBalance": "125.55", "maxWithdrawAmount": "125.55"},
  {"accountAlias": "foo", "asset": "BNB", "availableBalance": "0", "balance": "0", "crossUnPnl": "0", "crossWalletBalance": "0", "maxWithdrawAmount": "0"},
  {"accountAlias": "foo", "asset": "BUSD", "availableBalance": "0", "balance": "0", "crossUnPnl": "0", "crossWalletBalance": "0", "maxWithdrawAmount": "0"}
 ]"""  # noqa: E501
 
-BINANCE_COIN_FUTURES_BALANCES_RESPONSE = """[{"accountAlias": "boo", "asset": "ETC", "availableBalance": "0", "balance": "0", "crossUnPnl": "0", "crossWalletBalance": "0", "updateTime": 1608764079532, "withdrawAvailable": "0"},
+BINANCE_COIN_FUTURES_BALANCES_RESPONSE: Final = """[{"accountAlias": "boo", "asset": "ETC", "availableBalance": "0", "balance": "0", "crossUnPnl": "0", "crossWalletBalance": "0", "updateTime": 1608764079532, "withdrawAvailable": "0"},
  {"accountAlias": "boo", "asset": "BTC", "availableBalance": "0.5", "balance": "0.5", "crossUnPnl": "0", "crossWalletBalance": "0.5", "updateTime": 1608764079532, "withdrawAvailable": "0.5"},
  {"accountAlias": "boo", "asset": "ADA", "availableBalance": "0", "balance": "0", "crossUnPnl": "0", "crossWalletBalance": "0", "updateTime": 1608764079532, "withdrawAvailable": "0"},
  {"accountAlias": "boo", "asset": "FIL", "availableBalance": "0", "balance": "0", "crossUnPnl": "0", "crossWalletBalance": "0", "updateTime": 1608764079532, "withdrawAvailable": "0"},
@@ -270,31 +271,8 @@ BINANCE_COIN_FUTURES_BALANCES_RESPONSE = """[{"accountAlias": "boo", "asset": "E
  {"accountAlias": "boo", "asset": "EGLD", "availableBalance": "0", "balance": "0", "crossUnPnl": "0", "crossWalletBalance": "0", "updateTime": 1608764079532, "withdrawAvailable": "0"}
  ]"""  # noqa: E501
 
-BINANCE_LENDING_WALLET_RESPONSE = """{
-    "positionAmountVos": [
-        {
-            "amount": "75.46000000",
-            "amountInBTC": "0.01044819",
-            "amountInUSDT": "75.46000000",
-            "asset": "USDT"
-        },
-        {
-            "amount": "1.67072036",
-            "amountInBTC": "0.00023163",
-            "amountInUSDT": "1.67289230",
-            "asset": "BUSD"
-        }
-    ],
-    "totalAmountInBTC": "0.01067982",
-    "totalAmountInUSDT": "77.13289230",
-    "totalFixedAmountInBTC": "0.00000000",
-    "totalFixedAmountInUSDT": "0.00000000",
-    "totalFlexibleInBTC": "0.01067982",
-    "totalFlexibleInUSDT": "77.13289230"
-}"""
 
-
-BINANCE_MYTRADES_RESPONSE = """
+BINANCE_MYTRADES_RESPONSE: Final = """
 [
     {
     "symbol": "BNBBTC",
@@ -312,7 +290,7 @@ BINANCE_MYTRADES_RESPONSE = """
     }]"""
 
 
-BINANCE_FIATBUY_RESPONSE = """{
+BINANCE_FIATBUY_RESPONSE: Final = """{
    "code": "000000",
    "message": "success",
    "data": [{
@@ -332,7 +310,7 @@ BINANCE_FIATBUY_RESPONSE = """{
 }"""
 
 
-BINANCE_FIATSELL_RESPONSE = """{
+BINANCE_FIATSELL_RESPONSE: Final = """{
    "code": "000000",
    "message": "success",
    "data": [{
@@ -352,7 +330,7 @@ BINANCE_FIATSELL_RESPONSE = """{
 }"""
 
 
-BINANCE_DEPOSITS_HISTORY_RESPONSE = """[
+BINANCE_DEPOSITS_HISTORY_RESPONSE: Final = """[
     {
         "insertTime": 1508198532000,
         "amount": 0.04670582,
@@ -371,7 +349,7 @@ BINANCE_DEPOSITS_HISTORY_RESPONSE = """[
     }
 ]"""
 
-BINANCE_WITHDRAWALS_HISTORY_RESPONSE = """[
+BINANCE_WITHDRAWALS_HISTORY_RESPONSE: Final = """[
         {
         "id":"7213fea8e94b4a5593d507237e5a555b",
         "withdrawOrderId": null,
@@ -397,7 +375,7 @@ BINANCE_WITHDRAWALS_HISTORY_RESPONSE = """[
 ]"""  # noqa: E501
 
 
-BINANCE_FIATDEPOSITS_RESPONSE = """{
+BINANCE_FIATDEPOSITS_RESPONSE: Final = """{
    "code": "000000",
    "message": "success",
    "data": [
@@ -418,7 +396,7 @@ BINANCE_FIATDEPOSITS_RESPONSE = """{
 }"""
 
 
-BINANCE_FIATWITHDRAWS_RESPONSE = """{
+BINANCE_FIATWITHDRAWS_RESPONSE: Final = """{
    "code": "000000",
    "message": "success",
    "data": [
@@ -437,6 +415,59 @@ BINANCE_FIATWITHDRAWS_RESPONSE = """{
    "total": 1,
    "success": true
 }"""
+
+
+BINANCE_SIMPLE_EARN_FLEXIBLE_POSITION: Final = """{
+    "rows":[{
+        "totalAmount": "75.46000000",
+        "tierAnnualPercentageRate": {
+            "0-5BTC": 0.05,
+            "5-10BTC": 0.03
+        },
+        "latestAnnualPercentageRate": "0.02599895",
+        "yesterdayAirdropPercentageRate": "0.02599895",
+        "asset": "USDT",
+        "airDropAsset": "BETH",
+        "canRedeem": true,
+        "collateralAmount": "232.23123213",
+        "productId": "USDT001",
+        "yesterdayRealTimeRewards": "0.10293829",
+        "cumulativeBonusRewards": "0.22759183",
+        "cumulativeRealTimeRewards": "0.22759183",
+        "cumulativeTotalRewards": "0.45459183",
+        "autoSubscribe": true
+    }],
+    "total": 1
+}"""
+
+
+BINANCE_SIMPLE_EARN_LOCKED_POSITION: Final = """{
+    "rows":[{
+        "positionId": "123123",
+        "projectId": "Axs*90",
+        "asset": "AXS",
+        "amount": "122.09202928",
+        "purchaseTime": "1646182276000",
+        "duration": "60",
+        "accrualDays": "4",
+        "rewardAsset": "AXS",
+        "APY": "0.23",
+        "isRenewable": true,
+        "isAutoRenew": true,
+        "redeemDate": "1732182276000"
+    }],
+    "total": 1
+}"""
+
+
+BINANCE_FUNDING_WALLET_BALANCES_RESPONSE: Final = """[{
+    "asset": "USDT",
+    "free": "1",
+    "locked": "0",
+    "freeze": "0",
+    "withdrawing": "0",
+    "btcValuation": "0.00000091"
+}]"""
 
 
 def assert_binance_balances_result(balances: dict[str, Any]) -> None:
@@ -512,21 +543,31 @@ def assert_poloniex_balances_result(balances: dict[str, Any]) -> None:
 def mock_binance_balance_response(url, **kwargs):  # pylint: disable=unused-argument
     if 'futures' in url:
         return MockResponse(200, BINANCE_FUTURES_WALLET_RESPONSE)
-    if 'lending' in url:
-        return MockResponse(200, BINANCE_LENDING_WALLET_RESPONSE)
     if 'https://fapi' in url:
         return MockResponse(200, BINANCE_USDT_FUTURES_BALANCES_RESPONSE)
     if 'https://dapi' in url:
         return MockResponse(200, BINANCE_COIN_FUTURES_BALANCES_RESPONSE)
     if 'bswap/liquidity' in url:
         return MockResponse(200, BINANCE_POOL_BALANCES_RESPONSE)
+    if 'simple-earn/flexible/position' in url:
+        if kwargs.get('params', {}).get('current') == 1:
+            return MockResponse(200, BINANCE_SIMPLE_EARN_FLEXIBLE_POSITION)
+        else:
+            return MockResponse(200, '{"rows":[], "total": 1}')
+    if 'simple-earn/locked/position' in url:
+        if kwargs.get('params', {}).get('current') == 1:
+            return MockResponse(200, BINANCE_SIMPLE_EARN_LOCKED_POSITION)
+        else:
+            return MockResponse(200, '{"rows":[], "total": 1}')
+    if 'asset/get-funding-asset' in url:
+        return MockResponse(200, BINANCE_FUNDING_WALLET_BALANCES_RESPONSE)
 
     # else
     return MockResponse(200, BINANCE_BALANCES_RESPONSE)
 
 
 def patch_binance_balances_query(binance: 'Binance'):
-    def mock_binance_asset_return(url, timeout, *args):  # pylint: disable=unused-argument
+    def mock_binance_asset_return(url, *args, **kwargs):  # pylint: disable=unused-argument
         if 'futures' in url:
             response = '{"crossCollaterals":[]}'
         elif 'lending' in url:
@@ -541,7 +582,7 @@ def patch_binance_balances_query(binance: 'Binance'):
             response = BINANCE_BALANCES_RESPONSE
         return MockResponse(200, response)
 
-    binance_patch = patch.object(binance.session, 'get', side_effect=mock_binance_asset_return)
+    binance_patch = patch.object(binance.session, 'request', side_effect=mock_binance_asset_return)
     return binance_patch
 
 
@@ -558,9 +599,10 @@ def patch_poloniex_balances_query(poloniex: 'Poloniex'):
 def create_test_coinbase(
         database: DBHandler,
         msg_aggregator: MessagesAggregator,
+        name: str = 'coinbase',
 ) -> Coinbase:
     mock = Coinbase(
-        name='coinbase',
+        name=name,
         api_key=make_api_key(),
         secret=make_api_secret(),
         database=database,
@@ -655,36 +697,6 @@ def create_test_bitstamp(
     )
 
 
-def create_test_bittrex(
-        database: DBHandler,
-        msg_aggregator: MessagesAggregator,
-) -> Bittrex:
-    bittrex = Bittrex(
-        name='bittrex',
-        api_key=make_api_key(),
-        secret=make_api_secret(),
-        database=database,
-        msg_aggregator=msg_aggregator,
-    )
-    return bittrex
-
-
-def create_test_coinbasepro(
-        database: DBHandler,
-        msg_aggregator: MessagesAggregator,
-        passphrase: str,
-) -> Coinbasepro:
-    coinbasepro = Coinbasepro(
-        name='coinbasepro',
-        api_key=make_api_key(),
-        secret=make_api_secret(),
-        database=database,
-        msg_aggregator=msg_aggregator,
-        passphrase=passphrase,
-    )
-    return coinbasepro
-
-
 # This function is dynamically used in rotkehlchen_api_server_with_exchanges
 def create_test_gemini(
         api_key,
@@ -709,6 +721,32 @@ def create_test_kraken(
 ) -> MockKraken:
     return MockKraken(
         name='mockkraken',
+        api_key=make_api_key(),
+        secret=make_api_secret(),
+        database=database,
+        msg_aggregator=msg_aggregator,
+    )
+
+
+def create_test_bybit(
+        database: DBHandler,
+        msg_aggregator: MessagesAggregator,
+) -> Bybit:
+    return Bybit(
+        name='bybit',
+        api_key=make_api_key(),
+        secret=make_api_secret(),
+        database=database,
+        msg_aggregator=msg_aggregator,
+    )
+
+
+def create_test_htx(
+        database: DBHandler,
+        msg_aggregator: MessagesAggregator,
+) -> Htx:
+    return Htx(
+        name='htx',
         api_key=make_api_key(),
         secret=make_api_secret(),
         database=database,
@@ -909,186 +947,6 @@ def check_saved_events_for_exchange(
         assert len(trades) == 0
 
 
-BUYS_RESPONSE = """{
-"pagination": {
-    "ending_before": null,
-    "starting_after": null,
-    "limit": 25,
-    "order": "desc",
-    "previous_uri": null,
-    "next_uri": null
-},
-"data": [{
-  "id": "9e14d574-30fa-5d85-b02c-6be0d851d61d",
-  "status": "completed",
-  "payment_method": {
-    "id": "83562370-3e5c-51db-87da-752af5ab9559",
-    "resource": "payment_method",
-    "resource_path": "/v2/payment-methods/83562370-3e5c-51db-87da-752af5ab9559"
-  },
-  "transaction": {
-    "id": "4117f7d6-5694-5b36-bc8f-847509850ea4",
-    "resource": "transaction",
-    "resource_path": "/v2/accounts/2bbf394c-193b-5b2a-9155-3b4732659ede/transactions/441b9494"
-  },
-  "amount": {
-    "amount": "486.34313725",
-    "currency": "BTC"
-  },
-  "total": {
-    "amount": "4863.43",
-    "currency": "USD"
-  },
-  "subtotal": {
-    "amount": "4862.42",
-    "currency": "USD"
-  },
-  "created_at": "2017-07-21T23:43:59-07:00",
-  "updated_at": "2017-07-21T23:43:59-07:00",
-  "resource": "buy",
-  "resource_path": "/v2/accounts/2bbf394c-193b-5b2a-9155-3b4732659ede/buys/9e14d574",
-  "committed": true,
-  "instant": false,
-  "fee": {
-    "amount": "1.01",
-    "currency": "USD"
-  },
-  "payout_at": "2017-07-23T23:44:08Z"
-}]}"""
-
-
-SELLS_RESPONSE = """{
-"pagination": {
-    "ending_before": null,
-    "starting_after": null,
-    "limit": 25,
-    "order": "desc",
-    "previous_uri": null,
-    "next_uri": null
-},
-"data": [{
-  "id": "1e14d574-30fa-5d85-b02c-6be0d851d61d",
-  "status": "completed",
-  "payment_method": {
-    "id": "23562370-3e5c-51db-87da-752af5ab9559",
-    "resource": "payment_method",
-    "resource_path": "/v2/payment-methods/83562370-3e5c-51db-87da-752af5ab9559"
-  },
-  "transaction": {
-    "id": "3117f7d6-5694-5b36-bc8f-847509850ea4",
-    "resource": "transaction",
-    "resource_path": "/v2/accounts/2bbf394c-193b-5b2a-9155-3b4732659ede/transactions/4117f7d6"
-  },
-  "amount": {
-    "amount": "100.45",
-    "currency": "ETH"
-  },
-  "total": {
-    "amount": "8940.12",
-    "currency": "USD"
-  },
-  "subtotal": {
-    "amount": "8930.02",
-    "currency": "USD"
-  },
-  "created_at": "2016-03-26T13:42:00-07:00",
-  "updated_at": "2016-03-26T13:42:00-07:00",
-  "resource": "sell",
-  "resource_path": "/v2/accounts/2bbf394c-193b-5b2a-9155-3b4732659ede/sells/9e14d574",
-  "committed": true,
-  "instant": true,
-  "fee": {
-    "amount": "10.1",
-    "currency": "USD"
-  },
-  "payout_at": "2016-04-01T23:43:59-07:00"
-}]}"""
-
-DEPOSITS_RESPONSE = """{
-"pagination": {
-    "ending_before": null,
-    "starting_after": null,
-    "limit": 25,
-    "order": "desc",
-    "previous_uri": null,
-    "next_uri": null
-},
-"data": [{
-      "id": "1130eaec-07d7-54c4-a72c-2e92826897df",
-      "status": "completed",
-      "payment_method": {
-        "id": "83562370-3e5c-51db-87da-752af5ab9559",
-        "resource": "payment_method",
-        "resource_path": "/v2/payment-methods/83562370-3e5c-51db-87da-752af5ab9559"
-      },
-      "transaction": {
-        "id": "441b9494-b3f0-5b98-b9b0-4d82c21c252a",
-        "resource": "transaction",
-        "resource_path": "/v2/accounts/2bbf394c-193b-5b2a-9155-3b4732659ede/transactions/441b9494"
-      },
-      "amount": {
-        "amount": "55.00",
-        "currency": "USD"
-      },
-      "subtotal": {
-        "amount": "54.95",
-        "currency": "USD"
-      },
-      "created_at": "2015-01-31T20:49:02Z",
-      "updated_at": "2015-02-11T16:54:02-08:00",
-      "resource": "deposit",
-      "resource_path": "/v2/accounts/2bbf394c-193b-5b2a-9155-3b4732659ede/deposits/67e0eaec",
-      "committed": true,
-      "fee": {
-        "amount": "0.05",
-        "currency": "USD"
-      },
-      "payout_at": "2018-02-18T16:54:00-08:00"
-}]}"""
-
-
-WITHDRAWALS_RESPONSE = """{
-"pagination": {
-    "ending_before": null,
-    "starting_after": null,
-    "limit": 25,
-    "order": "desc",
-    "previous_uri": null,
-    "next_uri": null
-},
-"data": [{
-      "id": "146eaec-07d7-54c4-a72c-2e92826897df",
-      "status": "completed",
-      "payment_method": {
-        "id": "85562970-3e5c-51db-87da-752af5ab9559",
-        "resource": "payment_method",
-        "resource_path": "/v2/payment-methods/83562370-3e5c-51db-87da-752af5ab9559"
-      },
-      "transaction": {
-        "id": "441b9454-b3f0-5b98-b9b0-4d82c21c252a",
-        "resource": "transaction",
-        "resource_path": "/v2/accounts/2bbf394c-193b-5b2a-9155-3b4732659ede/transactions/441b9494"
-      },
-      "amount": {
-        "amount": "10.00",
-        "currency": "USD"
-      },
-      "subtotal": {
-        "amount": "9.99",
-        "currency": "USD"
-      },
-      "created_at": "2017-01-31T20:49:02Z",
-      "updated_at": "2017-01-31T20:49:02Z",
-      "resource": "withdrawal",
-      "resource_path": "/v2/accounts/2bbf394c-193b-5b2a-9155-3b4732659ede/withdrawals/67e0eaec",
-      "committed": true,
-      "fee": {
-        "amount": "0.01",
-        "currency": "USD"
-      },
-      "payout_at": null
-}]}"""
-
 TRANSACTIONS_RESPONSE = """{
 "pagination": {
     "ending_before": null,
@@ -1259,25 +1117,67 @@ TRANSACTIONS_RESPONSE = """{
     "health": "positive"
   },
   "hide_native_amount": false
-}]}"""
+},{
+"amount": {"amount": "0.05772716", "currency": "ETH"},
+ "buy": {"id": "testid-1", "resource": "buy", "resource_path": "/v2/accounts/accountid-1/buys/testid-1"},
+ "created_at": "2019-08-24T23:01:35Z",
+ "description": null,
+ "details": {"header": "Bought 0.05772716 ETH (€10.99)", "health": "positive", "payment_method_name": "1234********7890", "subtitle": "Using 1234********7890", "title": "Bought Ethereum"},
+ "hide_native_amount": false,
+ "id": "txid-1",
+ "instant_exchange": false,
+ "native_amount": {"amount": "10.99", "currency": "EUR"},
+ "resource": "transaction",
+ "resource_path": "/v2/accounts/accountid-1/transactions/txid-1",
+ "status": "completed",
+ "type": "buy",
+ "updated_at": "2021-11-08T01:18:26Z"
+},{
+"amount": {"amount": "0.05772715", "currency": "ETH"},
+ "buy": {"id": "testid-2", "resource": "buy", "resource_path": "/v2/accounts/accountid-1/sells/testid-2"},
+ "created_at": "2019-09-24T23:01:35Z",
+ "description": null,
+ "details": {"header": "Sold 0.05772715 ETH (€10.98)", "health": "positive", "payment_method_name": "1234********7890", "subtitle": "Using 1234********7890", "title": "Sold Ethereum"},
+ "hide_native_amount": false,
+ "id": "txid-2",
+ "instant_exchange": false,
+ "native_amount": {"amount": "10.98", "currency": "EUR"},
+ "resource": "transaction",
+ "resource_path": "/v2/accounts/accountid-1/transactions/txid-2",
+ "status": "completed",
+ "type": "sell",
+ "updated_at": "2021-12-08T01:18:26Z"
+},{
+ "amount": {"amount": "0.025412", "currency": "SOL"},
+ "created_at": "2021-01-24T18:23:53Z",
+ "updated_at": "2021-01-24T18:23:53Z",
+ "id": "id6",
+ "native_amount": {"amount": "0.31", "currency": "EUR"},
+ "resource": "transaction",
+ "resource_path": "/v2/accounts/accountid-1/transactions/id6",
+ "status": "completed",
+ "type": "staking_reward"
+}]}"""  # noqa: E501
 
 
 def mock_normal_coinbase_query(url, **kwargs):  # pylint: disable=unused-argument
-    if 'buys' in url:
-        return MockResponse(200, BUYS_RESPONSE)
-    if 'sells' in url:
-        return MockResponse(200, SELLS_RESPONSE)
-    if 'deposits' in url:
-        return MockResponse(200, DEPOSITS_RESPONSE)
-    if 'withdrawals' in url:
-        return MockResponse(200, WITHDRAWALS_RESPONSE)
     if 'transactions' in url:
         return MockResponse(200, TRANSACTIONS_RESPONSE)
     if 'accounts' in url:
         # keep it simple just return a single ID and ignore the rest of the fields
-        return MockResponse(200, '{"data": [{"id": "5fs23"}]}')
+        return MockResponse(200, '{"data": [{"id": "5fs23", "updated_at": "2020-06-08T02:32:16Z"}]}')  # noqa: E501
     # else
     raise AssertionError(f'Unexpected url {url} for test')
+
+
+def get_exchange_asset_symbols(exchange: Location) -> set[str]:
+    """Queries and returns all the asset symbols for a given exchange from the globalDB."""
+    with GlobalDBHandler().conn.read_ctx() as cursor:
+        cursor.execute(
+            'SELECT exchange_symbol FROM location_asset_mappings WHERE location IS ? OR location IS NULL;',  # noqa: E501
+            (exchange.serialize_for_db(),),
+        )
+        return {asset[0] for asset in cursor}
 
 
 def kraken_to_world_pair(pair: str) -> tuple[AssetWithOracles, AssetWithOracles]:
@@ -1289,6 +1189,8 @@ def kraken_to_world_pair(pair: str) -> tuple[AssetWithOracles, AssetWithOracles]
         - UnprocessableTradePair if the pair can't be processed and
           split into its base/quote assets
     """
+    kraken_assets = get_exchange_asset_symbols(Location.KRAKEN)
+
     # handle dark pool pairs
     if pair[-2:] == '.d':
         pair = pair[:-2]
@@ -1301,19 +1203,19 @@ def kraken_to_world_pair(pair: str) -> tuple[AssetWithOracles, AssetWithOracles]
         return A_ETH.resolve_to_asset_with_oracles(), A_DAI.resolve_to_asset_with_oracles()
     elif pair == 'ETH2.SETH':
         return A_ETH2.resolve_to_asset_with_oracles(), A_ETH.resolve_to_asset_with_oracles()
-    elif pair[0:2] in KRAKEN_TO_WORLD:
+    elif pair[0:2] in kraken_assets:
         base_asset_str = pair[0:2]
         quote_asset_str = pair[2:]
-    elif pair[0:3] in KRAKEN_TO_WORLD or pair[0:3] in {'XBT', 'ETH', 'XDG', 'LTC', 'XRP'}:
+    elif pair[0:3] in kraken_assets or pair[0:3] in {'XBT', 'ETH', 'XDG', 'LTC', 'XRP'}:
         base_asset_str = pair[0:3]
         quote_asset_str = pair[3:]
-    elif pair[0:4] in KRAKEN_TO_WORLD:
+    elif pair[0:4] in kraken_assets:
         base_asset_str = pair[0:4]
         quote_asset_str = pair[4:]
-    elif pair[0:5] in KRAKEN_TO_WORLD:
+    elif pair[0:5] in kraken_assets:
         base_asset_str = pair[0:5]
         quote_asset_str = pair[5:]
-    elif pair[0:6] in KRAKEN_TO_WORLD:
+    elif pair[0:6] in kraken_assets:
         base_asset_str = pair[0:6]
         quote_asset_str = pair[6:]
     else:
@@ -1322,84 +1224,3 @@ def kraken_to_world_pair(pair: str) -> tuple[AssetWithOracles, AssetWithOracles]
     base_asset = asset_from_kraken(base_asset_str)
     quote_asset = asset_from_kraken(quote_asset_str)
     return base_asset, quote_asset
-
-
-def mock_api_query_for_binance_lending(
-        api_type,  # pylint: disable=unused-argument
-        method,
-        options,
-        test_vars,
-):
-    """This function mocks `api_query` method of the binance exchange.
-
-    For method 'lending/union/interestHistory', it checks that pagination is
-    respected i.e. if a range has been queried before, `current` must always be > 1,
-    otherwise `current` must be == 1.
-    """
-    if 'lending/union/interestHistory' in method:
-        if (options['startTime'], options['endTime'], options['lendingType']) not in test_vars['ranges_queried']:  # noqa: E501
-            assert options['current'] == 1
-        else:
-            assert options['current'] > 1
-
-        test_vars['ranges_queried'].add(
-            (options['startTime'], options['endTime'], options['lendingType']),
-        )
-
-        if options['lendingType'] == 'DAILY':
-            if test_vars['interest_daily_call_count'] >= 1:
-                if options['current'] == 2:
-                    test_vars['interest_daily_call_count'] += 1
-                    return [
-                        {
-                            'asset': 'BUSD',
-                            'interest': '0.00006408',
-                            'lendingType': 'DAILY',
-                            'productName': 'BUSD',
-                            'time': 1577233578100,
-                        },
-                    ]
-                return []
-
-            test_vars['interest_daily_call_count'] += 1
-            return [
-                {
-                    'asset': 'BUSD',
-                    'interest': '0.00006408',
-                    'lendingType': 'DAILY',
-                    'productName': 'BUSD',
-                    'time': 1577233578000,
-                },
-            ]
-        elif options['lendingType'] == 'CUSTOMIZED_FIXED':
-            if test_vars['interest_customized_fixed_call_count'] >= 1:
-                return []
-
-            test_vars['interest_customized_fixed_call_count'] += 1
-            return [
-                {
-                    'asset': 'USDT',
-                    'interest': '0.00687654',
-                    'lendingType': 'CUSTOMIZED_FIXED',
-                    'productName': 'USDT',
-                    'time': 1577233562000,
-                },
-            ]
-        elif options['lendingType'] == 'ACTIVITY':
-            if test_vars['interest_activity_call_count'] >= 1:
-                return []
-
-            test_vars['interest_activity_call_count'] += 1
-            return [
-                {
-                    'asset': 'DAI',
-                    'interest': '0.00987654',
-                    'lendingType': 'ACTIVITY',
-                    'productName': 'USDT',
-                    'time': 1587233562000,
-                },
-            ]
-        else:
-            raise AssertionError(f'Unknown lendingType of {options["lendingType"]}')
-    else:
-        raise AssertionError('Unexpected url.')

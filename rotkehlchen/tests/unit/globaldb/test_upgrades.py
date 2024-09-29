@@ -3,14 +3,17 @@ import shutil
 from contextlib import ExitStack
 from pathlib import Path
 from sqlite3 import IntegrityError
+from typing import Final
 
 import pytest
 from eth_utils.address import to_checksum_address
 from freezegun import freeze_time
 
 from rotkehlchen.assets.types import AssetType
+from rotkehlchen.chain.ethereum.utils import should_update_protocol_cache
 from rotkehlchen.constants.misc import GLOBALDB_NAME, GLOBALDIR_NAME
 from rotkehlchen.db.drivers.gevent import DBConnection, DBConnectionType
+from rotkehlchen.db.utils import table_exists
 from rotkehlchen.errors.misc import DBUpgradeError
 from rotkehlchen.globaldb.cache import (
     globaldb_get_general_cache_keys_and_values_like,
@@ -18,6 +21,11 @@ from rotkehlchen.globaldb.cache import (
     globaldb_get_unique_cache_value,
 )
 from rotkehlchen.globaldb.handler import GlobalDBHandler
+from rotkehlchen.globaldb.schema import (
+    DB_CREATE_ASSET_COLLECTIONS,
+    DB_CREATE_LOCATION_ASSET_MAPPINGS,
+    DB_CREATE_LOCATION_UNSUPPORTED_ASSETS,
+)
 from rotkehlchen.globaldb.upgrades.manager import maybe_upgrade_globaldb
 from rotkehlchen.globaldb.upgrades.v2_v3 import OTHER_EVM_CHAINS_ASSETS
 from rotkehlchen.globaldb.upgrades.v3_v4 import (
@@ -33,12 +41,20 @@ from rotkehlchen.globaldb.upgrades.v5_v6 import V5_V6_UPGRADE_UNIQUE_CACHE_KEYS
 from rotkehlchen.globaldb.utils import GLOBAL_DB_VERSION
 from rotkehlchen.tests.fixtures.globaldb import create_globaldb
 from rotkehlchen.tests.utils.globaldb import patch_for_globaldb_upgrade_to
-from rotkehlchen.types import YEARN_VAULTS_V1_PROTOCOL, CacheType, ChainID, EvmTokenKind, Timestamp
+from rotkehlchen.types import (
+    ANY_BLOCKCHAIN_ADDRESSBOOK_VALUE,
+    YEARN_VAULTS_V1_PROTOCOL,
+    CacheType,
+    ChainID,
+    EvmTokenKind,
+    Location,
+    Timestamp,
+)
 from rotkehlchen.utils.misc import ts_now
 
 # TODO: Perhaps have a saved version of that global DB for the tests and query it too?
-ASSETS_IN_V2_GLOBALDB = 3095
-YEARN_V1_ASSETS_IN_V3 = 32
+ASSETS_IN_V2_GLOBALDB: Final = 3095
+YEARN_V1_ASSETS_IN_V3: Final = 32
 
 
 def _count_sql_file_sentences(file_name: str, skip_statements: int = 0):
@@ -185,7 +201,7 @@ def test_upgrade_v2_v3(globaldb: GlobalDBHandler):
             ('BIFI', 'BIFI'),
         )
         assert cursor.fetchone()[0] == 0
-        assert GlobalDBHandler().get_schema_version() == 3
+        assert GlobalDBHandler.get_schema_version() == 3
 
 
 @pytest.mark.parametrize('globaldb_upgrades', [[]])
@@ -280,7 +296,7 @@ def test_upgrade_v3_v4(globaldb: GlobalDBHandler):
         assert cursor.fetchone()[0] == _count_sql_file_sentences('populate_asset_collections.sql')
         cursor.execute('SELECT COUNT(*) FROM multiasset_mappings')
         assert cursor.fetchone()[0] == _count_sql_file_sentences('populate_multiasset_mappings.sql')  # noqa: E501
-        assert GlobalDBHandler().get_schema_version() == 4
+        assert GlobalDBHandler.get_schema_version() == 4
 
         # test that the blockchain column is nullable
         cursor.execute('INSERT INTO address_book(address, blockchain, name) VALUES ("0xc37b40ABdB939635068d3c5f13E7faF686F03B65", NULL, "yabir everywhere")')  # noqa: E501
@@ -355,15 +371,14 @@ def test_upgrade_v4_v5(globaldb: GlobalDBHandler):
 
         # check that we have five nodes for each chain
         nodes_file_path = Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'nodes.json'  # noqa: E501
-        with open(nodes_file_path, encoding='utf8') as f:
-            nodes_info = json.loads(f.read())
-            nodes_tuples_from_file = [
-                (idx, node['name'], node['endpoint'], int(False), int(True), str(node['weight']), node['blockchain'])  # noqa: E501
-                for idx, node in enumerate(nodes_info, start=1)
-            ]
+        nodes_info = json.loads(nodes_file_path.read_text(encoding='utf8'))
+        nodes_tuples_from_file = [
+            (idx, node['name'], node['endpoint'], int(False), int(True), str(node['weight']), node['blockchain'])  # noqa: E501
+            for idx, node in enumerate(nodes_info, start=1)
+        ]
 
-            nodes_tuples_from_db = cursor.execute('SELECT * FROM default_rpc_nodes').fetchall()
-            assert nodes_tuples_from_db == nodes_tuples_from_file
+        nodes_tuples_from_db = cursor.execute('SELECT * FROM default_rpc_nodes').fetchall()
+        assert nodes_tuples_from_db == nodes_tuples_from_file
 
         last_queried_ts = globaldb_get_general_cache_last_queried_ts_by_key(
             cursor=cursor,
@@ -507,6 +522,310 @@ def test_upgrade_v5_v6(globaldb: GlobalDBHandler):
         ).fetchone()[0] == 0
 
 
+@pytest.mark.parametrize('globaldb_upgrades', [[]])
+@pytest.mark.parametrize('custom_globaldb', ['v6_global.db'])
+@pytest.mark.parametrize('target_globaldb_version', [6])
+@pytest.mark.parametrize('reload_user_assets', [False])
+def test_upgrade_v6_v7(globaldb: GlobalDBHandler):
+    """Test the global DB upgrade from v6 to v7"""
+    # Check the state before upgrading
+    with globaldb.conn.read_ctx() as cursor:
+        # check that location_asset_mappings table is not present in the database
+        assert table_exists(
+            cursor=cursor,
+            name='location_asset_mappings',
+        ) is False
+        # check that location_unsupported_assets table is not present in the database
+        assert table_exists(
+            cursor=cursor,
+            name='location_unsupported_assets',
+        ) is False
+
+    # execute upgrade
+    with ExitStack() as stack:
+        patch_for_globaldb_upgrade_to(stack, 7)
+        maybe_upgrade_globaldb(
+            connection=globaldb.conn,
+            global_dir=globaldb._data_directory / GLOBALDIR_NAME,  # type: ignore
+            db_filename=GLOBALDB_NAME,
+        )
+    assert globaldb.get_setting_value('version', 0) == 7
+    with globaldb.conn.read_ctx() as cursor:
+        # check that location_asset_mappings table is present in the database
+        assert table_exists(
+            cursor=cursor,
+            name='location_asset_mappings',
+            schema=DB_CREATE_LOCATION_ASSET_MAPPINGS,
+        ) is True
+
+        # check that location_unsupported_assets table is present in the database
+        assert table_exists(
+            cursor=cursor,
+            name='location_unsupported_assets',
+            schema=DB_CREATE_LOCATION_UNSUPPORTED_ASSETS,
+        ) is True
+
+        # check that correct number of exchanges mappings are present.
+        # exact values can be tested by pasting this gist here and running it
+        # https://gist.github.com/OjusWiZard/0a9544ac4e985be08736cc3296e3e0d3
+        for exchange, expected_mappings_count in (
+            (None, 33),
+            (Location.KRAKEN.serialize_for_db(), 228),
+            (Location.POLONIEX.serialize_for_db(), 147),
+            (Location.BITTREX.serialize_for_db(), 121),
+            (Location.BINANCE.serialize_for_db(), 135),
+            (Location.COINBASE.serialize_for_db(), 78),
+            (Location.COINBASEPRO.serialize_for_db(), 82),
+            (Location.GEMINI.serialize_for_db(), 26),
+            (Location.CRYPTOCOM.serialize_for_db(), 0),
+            (Location.BITSTAMP.serialize_for_db(), 16),
+            (Location.BITFINEX.serialize_for_db(), 60),
+            (Location.ICONOMI.serialize_for_db(), 36),
+            (Location.KUCOIN.serialize_for_db(), 233),
+            (Location.FTX.serialize_for_db(), 45),
+            (Location.NEXO.serialize_for_db(), 2),
+            (Location.BLOCKFI.serialize_for_db(), 5),
+            (Location.UPHOLD.serialize_for_db(), 37),
+            (Location.BITPANDA.serialize_for_db(), 41),
+            (Location.OKX.serialize_for_db(), 65),
+            (Location.WOO.serialize_for_db(), 32),
+            (Location.BYBIT.serialize_for_db(), 78),
+        ):
+            assert cursor.execute(
+                'SELECT COUNT(*) FROM location_asset_mappings WHERE location IS ?', (exchange,),
+            ).fetchone()[0] == expected_mappings_count
+
+        # check that correct number of unsupported assets are present.
+        # exact values can be tested by pasting this gist here and running it
+        # https://gist.github.com/OjusWiZard/0a9544ac4e985be08736cc3296e3e0d3
+        for location, expected_mappings_count in (
+            (Location.BINANCE.serialize_for_db(), 22),
+            (Location.BITFINEX.serialize_for_db(), 10),
+            (Location.BITTREX.serialize_for_db(), 125),
+            (Location.FTX.serialize_for_db(), 65),
+            (Location.GEMINI.serialize_for_db(), 10),
+            (Location.ICONOMI.serialize_for_db(), 4),
+            (Location.KUCOIN.serialize_for_db(), 234),
+            (Location.OKX.serialize_for_db(), 7),
+            (Location.POLONIEX.serialize_for_db(), 133),
+        ):
+            assert cursor.execute(
+                'SELECT COUNT(*) FROM location_unsupported_assets WHERE location = ?', (location,),
+            ).fetchone()[0] == expected_mappings_count
+
+
+@pytest.mark.parametrize('globaldb_upgrades', [[]])
+@pytest.mark.parametrize('custom_globaldb', ['v7_global.db'])
+@pytest.mark.parametrize('target_globaldb_version', [7])
+@pytest.mark.parametrize('reload_user_assets', [False])
+def test_upgrade_v7_v8(globaldb: GlobalDBHandler):
+    """Test the global DB upgrade from v7 to v8"""
+    # Check the state before upgrading
+    with globaldb.conn.read_ctx() as cursor:
+        assert cursor.execute(
+            'SELECT protocol from evm_tokens where identifier=?',
+            ('eip155:1/erc20:0xA0b73E1Ff0B80914AB6fe0444E65848C4C34450b',),
+        ).fetchone()[0] == 'spam'
+        assert cursor.execute(
+            'SELECT COUNT(*) from general_cache where key=? AND value=?',
+            ('SPAM_ASSET_FALSE_POSITIVE', 'eip155:1/erc20:0xA0b73E1Ff0B80914AB6fe0444E65848C4C34450b'),  # noqa: E501
+        ).fetchone()[0] == 0
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM contract_data WHERE address=?',
+            ('0xAB392016859663Ce1267f8f243f9F2C02d93bad8',),
+        ).fetchone()[0] == 1
+
+        # check that asset asset_collections table have duplicated entries
+        unique_entries = {}
+        duplicated_entries = set()
+        for collection_id, name, symbol in cursor.execute('SELECT id, name, symbol FROM asset_collections;'):  # noqa: E501
+            if (name, symbol) not in unique_entries:
+                unique_entries[name, symbol] = collection_id
+            else:
+                duplicated_entries.add((collection_id, name, symbol))
+
+        v7_multiasset_mappings = cursor.execute(
+            'SELECT rowid, collection_id, asset FROM multiasset_mappings;',
+        ).fetchall()
+
+        cached_lp_tokens = set(cursor.execute('SELECT value FROM general_cache WHERE key LIKE "CURVE_LP_TOKENS%"').fetchall())  # noqa: E501
+        cached_pool_tokens = set(cursor.execute('SELECT value FROM general_cache WHERE key LIKE "CURVE_POOL_TOKENS%"').fetchall())  # noqa: E501
+        cached_underlying_tokens = set(cursor.execute('SELECT value FROM general_cache WHERE key LIKE "CURVE_POOL_UNDERLYING_TOKENS%"').fetchall())  # noqa: E501
+        cached_gauges = set(cursor.execute('SELECT value FROM unique_cache WHERE key LIKE "CURVE_GAUGE_ADDRESS%"').fetchall())  # noqa: E501
+        cached_pools = set(cursor.execute('SELECT value FROM unique_cache WHERE key LIKE "CURVE_POOL_ADDRESS%"').fetchall())  # noqa: E501
+
+        assert len(cached_lp_tokens) == 973
+        assert len(cached_pool_tokens) == 555
+        assert len(cached_underlying_tokens) == 202
+        assert len(cached_gauges) == 536
+        assert len(cached_pools) == 973
+
+        # cache with new keys doesn't exist yet
+        assert cursor.execute('SELECT COUNT(*) FROM general_cache WHERE key LIKE "CURVE_LP_TOKENS1%"').fetchone()[0] == 0  # noqa: E501
+        assert cursor.execute('SELECT COUNT(*) FROM general_cache WHERE key LIKE "CURVE_POOL_TOKENS1%"').fetchone()[0] == 0  # noqa: E501
+        assert cursor.execute('SELECT COUNT(*) FROM unique_cache WHERE key LIKE "CURVE_GAUGE_ADDRESS1%"').fetchone()[0] == 0  # noqa: E501
+        assert cursor.execute('SELECT COUNT(*) FROM unique_cache WHERE key LIKE "CURVE_POOL_ADDRESS1%"').fetchone()[0] == 0  # noqa: E501
+
+        # before update, the cache is not eligible to refresh, because last_queried_ts is ts_now()
+        cursor.execute('UPDATE general_cache SET last_queried_ts=? WHERE key LIKE ?', (ts_now(), 'CURVE_LP_TOKENS%'))  # noqa: E501
+        assert should_update_protocol_cache(CacheType.CURVE_LP_TOKENS) is False
+
+    assert unique_entries['Wormhole Token', 'W'] == 263
+    assert unique_entries['TokenFi', 'TOKEN'] == 264
+    assert unique_entries['HTX', 'HTX'] == 265
+    assert unique_entries['Kyber Network Crystal v2', 'KNC'] == 301
+    assert unique_entries['PancakeSwap Token', 'CAKE'] == 302
+    assert (262, 'Starknet', 'STRK') in duplicated_entries
+    assert (303, 'Starknet', 'STRK') in duplicated_entries
+    assert (304, 'Wormhole Token', 'W') in duplicated_entries
+    assert (305, 'TokenFi', 'TOKEN') in duplicated_entries
+    assert (306, 'HTX', 'HTX') in duplicated_entries
+
+    # execute upgrade
+    with ExitStack() as stack:
+        patch_for_globaldb_upgrade_to(stack, 8)
+        maybe_upgrade_globaldb(
+            connection=globaldb.conn,
+            global_dir=globaldb._data_directory / GLOBALDIR_NAME,  # type: ignore
+            db_filename=GLOBALDB_NAME,
+        )
+    assert globaldb.get_setting_value('version', 0) == 8
+
+    with globaldb.conn.read_ctx() as cursor:
+        assert cursor.execute(
+            'SELECT protocol from evm_tokens where identifier=?',
+            ('eip155:1/erc20:0xA0b73E1Ff0B80914AB6fe0444E65848C4C34450b',),
+        ).fetchone()[0] is None
+        assert cursor.execute(
+            'SELECT COUNT(*) from general_cache where key=? AND value=?',
+            ('SPAM_ASSET_FALSE_POSITIVE', 'eip155:1/erc20:0xA0b73E1Ff0B80914AB6fe0444E65848C4C34450b'),  # noqa: E501
+        ).fetchone()[0] == 1
+
+        # check that asset_collections have unique entries now with correctly mapped ids
+        assert table_exists(
+            cursor=cursor,
+            name='asset_collections',
+            schema=DB_CREATE_ASSET_COLLECTIONS,
+        ) is True
+
+        for collection_id, name, symbol in (
+            (260, 'Moon App', 'APP'),
+            (261, 'Starknet', 'STRK'),
+            (262, 'Wormhole Token', 'W'),
+            (263, 'TokenFi', 'TOKEN'),
+            (264, 'HTX', 'HTX'),
+            (300, 'Kyber Network Crystal v2', 'KNC'),
+            (301, 'PancakeSwap Token', 'CAKE'),
+        ):
+            assert cursor.execute(
+                'SELECT COUNT(*) FROM asset_collections WHERE id=? AND name=? AND symbol=?',
+                (collection_id, name, symbol),
+            ).fetchone()[0] == 1
+
+        # and multiasset_mappings are exactly same
+        assert v7_multiasset_mappings == cursor.execute(
+            'SELECT rowid, collection_id, asset FROM multiasset_mappings;',
+        ).fetchall()
+
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM contract_data WHERE address=?',
+            ('0xAB392016859663Ce1267f8f243f9F2C02d93bad8',),
+        ).fetchone()[0] == 0
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM contract_data WHERE address=?',
+            ('0xc97EE9490F4e3A3136A513DB38E3C7b47e69303B',),
+        ).fetchone()[0] == 1
+
+        # previous keys were deleted
+        assert cursor.execute('SELECT COUNT(*) FROM general_cache WHERE key LIKE "CURVE_LP_TOKENS0x%"').fetchone()[0] == 0  # noqa: E501
+        assert cursor.execute('SELECT COUNT(*) FROM general_cache WHERE key LIKE "CURVE_POOL_TOKENS0x%"').fetchone()[0] == 0  # noqa: E501
+        assert cursor.execute('SELECT COUNT(*) FROM unique_cache WHERE key LIKE "CURVE_GAUGE_ADDRESS0x%"').fetchone()[0] == 0  # noqa: E501
+        assert cursor.execute('SELECT COUNT(*) FROM unique_cache WHERE key LIKE "CURVE_POOL_ADDRESS0x%"').fetchone()[0] == 0  # noqa: E501
+
+        # values are same as in v7 with key containing the chain id
+        assert set(cursor.execute('SELECT value FROM general_cache WHERE key LIKE "CURVE_LP_TOKENS1%"').fetchall()) == cached_lp_tokens  # noqa: E501
+        assert set(cursor.execute('SELECT value FROM general_cache WHERE key LIKE "CURVE_POOL_TOKENS1%"').fetchall()) == cached_pool_tokens  # noqa: E501
+        assert set(cursor.execute('SELECT value FROM unique_cache WHERE key LIKE "CURVE_GAUGE_ADDRESS1%"').fetchall()) == cached_gauges  # noqa: E501
+        assert set(cursor.execute('SELECT value FROM unique_cache WHERE key LIKE "CURVE_POOL_ADDRESS1%"').fetchall()) == cached_pools  # noqa: E501
+
+        # CURVE_POOL_UNDERLYING_TOKENS should be deleted
+        assert cursor.execute('SELECT COUNT(*) FROM general_cache WHERE key LIKE "CURVE_POOL_UNDERLYING_TOKENS%"').fetchone()[0] == 0  # noqa: E501
+
+        # ensure that now curve cache should be eligible to update
+        assert should_update_protocol_cache(CacheType.CURVE_LP_TOKENS, '1') is True
+
+    with (
+        pytest.raises(IntegrityError),
+        globaldb.conn.write_ctx() as write_cursor,
+    ):
+        write_cursor.execute(
+            'INSERT INTO contract_abi(id, value, name) SELECT 100, value, "yabir" FROM contract_abi WHERE id=1',  # noqa: E501
+        )  # test that raises unique error when trying to copy an existing abi
+
+
+@pytest.mark.parametrize('custom_globaldb', ['v8_global.db'])
+@pytest.mark.parametrize('target_globaldb_version', [8])
+@pytest.mark.parametrize('reload_user_assets', [False])
+def test_upgrade_v8_v9(globaldb: GlobalDBHandler):
+    """We use version 8 of the globaldb at 1.34.3 and we set the
+    target_globaldb_version to version 8 to avoid an automatic update of the globaldb
+    and insert some data in it before updating to v9.
+    """
+    bad_address, tether_address = '0xc37b40ABdB939635068d3c5f13E7faF686F03B65', '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'  # noqa: E501
+    inserted_rows = [
+        (bad_address, 'yabir.eth', None),
+        (bad_address, 'yabirgb.eth', None),
+        (tether_address, 'Black Tether', None),
+    ]
+    with globaldb.conn.write_ctx() as write_cursor:
+        write_cursor.executemany(
+            'INSERT INTO address_book (address, name, blockchain) VALUES (?, ?, ?)',
+            inserted_rows,
+        )
+        write_cursor.execute(
+            'INSERT OR REPLACE INTO general_cache ("key", "value", "last_queried_ts") '
+            'VALUES (?, ?, ?);',
+            ('CURVE_LP_TOKENS1', '0xEd4064f376cB8d68F770FB1Ff088a3d0F3FF5c4d', 0),
+        )  # entry to ensure that cache with wrong entries gets cleared correctly
+
+    with ExitStack() as stack:
+        patch_for_globaldb_upgrade_to(stack, 9)
+        maybe_upgrade_globaldb(
+            connection=globaldb.conn,
+            global_dir=globaldb._data_directory / GLOBALDIR_NAME,  # type: ignore
+            db_filename=GLOBALDB_NAME,
+        )
+
+    assert globaldb.get_setting_value('version', 0) == 9
+    with globaldb.conn.read_ctx() as cursor:
+        assert table_exists(
+            cursor=cursor,
+            name='address_book',
+            schema="""
+            CREATE TABLE IF NOT EXISTS address_book (
+                address TEXT NOT NULL,
+                blockchain TEXT NOT NULL,
+                name TEXT NOT NULL,
+                PRIMARY KEY(address, blockchain)
+            );
+            """,
+        )
+        assert cursor.execute(
+            'SELECT * FROM address_book WHERE address IN (?, ?)',
+            (bad_address, tether_address),
+        ).fetchall() == [
+            (tether_address, ANY_BLOCKCHAIN_ADDRESSBOOK_VALUE, 'Black Tether'),
+            (bad_address, ANY_BLOCKCHAIN_ADDRESSBOOK_VALUE, 'yabirgb.eth'),
+        ]
+        assert len(cursor.execute(
+            "SELECT * FROM price_history_source_types WHERE type IN ('G', 'H') AND seq IN (7, 8);",
+        ).fetchall()) == 2
+        assert cursor.execute(
+            'SELECT last_queried_ts FROM general_cache WHERE key LIKE "CURVE_LP_TOKENS%" '
+            'ORDER BY last_queried_ts ASC LIMIT 2',
+        ).fetchall() == [(1718795451,), (1718795451,)]
+
+
 @pytest.mark.parametrize('custom_globaldb', ['v2_global.db'])
 @pytest.mark.parametrize('target_globaldb_version', [2])
 @pytest.mark.parametrize('reload_user_assets', [False])
@@ -520,6 +839,8 @@ def test_unfinished_upgrades(globaldb: GlobalDBHandler):
     with pytest.raises(DBUpgradeError):
         create_globaldb(globaldb._data_directory, 0)
 
+    globaldb.conn.execute('PRAGMA wal_checkpoint;')  # flush the wal file
+
     # Add a backup
     backup_path = globaldb._data_directory / GLOBALDIR_NAME / f'{ts_now()}_global_db_v2.backup'  # type: ignore  # _data_directory is definitely not null here
     shutil.copy(Path(__file__).parent.parent.parent / 'data' / 'v2_global.db', backup_path)
@@ -530,6 +851,7 @@ def test_unfinished_upgrades(globaldb: GlobalDBHandler):
     )
     with backup_connection.write_ctx() as write_cursor:
         write_cursor.execute('INSERT INTO settings VALUES("is_backup", "Yes")')  # mark as a backup  # noqa: E501
+    backup_connection.close()
 
     globaldb = create_globaldb(globaldb._data_directory, 0)  # Now the backup should be used
     assert globaldb.used_backup is True
@@ -537,6 +859,7 @@ def test_unfinished_upgrades(globaldb: GlobalDBHandler):
     assert globaldb.get_setting_value('ongoing_upgrade_from_version', -1) == -1
     with globaldb.conn.read_ctx() as cursor:
         assert cursor.execute('SELECT value FROM settings WHERE name="is_backup"').fetchone()[0] == 'Yes'  # noqa: E501
+    globaldb.cleanup()
 
 
 @pytest.mark.parametrize('globaldb_upgrades', [[]])

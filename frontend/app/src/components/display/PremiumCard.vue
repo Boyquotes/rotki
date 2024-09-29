@@ -3,11 +3,11 @@ defineProps<{ title: string }>();
 </script>
 
 <template>
-  <VCard>
-    <VCardTitle>
+  <RuiCard no-padding>
+    <CardTitle class="p-4">
       {{ title }}
-      <VSpacer />
+      <div class="grow" />
       <PremiumLock />
-    </VCardTitle>
-  </VCard>
+    </CardTitle>
+  </RuiCard>
 </template>

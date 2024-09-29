@@ -10,10 +10,11 @@ from rotkehlchen.constants import ONE
 from rotkehlchen.constants.assets import A_1INCH, A_BTC, A_DOGE, A_ETH, A_LINK, A_USDC, A_WETH
 from rotkehlchen.constants.prices import ZERO_PRICE
 from rotkehlchen.errors.defi import DefiPoolError
-from rotkehlchen.errors.price import PriceQueryUnsupportedAsset
+from rotkehlchen.errors.price import NoPriceForGivenTimestamp, PriceQueryUnsupportedAsset
 from rotkehlchen.fval import FVal
 from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.inquirer import CurrentPriceOracle
+from rotkehlchen.tests.utils.ethereum import INFURA_ETH_NODE
 from rotkehlchen.tests.utils.mock import MockResponse
 from rotkehlchen.types import ChainID, EvmTokenKind, Price
 
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
     from rotkehlchen.inquirer import Inquirer
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
 @pytest.mark.parametrize('should_mock_current_price_queries', [False])
 def test_uniswap_oracles_asset_to_asset(inquirer_defi, socket_enabled):  # pylint: disable=unused-argument
@@ -50,6 +52,49 @@ def test_uniswap_oracles_asset_to_asset(inquirer_defi, socket_enabled):  # pylin
         assert price_as_assets.is_close(price, max_diff='0.01')
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('use_clean_caching_directory', [True])
+@pytest.mark.parametrize('should_mock_current_price_queries', [False])
+@pytest.mark.parametrize('ethereum_manager_connect_at_start', [(INFURA_ETH_NODE,)])
+def test_uniswap_oracles_historic_price(inquirer_defi, socket_enabled):  # pylint: disable=unused-argument
+    """Test that the uniswap oracles return correct historical prices."""
+    inquirer_defi.set_oracles_order(oracles=[CurrentPriceOracle.UNISWAPV3])
+    assert inquirer_defi._uniswapv3.query_historical_price(
+        from_asset=A_1INCH,
+        to_asset=A_LINK,
+        timestamp=1653454800,
+    ) == Price(FVal('0.139152791117568194371010708385710558327124437415165328415539849552333178019986'))  # noqa: E501
+
+    with pytest.raises(NoPriceForGivenTimestamp):
+        inquirer_defi._uniswapv3.query_historical_price(
+            from_asset=A_WETH,
+            to_asset=A_USDC,
+            timestamp=1601557200,  # before V3 contract was created
+        )
+
+    inquirer_defi.set_oracles_order(oracles=[CurrentPriceOracle.UNISWAPV2])
+    assert inquirer_defi._uniswapv2.query_historical_price(
+        from_asset=A_WETH,
+        to_asset=A_USDC,
+        timestamp=1610150400,
+    ) == Price(FVal('1218.87080719990345367447708023135690417334776916278271419773639287665690749300'))  # noqa: E501
+
+    with pytest.raises(NoPriceForGivenTimestamp):
+        inquirer_defi._uniswapv2.query_historical_price(
+            from_asset=A_WETH,
+            to_asset=A_USDC,
+            timestamp=1571230800,  # before V2 contract was created
+        )
+
+    with pytest.raises(PriceQueryUnsupportedAsset):
+        inquirer_defi._uniswapv2.query_historical_price(
+            from_asset=A_BTC,  # non eth tokens
+            to_asset=A_DOGE,
+            timestamp=1653454800,
+        )
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
 @pytest.mark.parametrize('should_mock_current_price_queries', [False])
 def test_uniswap_oracles_special_cases(inquirer_defi, socket_enabled):  # pylint: disable=unused-argument
@@ -69,47 +114,52 @@ def test_uniswap_oracles_special_cases(inquirer_defi, socket_enabled):  # pylint
         assert inquirer_defi._uniswapv2.query_current_price(A_ETH, A_WETH, False)[0] == Price(ONE)
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
 @pytest.mark.parametrize('should_mock_current_price_queries', [False])
-def test_uniswap_no_decimals(inquirer_defi, socket_enabled):  # pylint: disable=unused-argument
+def test_uniswap_no_decimals(inquirer_defi: 'Inquirer'):
     """Test that if a token has no information about the number of decimals a proper error
     is raised"""
     asset_resolver = AssetResolver()
     original_getter = asset_resolver.resolve_asset
+    original_resolver_to_class = asset_resolver.resolve_asset_to_class
+    resolved_weth = A_WETH.resolve_to_evm_token()
+    resolved_usdc = A_USDC.resolve_to_evm_token()
 
-    def fake_weth_token():
-        """Make sure that the weth token has no decimals fields and any other token
-        is loaded properly
-        """
-        resolved_weth = A_WETH.resolve_to_evm_token()
+    def mocked_asset_getter(identifier, **kwargs):
+        if identifier == resolved_weth.identifier:
+            fake_weth = EvmToken.initialize(
+                address=resolved_weth.evm_address,
+                chain_id=resolved_weth.chain_id,
+                token_kind=resolved_weth.token_kind,
+                decimals=None,
+                name=resolved_weth.name,
+                symbol=resolved_weth.symbol,
+                started=resolved_weth.started,
+                forked=resolved_weth.forked.identifier if resolved_weth.forked is not None else None,  # noqa: E501
+                swapped_for=resolved_weth.swapped_for.identifier if resolved_weth.swapped_for is not None else None,  # noqa: E501
+                coingecko=resolved_weth.coingecko,
+                cryptocompare=resolved_weth.cryptocompare,
+                protocol=resolved_weth.protocol,
+            )
+            return fake_weth
 
-        def mocked_asset_getter(identifier):
-            if identifier == resolved_weth.identifier:
-                fake_weth = EvmToken.initialize(
-                    address=resolved_weth.evm_address,
-                    chain_id=resolved_weth.chain_id,
-                    token_kind=resolved_weth.token_kind,
-                    decimals=None,
-                    name=resolved_weth.name,
-                    symbol=resolved_weth.symbol,
-                    started=resolved_weth.started,
-                    forked=resolved_weth.forked.identifier if resolved_weth.forked is not None else None,  # noqa: E501
-                    swapped_for=resolved_weth.swapped_for.identifier if resolved_weth.swapped_for is not None else None,  # noqa: E501
-                    coingecko=resolved_weth.coingecko,
-                    cryptocompare=resolved_weth.cryptocompare,
-                    protocol=resolved_weth.protocol,
-                )
-                return fake_weth
-            return original_getter(identifier)
-        return patch.object(asset_resolver, 'resolve_asset', wraps=mocked_asset_getter)
+        if len(kwargs) == 0:
+            return original_getter(identifier, **kwargs)
+        return original_resolver_to_class(identifier, **kwargs)
 
-    with fake_weth_token():
+    with (
+        patch.object(asset_resolver, 'resolve_asset', wraps=mocked_asset_getter),
+        patch.object(asset_resolver, 'resolve_asset_to_class', wraps=mocked_asset_getter),
+    ):
         weth = EvmToken(A_WETH.identifier)
         assert weth.decimals is None
+        assert inquirer_defi._uniswapv2 is not None
+        assert inquirer_defi._uniswapv3 is not None
         with pytest.raises(DefiPoolError):
-            inquirer_defi._uniswapv2.query_current_price(weth, A_USDC, False)
+            inquirer_defi._uniswapv2.query_current_price(weth, resolved_usdc, False)
         with pytest.raises(DefiPoolError):
-            inquirer_defi._uniswapv3.query_current_price(weth, A_USDC, False)
+            inquirer_defi._uniswapv3.query_current_price(weth, resolved_usdc, False)
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])

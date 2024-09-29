@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { type DataTableHeader } from '@/types/vuetify';
-import { type BaseDefiBalance } from '@/types/defi/lending';
+import type { BaseDefiBalance } from '@/types/defi/lending';
+import type { DataTableColumn, DataTableSortData } from '@rotki/ui-library';
 
 withDefaults(
   defineProps<{
@@ -8,61 +8,75 @@ withDefaults(
     loading?: boolean;
   }>(),
   {
-    loading: false
-  }
+    loading: false,
+  },
 );
 
 const { currencySymbol } = storeToRefs(useGeneralSettingsStore());
 const { t } = useI18n();
 
-const headers = computed<DataTableHeader[]>(() => [
+const sort = ref<DataTableSortData<BaseDefiBalance>>({
+  column: 'usdValue',
+  direction: 'desc' as const,
+});
+
+const headers = computed<DataTableColumn<BaseDefiBalance>[]>(() => [
   {
-    text: t('common.asset'),
-    value: 'asset'
+    label: t('common.asset'),
+    key: 'asset',
+    sortable: true,
   },
   {
-    text: t('common.amount'),
-    value: 'balance.amount',
-    align: 'end'
+    label: t('common.amount'),
+    key: 'amount',
+    align: 'end',
+    sortable: true,
   },
-  { text: '', value: 'balance.usdValue', align: 'end' },
+  { label: '', key: 'usdValue', align: 'end', sortable: true },
   {
-    text: t('lending_asset_table.headers.effective_interest_rate'),
-    value: 'effectiveInterestRate',
-    align: 'end'
-  }
+    label: t('lending_asset_table.headers.effective_interest_rate'),
+    key: 'effectiveInterestRate',
+    align: 'end',
+    sortable: true,
+  },
 ]);
 </script>
 
 <template>
-  <DataTable
-    :items="assets"
-    :headers="headers"
+  <RuiDataTable
+    v-model:sort="sort"
+    :rows="assets"
+    :cols="headers"
     :loading="loading"
-    sort-by="balance.usdValue"
+    row-attr="asset"
+    dense
+    outlined
   >
-    <template #item.asset="{ item }">
-      <AssetDetails :asset="item.asset" hide-name />
+    <template #item.asset="{ row }">
+      <AssetDetails
+        :asset="row.asset"
+        hide-name
+      />
     </template>
-    <template #item.balance.amount="{ item }">
-      <AmountDisplay :value="item.balance.amount" />
+    <template #item.amount="{ row }">
+      <AmountDisplay :value="row.amount" />
     </template>
-    <template #item.balance.usdValue="{ item }">
+    <template #item.usdValue="{ row }">
       <AmountDisplay
         fiat-currency="USD"
-        :value="item.balance.usdValue"
+        :value="row.usdValue"
         show-currency="symbol"
       />
     </template>
-    <template #item.effectiveInterestRate="{ item }">
-      <PercentageDisplay :value="item.effectiveInterestRate" />
+    <template #item.effectiveInterestRate="{ row }">
+      <PercentageDisplay :value="row.effectiveInterestRate" />
     </template>
-    <template #header.balance.usdValue>
+    <template #header.text.usdValue>
       {{
         t('lending_asset_table.headers.usd_value', {
-          currency: currencySymbol
+          currency: currencySymbol,
         })
       }}
     </template>
-  </DataTable>
+  </RuiDataTable>
 </template>

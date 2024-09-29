@@ -1,80 +1,73 @@
-import {
-  ALL_CENTRALIZED_EXCHANGES,
-  ALL_DECENTRALIZED_EXCHANGES,
-  ALL_MODULES,
-  ALL_TRANSACTIONS,
-  type Purgeable
-} from '@/types/session/purge';
-import {
-  SUPPORTED_EXCHANGES,
-  type SupportedExchange,
-  type SupportedExternalExchanges
-} from '@/types/exchanges';
-import { EXTERNAL_EXCHANGES } from '@/data/defaults';
-import { Module } from '@/types/modules';
+import { Purgeable } from '@/types/session/purge';
 import { Section } from '@/types/status';
 import { TaskType } from '@/types/task-type';
-import { type TaskMeta } from '@/types/task';
+import type { Module } from '@/types/modules';
+import type { TaskMeta } from '@/types/task';
 
-export const useSessionPurge = () => {
+interface UseSessionPurge {
+  purgeCache: (purgeable: Purgeable, value: string) => void;
+  refreshGeneralCache: () => Promise<void>;
+}
+
+export function useSessionPurge(): UseSessionPurge {
   const { resetState } = useDefiStore();
-  const { reset } = useStaking();
-
   const { refreshGeneralCacheTask } = useSessionApi();
+  const { resetStatus } = useStatusStore();
 
-  const purgeExchange = async (
-    exchange: SupportedExchange | typeof ALL_CENTRALIZED_EXCHANGES
-  ): Promise<void> => {
-    const { resetStatus } = useStatusUpdater(Section.TRADES);
+  const purgeExchange = (): void => {
+    resetStatus(Section.TRADES);
+    resetStatus(Section.ASSET_MOVEMENT);
+  };
 
-    if (exchange === ALL_CENTRALIZED_EXCHANGES) {
-      resetStatus();
-      resetStatus(Section.ASSET_MOVEMENT);
+  const purgeTransactions = (): void => {
+    resetStatus(Section.HISTORY_EVENT);
+  };
+
+  const purgeCache = (purgeable: Purgeable, value: string): void => {
+    if (purgeable === Purgeable.CENTRALIZED_EXCHANGES) {
+      if (!value)
+        purgeExchange();
     }
-  };
-
-  const purgeTransactions = async (): Promise<void> => {
-    const { resetStatus } = useStatusUpdater(Section.HISTORY_EVENT);
-    resetStatus();
-  };
-
-  const purgeCache = async (purgeable: Purgeable): Promise<void> => {
-    if (purgeable === ALL_CENTRALIZED_EXCHANGES) {
-      await purgeExchange(ALL_CENTRALIZED_EXCHANGES);
-    } else if (purgeable === ALL_DECENTRALIZED_EXCHANGES) {
-      resetState(ALL_DECENTRALIZED_EXCHANGES);
-    } else if (purgeable === ALL_MODULES) {
-      reset();
-      resetState(ALL_MODULES);
-    } else if (
-      SUPPORTED_EXCHANGES.includes(purgeable as SupportedExchange) ||
-      EXTERNAL_EXCHANGES.includes(purgeable as SupportedExternalExchanges)
-    ) {
-      await purgeExchange(purgeable as SupportedExchange);
-    } else if (purgeable === ALL_TRANSACTIONS) {
-      await purgeTransactions();
-    } else if (Object.values(Module).includes(purgeable as Module)) {
-      if ([Module.ETH2].includes(purgeable as Module)) {
-        reset(purgeable as Module);
-      } else {
-        resetState(purgeable as Module);
-      }
+    else if (purgeable === Purgeable.DECENTRALIZED_EXCHANGES) {
+      resetState((value as Module) || Purgeable.DECENTRALIZED_EXCHANGES);
+    }
+    else if (purgeable === Purgeable.DEFI_MODULES) {
+      resetState((value as Module) || Purgeable.DEFI_MODULES);
+    }
+    else if (purgeable === Purgeable.TRANSACTIONS) {
+      purgeTransactions();
     }
   };
 
   const { awaitTask } = useTaskStore();
   const { t } = useI18n();
+  const { notify } = useNotificationsStore();
 
-  const refreshGeneralCache = async () => {
+  const { resetProtocolCacheUpdatesStatus } = useHistoryStore();
+  const refreshGeneralCache = async (): Promise<void> => {
+    resetProtocolCacheUpdatesStatus();
     const taskType = TaskType.REFRESH_GENERAL_CACHE;
     const { taskId } = await refreshGeneralCacheTask();
-    await awaitTask<boolean, TaskMeta>(taskId, taskType, {
-      title: t('actions.session.refresh_general_cache.task.title')
-    });
+    try {
+      await awaitTask<boolean, TaskMeta>(taskId, taskType, {
+        title: t('actions.session.refresh_general_cache.task.title'),
+      });
+    }
+    catch (error: any) {
+      if (!isTaskCancelled(error)) {
+        notify({
+          title: t('actions.session.refresh_general_cache.task.title'),
+          message: t('actions.session.refresh_general_cache.error.message', {
+            message: error.message,
+          }),
+          display: true,
+        });
+      }
+    }
   };
 
   return {
     purgeCache,
-    refreshGeneralCache
+    refreshGeneralCache,
   };
-};
+}

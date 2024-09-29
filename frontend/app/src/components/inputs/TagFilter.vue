@@ -1,20 +1,18 @@
 <script setup lang="ts">
-import { type Tag } from '@/types/tags';
+import type { Tag } from '@/types/tags';
 
-const props = withDefaults(
+withDefaults(
   defineProps<{
-    value: string[];
     disabled?: boolean;
     hideDetails?: boolean;
   }>(),
   {
     disabled: false,
-    hideDetails: false
-  }
+    hideDetails: false,
+  },
 );
 
-const emit = defineEmits<{ (e: 'input', tags: string[]): void }>();
-const { value } = toRefs(props);
+const model = defineModel<string[]>({ required: true });
 
 const { t } = useI18n();
 
@@ -24,74 +22,43 @@ const availableTagsList = computed<Tag[]>(() => {
   const tags = get(availableTags);
   return Object.values(tags);
 });
-
-const input = (tags: string[]) => {
-  emit('input', tags);
-};
-
-const remove = (tag: string) => {
-  const tags = get(value);
-  const index = tags.indexOf(tag);
-  input([...tags.slice(0, index), ...tags.slice(index + 1)]);
-};
 </script>
 
 <template>
-  <VAutocomplete
-    :value="value"
+  <RuiAutoComplete
+    v-model="model"
     :disabled="disabled"
-    :items="availableTagsList"
+    :options="availableTagsList"
     class="tag-filter"
-    small-chips
     :label="t('tag_filter.label')"
-    prepend-inner-icon="mdi-magnify"
-    item-text="name"
-    :menu-props="{ closeOnContentClick: true }"
-    outlined
-    dense
-    item-value="name"
-    multiple
+    key-attr="name"
+    text-attr="name"
+    variant="outlined"
+    :item-height="40"
     clearable
+    dense
     :hide-details="hideDetails"
-    @input="input($event)"
-    @click:clear="input([])"
   >
-    <template #selection="{ item, selected, select }">
-      <VChip
-        label
-        small
-        class="font-medium"
-        :input-value="selected"
-        :color="`#${item.backgroundColor}`"
+    <template #selection="{ item, chipAttrs }">
+      <RuiChip
+        tile
+        size="sm"
+        class="font-medium !leading-4"
+        :bg-color="`#${item.backgroundColor}`"
         :text-color="`#${item.foregroundColor}`"
-        close
-        @click:close="remove(item.name)"
-        @click="select($event)"
+        closeable
+        clickable
+        v-bind="chipAttrs"
       >
         {{ item.name }}
-      </VChip>
+      </RuiChip>
     </template>
     <template #item="{ item }">
-      <TagIcon :tag="item" />
-      <span class="tag-input__tag__description ml-4">
-        {{ item.description }}
-      </span>
+      <TagIcon
+        :tag="item"
+        show-description
+        small
+      />
     </template>
-  </VAutocomplete>
+  </RuiAutoComplete>
 </template>
-
-<style scoped lang="scss">
-.tag-filter {
-  &__clear {
-    margin-top: -4px;
-  }
-
-  /* stylelint-disable selector-class-pattern,selector-nested-pattern */
-
-  :deep(.v-select__slot) {
-    min-height: 40px;
-  }
-
-  /* stylelint-enable selector-class-pattern,selector-nested-pattern */
-}
-</style>

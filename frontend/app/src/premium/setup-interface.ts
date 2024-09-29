@@ -1,12 +1,5 @@
-import {
-  type DataUtilities,
-  type DateUtilities,
-  type PremiumInterface,
-  type SettingsApi
-} from '@rotki/common/lib/premium';
-import { type Themes, type TimeUnit } from '@rotki/common/lib/settings';
 import dayjs from 'dayjs';
-import { displayDateFormatter } from '@/data/date_formatter';
+import { displayDateFormatter } from '@/data/date-formatter';
 import { DARK_COLORS, LIGHT_COLORS } from '@/plugins/theme';
 import {
   assetsApi,
@@ -16,10 +9,11 @@ import {
   statisticsApi,
   sushiApi,
   userSettings,
-  utilsApi
+  utilsApi,
 } from '@/premium/premium-apis';
-import { type DateFormat } from '@/types/date-format';
-import { type FrontendSettingsPayload } from '@/types/settings/frontend-settings';
+import type { DataUtilities, DateUtilities, PremiumInterface, SettingsApi, Themes, TimeUnit } from '@rotki/common';
+import type { DateFormat } from '@/types/date-format';
+import type { FrontendSettingsPayload } from '@/types/settings/frontend-settings';
 
 const date: DateUtilities = {
   epoch(): number {
@@ -41,71 +35,66 @@ const date: DateUtilities = {
     return dayjs().subtract(amount, unit).unix();
   },
   toUserSelectedFormat(timestamp: number): string {
-    return displayDateFormatter.format(
-      new Date(timestamp * 1000),
-      useGeneralSettingsStore().dateDisplayFormat
-    );
+    return displayDateFormatter.format(new Date(timestamp * 1000), useGeneralSettingsStore().dateDisplayFormat);
   },
   getDateInputISOFormat(format: string): string {
     return getDateInputISOFormat(format as DateFormat);
   },
-  convertToTimestamp(date: string, dateFormat: string): number {
-    return convertToTimestamp(date, dateFormat as DateFormat);
-  }
+  convertToTimestamp(date: string, dateFormat?: string): number {
+    return convertToTimestamp(date, dateFormat as DateFormat | undefined);
+  },
 };
 
-const data = (): DataUtilities => ({
-  assets: assetsApi(),
-  statistics: statisticsApi(),
-  balances: balancesApi(),
-  balancer: balancerApi(),
-  compound: compoundApi(),
-  sushi: sushiApi(),
-  utils: utilsApi()
-});
+function data(): DataUtilities {
+  return {
+    assets: assetsApi(),
+    statistics: statisticsApi(),
+    balances: balancesApi(),
+    balancer: balancerApi(),
+    compound: compoundApi(),
+    sushi: sushiApi(),
+    utils: utilsApi(),
+  };
+}
 
-const settings = (): SettingsApi => {
-  const { t } = useI18n();
+function settings(): SettingsApi {
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const { t, te } = useI18n();
   const frontendStore = useFrontendSettingsStore();
   return {
     async update(settings: FrontendSettingsPayload): Promise<void> {
       await frontendStore.updateSetting(settings);
     },
+    isDark: useRotkiTheme().isDark,
     defaultThemes(): Themes {
       return {
         dark: DARK_COLORS,
-        light: LIGHT_COLORS
+        light: LIGHT_COLORS,
       };
     },
     themes(): Themes {
       return {
         light: frontendStore.lightTheme,
-        dark: frontendStore.darkTheme
+        dark: frontendStore.darkTheme,
       };
     },
     user: userSettings(),
     i18n: {
       t,
-      // TODO: deprecate on the next major components version (it's only here for backwards compat)
-      tc: (key, choice, values) => {
-        if (!isDefined(choice)) {
-          return t(key);
-        }
-        if (!values) {
-          return t(key, choice);
-        }
-        return t(key, values, choice);
-      }
-    }
+      te,
+    },
   };
-};
+}
 
-export const usePremiumApi = (): PremiumInterface => ({
-  useHostComponents: true,
-  version: 23,
-  api: () => ({
-    date,
-    data: data(),
-    settings: settings()
-  })
-});
+export function usePremiumApi(): PremiumInterface {
+  return {
+    useHostComponents: true,
+    version: 25,
+    api: () => ({
+      date,
+      data: data(),
+      settings: settings(),
+      graphs: useGraph,
+    }),
+  };
+}

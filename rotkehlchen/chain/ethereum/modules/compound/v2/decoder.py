@@ -3,6 +3,10 @@ from typing import TYPE_CHECKING, Any
 
 from rotkehlchen.assets.asset import EvmToken
 from rotkehlchen.assets.utils import get_or_create_evm_token
+from rotkehlchen.chain.ethereum.modules.compound.constants import (
+    COMPTROLLER_PROXY_ADDRESS,
+    CPT_COMPOUND,
+)
 from rotkehlchen.chain.ethereum.utils import asset_normalized_value, token_normalized_value
 from rotkehlchen.chain.evm.decoding.constants import ERC20_OR_ERC721_TRANSFER
 from rotkehlchen.chain.evm.decoding.interfaces import DecoderInterface
@@ -23,7 +27,6 @@ from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import ChainID, ChecksumEvmAddress, EvmTokenKind, EvmTransaction
 from rotkehlchen.utils.misc import hex_or_bytes_to_address, hex_or_bytes_to_int
 
-from .constants import COMPTROLLER_PROXY_ADDRESS, CPT_COMPOUND
 from .utils import get_compound_underlying_token
 
 if TYPE_CHECKING:
@@ -84,7 +87,12 @@ class Compoundv2Decoder(DecoderInterface):
         out_event = None
         for event in decoded_events:
             # Find the transfer event which should have come before the minting
-            if event.event_type == HistoryEventType.SPEND and event.asset == underlying_asset and event.balance.amount == mint_amount:  # noqa: E501
+            if (
+                event.event_type == HistoryEventType.SPEND and
+                event.asset == underlying_asset and
+                event.balance.amount == mint_amount and
+                event.address == compound_token.evm_address
+            ):
                 event.event_type = HistoryEventType.DEPOSIT
                 event.event_subtype = HistoryEventSubType.DEPOSIT_ASSET
                 event.counterparty = CPT_COMPOUND
@@ -106,7 +114,7 @@ class Compoundv2Decoder(DecoderInterface):
             to_event_subtype=HistoryEventSubType.RECEIVE_WRAPPED,
             to_notes=f'Receive {minted_amount} {compound_token.symbol} from compound',
             to_counterparty=CPT_COMPOUND,
-            paired_event_data=(out_event, True),
+            paired_events_data=((out_event,), True),
         )
         return DecodingOutput(action_items=[action_item])
 
@@ -176,16 +184,27 @@ class Compoundv2Decoder(DecoderInterface):
         amount = asset_normalized_value(amount_raw, underlying_asset)
         for event in decoded_events:
             # Find the transfer event which should have come before the redeeming
-            if event.event_type == HistoryEventType.RECEIVE and event.asset.identifier == underlying_asset and event.balance.amount == amount:  # noqa: E501
+            if (
+                event.event_type == HistoryEventType.RECEIVE and
+                event.asset.identifier == underlying_asset and
+                event.balance.amount == amount and
+                event.address == compound_token.evm_address
+            ):
                 event.event_subtype = HistoryEventSubType.GENERATE_DEBT
                 event.counterparty = CPT_COMPOUND
                 event.notes = f'Borrow {amount} {underlying_asset.symbol} from compound'
-            elif event.event_type == HistoryEventType.RECEIVE and event.location_label == payer and event.asset == A_COMP and event.address == COMPTROLLER_PROXY_ADDRESS:  # noqa: E501
+            elif (
+                event.event_type == HistoryEventType.RECEIVE and
+                event.location_label == payer and
+                event.asset == A_COMP and
+                event.address == COMPTROLLER_PROXY_ADDRESS
+            ):
                 event.event_subtype = HistoryEventSubType.REWARD
                 event.counterparty = CPT_COMPOUND
                 event.notes = f'Collect {event.balance.amount} COMP from compound'
             elif (
-                event.event_type == HistoryEventType.SPEND and event.balance.amount == amount and
+                event.event_type == HistoryEventType.SPEND and
+                event.balance.amount == amount and
                 (
                     (underlying_asset == self.eth and event.address == MAXIMILLION_ADDR) or
                     (event.location_label == payer and event.address == compound_token.evm_address)
@@ -266,6 +285,7 @@ class Compoundv2Decoder(DecoderInterface):
                 event.balance.amount == seized_collateral_amount and
                 event.asset == collateral_ctoken
             ):
+                event.event_type = HistoryEventType.LOSS
                 event.event_subtype = HistoryEventSubType.LIQUIDATE
                 event.notes = f'Lost {seized_collateral_amount} {collateral_ctoken.symbol} in a compound forced liquidation to repay {repaid_amount} {repaying_asset.symbol}'  # noqa: E501
                 event.counterparty = CPT_COMPOUND
@@ -349,12 +369,24 @@ class Compoundv2Decoder(DecoderInterface):
                 event.notes = f'Collect {event.balance.amount} COMP from compound'
                 break
 
+        else:  # not found, so transfer may come after
+            action_item = ActionItem(
+                action='transform',
+                from_event_type=HistoryEventType.RECEIVE,
+                from_event_subtype=HistoryEventSubType.NONE,
+                asset=A_COMP,
+                to_event_subtype=HistoryEventSubType.REWARD,
+                to_notes='Collect {amount} COMP from compound',  # amount set at actionitem process
+                to_counterparty=CPT_COMPOUND,
+            )
+            return DecodingOutput(action_items=[action_item])
+
         return DEFAULT_DECODING_OUTPUT
 
     # -- DecoderInterface methods
 
     def addresses_to_decoders(self) -> dict[ChecksumEvmAddress, tuple[Any, ...]]:
-        compound_tokens = GlobalDBHandler().get_evm_tokens(
+        compound_tokens = GlobalDBHandler.get_evm_tokens(
             chain_id=ChainID.ETHEREUM,
             protocol='compound',
         )

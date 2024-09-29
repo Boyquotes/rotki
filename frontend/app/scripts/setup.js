@@ -1,15 +1,16 @@
-const path = require('node:path');
+import path from 'node:path';
+import process from 'node:process';
 
 /** @type 'production' | 'development'' */
-const mode = (process.env.NODE_ENV = process.env.NODE_ENV || 'development');
+export const mode = (process.env.NODE_ENV = process.env.NODE_ENV || 'development');
 
 /** @type {import('vite').LogLevel} */
-const LOG_LEVEL = 'info';
+export const LOG_LEVEL = 'info';
 
 /** @type {import('vite').InlineConfig} */
-const sharedConfig = {
+export const sharedConfig = {
   mode,
-  logLevel: LOG_LEVEL
+  logLevel: LOG_LEVEL,
 };
 
 // in some systems the virtualenv's python is not detected from inside electron and the
@@ -21,12 +22,6 @@ if (process.env.VIRTUAL_ENV) {
   process.env.PATH = process.env.VIRTUAL_ENV.concat(
     path.sep,
     process.platform === 'win32' ? 'Scripts;' : 'bin:',
-    process.env.PATH
+    process.env.PATH,
   );
 }
-
-module.exports = {
-  mode,
-  LOG_LEVEL,
-  sharedConfig
-};

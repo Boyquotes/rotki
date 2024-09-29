@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { type AaveLoan } from '@/types/defi/lending';
+import type { AaveLoan } from '@/types/defi/lending';
 
 const props = defineProps<{
   loan: AaveLoan;
@@ -13,7 +13,10 @@ const totalCollateralUsd = totalCollateral(loan);
 
 <template>
   <StatCard :title="t('loan_collateral.title')">
-    <LoanRow medium :title="t('loan_collateral.locked_collateral')">
+    <LoanRow
+      medium
+      :title="t('loan_collateral.locked_collateral')"
+    >
       <AmountDisplay
         :asset-padding="assetPadding"
         :value="totalCollateralUsd"
@@ -32,18 +35,27 @@ const totalCollateralUsd = totalCollateral(loan);
         :key="collateral.asset"
         class="flex flex-row"
       >
-        <BalanceDisplay :asset="collateral.asset" :value="collateral" />
+        <BalanceDisplay
+          :asset="collateral.asset"
+          :value="collateral"
+        />
       </div>
     </LoanRow>
 
-    <RuiDivider v-if="loan.collateral.length > 0" class="my-4" />
+    <RuiDivider
+      v-if="loan.collateral.length > 0"
+      class="my-4"
+    />
 
-    <LoanRow :title="t('loan_collateral.stable_apr')" class="mb-2">
-      <PercentageDisplay :value="loan.stableApr ? loan.stableApr : null" />
+    <LoanRow
+      :title="t('loan_collateral.stable_apr')"
+      class="mb-2"
+    >
+      <PercentageDisplay :value="loan.stableApr" />
     </LoanRow>
 
     <LoanRow :title="t('loan_collateral.variable_apr')">
-      <PercentageDisplay :value="loan.variableApr ? loan.variableApr : null" />
+      <PercentageDisplay :value="loan.variableApr" />
     </LoanRow>
   </StatCard>
 </template>

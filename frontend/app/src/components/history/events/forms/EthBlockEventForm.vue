@@ -1,26 +1,22 @@
 <script setup lang="ts">
 import dayjs from 'dayjs';
-import { HistoryEventEntryType } from '@rotki/common/lib/history/events';
+import { Blockchain, HistoryEventEntryType } from '@rotki/common';
 import { helpers, required, requiredIf } from '@vuelidate/validators';
-import { Blockchain } from '@rotki/common/lib/blockchain';
 import { isEmpty } from 'lodash-es';
-import {
-  type EthBlockEvent,
-  type NewEthBlockEventPayload
-} from '@/types/history/events';
 import { toMessages } from '@/utils/validation';
 import HistoryEventAssetPriceForm from '@/components/history/events/forms/HistoryEventAssetPriceForm.vue';
 import { DateFormat } from '@/types/date-format';
+import type { EthBlockEvent, NewEthBlockEventPayload } from '@/types/history/events';
 
 const props = withDefaults(
   defineProps<{
-    editableItem?: EthBlockEvent | null;
-    groupHeader?: EthBlockEvent | null;
+    editableItem?: EthBlockEvent;
+    groupHeader?: EthBlockEvent;
   }>(),
   {
-    editableItem: null,
-    groupHeader: null
-  }
+    editableItem: undefined,
+    groupHeader: undefined,
+  },
 );
 
 const { t } = useI18n();
@@ -28,77 +24,55 @@ const { t } = useI18n();
 const { editableItem, groupHeader } = toRefs(props);
 const { currencySymbol } = storeToRefs(useGeneralSettingsStore());
 
-const assetPriceForm: Ref<InstanceType<
-  typeof HistoryEventAssetPriceForm
-> | null> = ref(null);
+const assetPriceForm = ref<InstanceType<typeof HistoryEventAssetPriceForm>>();
 
-const eventIdentifier: Ref<string> = ref('');
-const datetime: Ref<string> = ref('');
-const amount: Ref<string> = ref('');
-const usdValue: Ref<string> = ref('');
-const blockNumber: Ref<string> = ref('');
-const validatorIndex: Ref<string> = ref('');
-const feeRecipient: Ref<string> = ref('');
-const isMevReward: Ref<boolean> = ref(false);
+const eventIdentifier = ref<string>('');
+const datetime = ref<string>('');
+const amount = ref<string>('');
+const usdValue = ref<string>('');
+const blockNumber = ref<string>('');
+const validatorIndex = ref<string>('');
+const feeRecipient = ref<string>('');
+const isMevReward = ref<boolean>(false);
 
 const errorMessages = ref<Record<string, string[]>>({});
 
 const rules = {
   eventIdentifier: {
     required: helpers.withMessage(
-      t(
-        'transactions.events.form.event_identifier.validation.non_empty'
-      ).toString(),
-      requiredIf(() => !!get(editableItem))
-    )
+      t('transactions.events.form.event_identifier.validation.non_empty'),
+      requiredIf(() => !!get(editableItem)),
+    ),
   },
   timestamp: { externalServerValidation: () => true },
   amount: {
-    required: helpers.withMessage(
-      t('transactions.events.form.amount.validation.non_empty').toString(),
-      required
-    )
+    required: helpers.withMessage(t('transactions.events.form.amount.validation.non_empty'), required),
   },
   usdValue: {
     required: helpers.withMessage(
       t('transactions.events.form.fiat_value.validation.non_empty', {
-        currency: get(currencySymbol)
-      }).toString(),
-      required
-    )
+        currency: get(currencySymbol),
+      }),
+      required,
+    ),
   },
   blockNumber: {
-    required: helpers.withMessage(
-      t(
-        'transactions.events.form.block_number.validation.non_empty'
-      ).toString(),
-      required
-    )
+    required: helpers.withMessage(t('transactions.events.form.block_number.validation.non_empty'), required),
   },
   validatorIndex: {
-    required: helpers.withMessage(
-      t(
-        'transactions.events.form.validator_index.validation.non_empty'
-      ).toString(),
-      required
-    )
+    required: helpers.withMessage(t('transactions.events.form.validator_index.validation.non_empty'), required),
   },
   feeRecipient: {
-    required: helpers.withMessage(
-      t(
-        'transactions.events.form.fee_recipient.validation.non_empty'
-      ).toString(),
-      required
-    ),
-    isValid: helpers.withMessage(
-      t('transactions.events.form.fee_recipient.validation.valid').toString(),
-      (value: string) => isValidEthAddress(value)
-    )
-  }
+    required: helpers.withMessage(t('transactions.events.form.fee_recipient.validation.non_empty'), required),
+    isValid: helpers.withMessage(t('transactions.events.form.fee_recipient.validation.valid'), (value: string) =>
+      isValidEthAddress(value)),
+  },
 };
 
-const { setValidation, setSubmitFunc, saveHistoryEventHandler } =
-  useHistoryEventsForm();
+const numericAmount = bigNumberifyFromRef(amount);
+const numericUsdValue = bigNumberifyFromRef(usdValue);
+
+const { setValidation, setSubmitFunc, saveHistoryEventHandler } = useHistoryEventsForm();
 
 const v$ = setValidation(
   rules,
@@ -109,24 +83,17 @@ const v$ = setValidation(
     usdValue,
     blockNumber,
     validatorIndex,
-    feeRecipient
+    feeRecipient,
   },
   {
     $autoDirty: true,
-    $externalResults: errorMessages
-  }
+    $externalResults: errorMessages,
+  },
 );
 
-const reset = () => {
+function reset() {
   set(eventIdentifier, null);
-  set(
-    datetime,
-    convertFromTimestamp(
-      dayjs().valueOf(),
-      DateFormat.DateMonthYearHourMinuteSecond,
-      true
-    )
-  );
+  set(datetime, convertFromTimestamp(dayjs().valueOf(), DateFormat.DateMonthYearHourMinuteSecond, true));
   set(amount, '0');
   set(usdValue, '0');
   set(blockNumber, '');
@@ -136,54 +103,35 @@ const reset = () => {
   set(errorMessages, {});
 
   get(assetPriceForm)?.reset();
-};
+}
 
-const applyEditableData = async (entry: EthBlockEvent) => {
+function applyEditableData(entry: EthBlockEvent) {
   set(eventIdentifier, entry.eventIdentifier);
-  set(
-    datetime,
-    convertFromTimestamp(
-      entry.timestamp,
-      DateFormat.DateMonthYearHourMinuteSecond,
-      true
-    )
-  );
+  set(datetime, convertFromTimestamp(entry.timestamp, DateFormat.DateMonthYearHourMinuteSecond, true));
   set(amount, entry.balance.amount.toFixed());
   set(usdValue, entry.balance.usdValue.toFixed());
   set(blockNumber, entry.blockNumber.toString());
   set(validatorIndex, entry.validatorIndex.toString());
   set(feeRecipient, entry.locationLabel);
   set(isMevReward, entry.eventSubtype === 'mev reward');
-};
+}
 
-const applyGroupHeaderData = async (entry: EthBlockEvent) => {
+function applyGroupHeaderData(entry: EthBlockEvent) {
   set(eventIdentifier, entry.eventIdentifier);
   set(feeRecipient, entry.locationLabel ?? '');
   set(blockNumber, entry.blockNumber.toString());
   set(validatorIndex, entry.validatorIndex.toString());
-  set(
-    datetime,
-    convertFromTimestamp(
-      entry.timestamp,
-      DateFormat.DateMonthYearHourMinuteSecond,
-      true
-    )
-  );
+  set(datetime, convertFromTimestamp(entry.timestamp, DateFormat.DateMonthYearHourMinuteSecond, true));
   set(usdValue, '0');
-};
+}
 
-watch(errorMessages, errors => {
-  if (!isEmpty(errors)) {
+watch(errorMessages, (errors) => {
+  if (!isEmpty(errors))
     get(v$).$validate();
-  }
 });
 
-const save = async (): Promise<boolean> => {
-  const timestamp = convertToTimestamp(
-    get(datetime),
-    DateFormat.DateMonthYearHourMinuteSecond,
-    true
-  );
+async function save(): Promise<boolean> {
+  const timestamp = convertToTimestamp(get(datetime), DateFormat.DateMonthYearHourMinuteSecond, true);
 
   const payload: NewEthBlockEventPayload = {
     eventIdentifier: get(eventIdentifier),
@@ -191,12 +139,12 @@ const save = async (): Promise<boolean> => {
     timestamp,
     balance: {
       amount: get(numericAmount).isNaN() ? Zero : get(numericAmount),
-      usdValue: get(numericUsdValue).isNaN() ? Zero : get(numericUsdValue)
+      usdValue: get(numericUsdValue).isNaN() ? Zero : get(numericUsdValue),
     },
     blockNumber: parseInt(get(blockNumber)),
     validatorIndex: parseInt(get(validatorIndex)),
     feeRecipient: get(feeRecipient),
-    isMevReward: get(isMevReward)
+    isMevReward: get(isMevReward),
   };
 
   const edit = get(editableItem);
@@ -205,16 +153,13 @@ const save = async (): Promise<boolean> => {
     edit ? { ...payload, identifier: edit.identifier } : payload,
     assetPriceForm,
     errorMessages,
-    reset
+    reset,
   );
-};
+}
 
 setSubmitFunc(save);
 
-const numericAmount = bigNumberifyFromRef(amount);
-const numericUsdValue = bigNumberifyFromRef(usdValue);
-
-const checkPropsData = () => {
+function checkPropsData() {
   const editable = get(editableItem);
   if (editable) {
     applyEditableData(editable);
@@ -226,30 +171,25 @@ const checkPropsData = () => {
     return;
   }
   reset();
-};
+}
 
 watch([groupHeader, editableItem], checkPropsData);
 onMounted(() => {
   checkPropsData();
 });
 
-const { accounts } = useAccountBalances();
+const { getAddresses } = useBlockchainStore();
 
-const feeRecipientSuggestions = computed(() =>
-  get(accounts)
-    .filter(item => item.chain === Blockchain.ETH)
-    .map(item => item.address)
-);
+const feeRecipientSuggestions = computed(() => getAddresses(Blockchain.ETH));
 </script>
 
 <template>
   <div>
-    <div class="grid md:grid-cols-4 gap-4">
+    <div class="grid md:grid-cols-4 gap-4 mb-4">
       <DateTimePicker
         v-model="datetime"
         class="md:col-span-2"
-        outlined
-        :label="t('transactions.events.form.datetime.label')"
+        :label="t('common.datetime')"
         persistent-hint
         limit-now
         milliseconds
@@ -260,8 +200,7 @@ const feeRecipientSuggestions = computed(() =>
       />
       <AmountInput
         v-model="blockNumber"
-        outlined
-        required
+        variant="outlined"
         integer
         data-cy="blockNumber"
         :label="t('transactions.events.form.block_number.label')"
@@ -270,8 +209,7 @@ const feeRecipientSuggestions = computed(() =>
       />
       <AmountInput
         v-model="validatorIndex"
-        outlined
-        required
+        variant="outlined"
         integer
         data-cy="validatorIndex"
         :label="t('transactions.events.form.validator_index.label')"
@@ -284,20 +222,19 @@ const feeRecipientSuggestions = computed(() =>
 
     <HistoryEventAssetPriceForm
       ref="assetPriceForm"
+      v-model:amount="amount"
+      v-model:usd-value="usdValue"
       asset="ETH"
       :v$="v$"
       :datetime="datetime"
-      :amount.sync="amount"
-      :usd-value.sync="usdValue"
       disable-asset
     />
 
     <RuiDivider class="my-10" />
 
-    <ComboboxWithCustomInput
+    <AutoCompleteWithSearchSync
       v-model="feeRecipient"
       :items="feeRecipientSuggestions"
-      outlined
       data-cy="feeRecipient"
       :label="t('transactions.events.form.fee_recipient.label')"
       :error-messages="toMessages(v$.feeRecipient)"
@@ -305,23 +242,26 @@ const feeRecipientSuggestions = computed(() =>
       @blur="v$.feeRecipient.$touch()"
     />
 
-    <RuiCheckbox v-model="isMevReward" color="primary" data-cy="isMevReward">
+    <RuiCheckbox
+      v-model="isMevReward"
+      color="primary"
+      data-cy="isMevReward"
+    >
       {{ t('transactions.events.form.is_mev_reward.label') }}
     </RuiCheckbox>
 
     <RuiDivider class="mb-2 mt-6" />
 
-    <VExpansionPanels flat>
-      <VExpansionPanel>
-        <VExpansionPanelHeader
-          class="p-0"
-          data-cy="eth-block-event-form__advance-toggle"
-        >
+    <RuiAccordions>
+      <RuiAccordion
+        data-cy="eth-block-event-form__advance"
+        header-class="py-4"
+        eager
+      >
+        <template #header>
           {{ t('transactions.events.form.advanced') }}
-        </VExpansionPanelHeader>
-        <VExpansionPanelContent
-          class="[&>.v-expansion-panel-content\_\_wrap]:!p-0"
-        >
+        </template>
+        <div class="py-2">
           <RuiTextField
             v-model="eventIdentifier"
             variant="outlined"
@@ -331,8 +271,8 @@ const feeRecipientSuggestions = computed(() =>
             :error-messages="toMessages(v$.eventIdentifier)"
             @blur="v$.eventIdentifier.$touch()"
           />
-        </VExpansionPanelContent>
-      </VExpansionPanel>
-    </VExpansionPanels>
+        </div>
+      </RuiAccordion>
+    </RuiAccordions>
   </div>
 </template>

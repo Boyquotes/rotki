@@ -1,77 +1,111 @@
 <script setup lang="ts">
-import { type Ref } from 'vue';
 import { RefreshableCache } from '@/types/session/purge';
+import { TaskType } from '@/types/task-type';
 
 const { t } = useI18n();
 
 const refreshable = [
   {
     id: RefreshableCache.GENERAL_CACHE,
-    text: t('data_management.refresh_cache.label.general_cache')
-  }
+    text: t('data_management.refresh_cache.label.general_cache'),
+    shortText: t('data_management.refresh_cache.label.general_cache_short'),
+  },
 ];
 
-const source: Ref<RefreshableCache> = ref(RefreshableCache.GENERAL_CACHE);
+const source = ref<RefreshableCache>(RefreshableCache.GENERAL_CACHE);
 
 const { refreshGeneralCache } = useSessionPurge();
+const { protocolCacheStatus } = storeToRefs(useHistoryStore());
 
-const refreshSource = async (source: RefreshableCache) => {
-  if (source === RefreshableCache.GENERAL_CACHE) {
+const { isTaskRunning } = useTaskStore();
+const taskRunning = isTaskRunning(TaskType.REFRESH_GENERAL_CACHE);
+const eventTaskLoading = isTaskRunning(TaskType.TRANSACTIONS_DECODING);
+
+async function refreshSource(source: RefreshableCache) {
+  if (source === RefreshableCache.GENERAL_CACHE)
     await refreshGeneralCache();
-  }
-};
+}
 
 const { status, pending, showConfirmation } = useCacheClear<RefreshableCache>(
   refreshable,
   refreshSource,
   (source: string) => ({
     success: t('data_management.refresh_cache.success', {
-      source
+      source,
     }),
     error: t('data_management.refresh_cache.error', {
-      source
-    })
+      source,
+    }),
   }),
   (source: string) => ({
     title: t('data_management.refresh_cache.confirm.title'),
     message: t('data_management.refresh_cache.confirm.message', {
-      source
-    })
-  })
+      source,
+    }),
+  }),
 );
+
+const { getChainName } = useSupportedChains();
+
+const hint = computed<string>(() => {
+  if (!get(taskRunning))
+    return '';
+
+  const status = get(protocolCacheStatus);
+  if (status.length === 0)
+    return '';
+
+  const data = status[0];
+
+  return t('transactions.protocol_cache_updates.hint', {
+    ...data,
+    protocol: toCapitalCase(data.protocol),
+    chain: get(getChainName(data.chain)),
+  });
+});
+
+const loading = logicOr(pending, taskRunning, eventTaskLoading);
 </script>
 
 <template>
-  <div class="mb-2">
-    <div class="mb-6">
-      <div class="text-h6">
+  <div>
+    <RuiCardHeader class="p-0 mb-4">
+      <template #header>
         {{ t('data_management.refresh_cache.title') }}
-      </div>
-      <div>
+      </template>
+      <template #subheader>
         {{ t('data_management.refresh_cache.subtitle') }}
-      </div>
-    </div>
+      </template>
+    </RuiCardHeader>
 
     <div class="flex items-center gap-4">
-      <VAutocomplete
+      <RuiAutoComplete
         v-model="source"
         class="flex-1"
-        outlined
+        variant="outlined"
         :label="t('data_management.refresh_cache.select_cache')"
-        :items="refreshable"
-        item-text="text"
-        item-value="id"
-        hide-details
-        :disabled="pending"
-      />
+        :options="refreshable"
+        text-attr="text"
+        key-attr="id"
+        :disabled="loading"
+        :hint="hint"
+      >
+        <template #selection="{ item }">
+          <div>{{ item.shortText || item.text }}</div>
+        </template>
+      </RuiAutoComplete>
 
-      <RuiTooltip :popper="{ placement: 'top' }" open-delay="400">
+      <RuiTooltip
+        :popper="{ placement: 'top' }"
+        :open-delay="400"
+        class="-mt-6"
+      >
         <template #activator>
           <RuiButton
             variant="text"
             icon
-            :disabled="!source || pending"
-            :loading="pending"
+            :disabled="!source || loading"
+            :loading="loading"
             @click="showConfirmation(source)"
           >
             <RuiIcon name="restart-line" />
@@ -81,6 +115,10 @@ const { status, pending, showConfirmation } = useCacheClear<RefreshableCache>(
       </RuiTooltip>
     </div>
 
-    <ActionStatusIndicator v-if="status" :status="status" />
+    <ActionStatusIndicator
+      v-if="status"
+      class="mt-4"
+      :status="status"
+    />
   </div>
 </template>

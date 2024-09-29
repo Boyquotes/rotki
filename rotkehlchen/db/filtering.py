@@ -1,19 +1,28 @@
 import logging
-from abc import ABCMeta, abstractmethod
-from collections.abc import Collection
+from abc import ABC, abstractmethod
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Generic, Literal, NamedTuple, TypeVar, cast
+from enum import Enum, auto
+from typing import Any, Generic, Literal, NamedTuple, TypeVar
 
 from rotkehlchen.accounting.types import SchemaEventType
 from rotkehlchen.api.v1.types import IncludeExcludeFilterData
 from rotkehlchen.assets.asset import Asset
+from rotkehlchen.assets.ignored_assets_handling import IgnoredAssetsHandling
 from rotkehlchen.assets.types import AssetType
-from rotkehlchen.assets.utils import IgnoredAssetsHandling
 from rotkehlchen.chain.ethereum.modules.nft.structures import NftLpHandling
 from rotkehlchen.chain.evm.types import EvmAccount
-from rotkehlchen.db.constants import HISTORY_MAPPING_KEY_STATE, HISTORY_MAPPING_STATE_CUSTOMIZED
+from rotkehlchen.db.constants import (
+    ETH_STAKING_EVENT_FIELDS,
+    EVM_EVENT_FIELDS,
+    EVMTX_DECODED,
+    HISTORY_BASE_ENTRY_FIELDS,
+    HISTORY_MAPPING_KEY_STATE,
+    HISTORY_MAPPING_STATE_CUSTOMIZED,
+)
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.fval import FVal
+from rotkehlchen.globaldb.cache import compute_cache_key
 from rotkehlchen.history.events.structures.base import HistoryBaseEntryType
 from rotkehlchen.history.events.structures.evm_event import EvmProduct
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
@@ -21,16 +30,23 @@ from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import (
     SUPPORTED_CHAIN_IDS,
     AssetMovementCategory,
+    CacheType,
     ChainID,
     ChecksumEvmAddress,
     EVMTxHash,
     Location,
+    OptionalBlockchainAddress,
     OptionalChainAddress,
     SupportedBlockchain,
     Timestamp,
     TradeType,
 )
 from rotkehlchen.utils.misc import ts_now
+
+
+class InvalidFilter(Exception):
+    """Raised if an invalid filter combination has been given"""
+
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -45,6 +61,7 @@ ETH_DEPOSIT_EVENT_JOIN = ALL_EVENTS_DATA_JOIN
 
 
 T = TypeVar('T')
+V = TypeVar('V')
 T_FilterQ = TypeVar('T_FilterQ', bound='DBFilterQuery')
 T_HistoryBaseEntryFilterQ = TypeVar('T_HistoryBaseEntryFilterQ', bound='HistoryBaseEntryFilterQuery')  # noqa: E501
 T_EthSTakingFilterQ = TypeVar('T_EthSTakingFilterQ', bound='EthStakingEventFilterQuery')
@@ -59,7 +76,7 @@ class DBFilterOrder(NamedTuple):
         for idx, (attribute, ascending) in enumerate(self.rules):
             if idx != 0:
                 querystr += ','
-            if attribute in {'amount', 'fee', 'rate'}:
+            if attribute in {'amount', 'fee', 'rate', 'last_price', 'last_price_asset', 'manual_price'}:  # noqa: E501
                 order_by = f'CAST({attribute} AS REAL)'
             else:
                 order_by = attribute
@@ -73,11 +90,11 @@ class DBFilterOrder(NamedTuple):
 
 
 class DBFilterPagination(NamedTuple):
-    limit: int
-    offset: int
+    limit: int | None
+    offset: int | None
 
     def prepare(self) -> str:
-        return f'LIMIT {self.limit} OFFSET {self.offset}'
+        return f'LIMIT {self.limit or -1}' + (f' OFFSET {self.offset}' if self.offset else '')
 
 
 class DBFilterGroupBy(NamedTuple):
@@ -179,12 +196,15 @@ class DBTransactionsPendingDecodingFilter(DBFilter):
     """
     This filter is used to find the ethereum transactions that have not been decoded yet
     using the query in `TRANSACTIONS_MISSING_DECODING_QUERY`. It allows filtering by chain.
+
+    Due to the joining we need to check for either value being NULL (meaning no entry
+    in evm_tx_mappings) or not having the DECODED value.
     """
     chain_id: ChainID | None
 
     def prepare(self) -> tuple[list[str], list[Any]]:
-        query_filters = ['B.tx_id is NULL']
-        bindings: list[int] = []
+        query_filters = ['(B.tx_id IS NULL OR B.tx_id NOT IN (SELECT tx_id FROM evm_tx_mappings WHERE value=?))']  # noqa: E501
+        bindings: list[int] = [EVMTX_DECODED]
         if self.chain_id is not None:
             bindings.append(self.chain_id.serialize_for_db())
             query_filters.append('C.chain_id=?')
@@ -266,6 +286,14 @@ class DBLocationFilter(DBFilter):
 
 
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
+class DBNullableLocationFilter(DBFilter):
+    location: Location | None
+
+    def prepare(self) -> tuple[list[str], list[Any]]:
+        return (['location IS ?'], [None if self.location is None else self.location.serialize_for_db()])  # noqa: E501
+
+
+@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
 class DBSubStringFilter(DBFilter):
     field: str
     search_string: str
@@ -275,7 +303,7 @@ class DBSubStringFilter(DBFilter):
 
 
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
-class DBFilterQuery(metaclass=ABCMeta):
+class DBFilterQuery(ABC):
     and_op: bool
     filters: list[DBFilter]
     join_clause: DBFilter | None = None
@@ -288,7 +316,7 @@ class DBFilterQuery(metaclass=ABCMeta):
             with_pagination: bool = True,
             with_order: bool = True,
             with_group_by: bool = False,
-            special_free_query: bool = False,
+            without_ignored_asset_filter: bool = False,
     ) -> tuple[str, list[Any]]:
         """Prepares a filter by converting the filters to a query string
 
@@ -296,9 +324,9 @@ class DBFilterQuery(metaclass=ABCMeta):
         - with_pagination: Use or not the pagination filters
         - with_order: Use or not the order by filters
         - with_group_by: Use or not the group by filters
-        - special_free_query: This is only for history events query and since we have quite
-        a complicated query in the backend to count the limited grouped history events, there is
-        no need to rerun the ignored assets filter as it's already part of the inner
+        - without_ignored_asset_filter: This is only for history events query and since we have
+        quite a complicated query in the backend to count the limited grouped history events, there
+        is no need to rerun the ignored assets filter as it's already part of the inner
         query in order to not count ignored/spam assets in the limit of free events.
         TODO: Quite hacky. Improve this.
         """
@@ -312,7 +340,7 @@ class DBFilterQuery(metaclass=ABCMeta):
             bindings.extend(single_bindings)
 
         for fil in self.filters:
-            if special_free_query and isinstance(fil, DBIgnoredAssetsFilter):
+            if without_ignored_asset_filter and isinstance(fil, DBIgnoredAssetsFilter):
                 continue  # skip subtable select filter as it's already applied
 
             filters, single_bindings = fil.prepare()
@@ -418,11 +446,10 @@ class EvmTransactionsFilterQuery(DBFilterQuery, FilterWithTimestamp):
 
     @property
     def accounts(self) -> list[EvmAccount] | None:
-        if self.join_clause is None:
+        if not isinstance(self.join_clause, DBEvmTransactionJoinsFilter):
             return None
 
-        ethaddress_filter = cast('DBEvmTransactionJoinsFilter', self.join_clause)
-        return ethaddress_filter.accounts
+        return self.join_clause.accounts
 
     @property
     def chain_id(self) -> SUPPORTED_CHAIN_IDS | None:
@@ -443,6 +470,9 @@ class EvmTransactionsFilterQuery(DBFilterQuery, FilterWithTimestamp):
             tx_hash: EVMTxHash | None = None,
             chain_id: SUPPORTED_CHAIN_IDS | None = None,
     ) -> 'EvmTransactionsFilterQuery':
+        """May raise:
+        - InvalidFilter for invalid combination of filters
+        """
         if order_by_rules is None:
             order_by_rules = [('timestamp', True)]
 
@@ -466,6 +496,9 @@ class EvmTransactionsFilterQuery(DBFilterQuery, FilterWithTimestamp):
 
         else:
             if accounts is not None:
+                if filter_query.join_clause is not None:  # atm "should not happen"
+                    raise InvalidFilter('Unable to filter by account due to conflicting filter')
+
                 filter_query.join_clause = DBEvmTransactionJoinsFilter(
                     and_op=False,
                     accounts=accounts,
@@ -506,13 +539,13 @@ class DBIgnoreValuesFilter(DBFilter):
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
 class DBEth2ValidatorIndicesFilter(DBFilter):
     """A filter for Eth2 validator indices"""
-    validators: list[int] | None
+    validators: set[int] | None
 
     def prepare(self) -> tuple[list[str], list[Any]]:
         if self.validators is None:
             return [], []
         questionmarks = '?' * len(self.validators)
-        return [f'validator_index IN ({",".join(questionmarks)})'], self.validators
+        return [f'validator_index IN ({",".join(questionmarks)})'], list(self.validators)
 
 
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
@@ -531,27 +564,47 @@ class DBTypeFilter(DBFilter):
 
 
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
-class DBEqualsFilter(DBFilter):
-    """Filter a column by comparing its column to its value for equality."""
+class DBNotEqualFilter(DBFilter):
+    """Filter a column by comparing its column to its value for inequality"""
     column: str
     value: str | (bytes | (int | bool))
     alias: str | None = None
 
-    def prepare(self) -> tuple[list[str], list[Any]]:
+    def key_name(self) -> str:
         key_name = self.column
         if self.alias is not None:
             key_name = f'{self.alias}.{key_name}'
-        return [f'{key_name}=?'], [self.value]
+
+        return key_name
+
+    def prepare(self) -> tuple[list[str], list[Any]]:
+        return [f'{self.key_name()}!=?'], [self.value]
 
 
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
-class DBMultiValueFilter(Generic[T], DBFilter):
+class DBEqualsFilter(DBNotEqualFilter):
+    """Filter a column by comparing its column to its value for equality.
+    For nullable columns that's where we want to include the null rows set
+    include_null_values to true.
+    """
+    include_null_values: bool = False
+
+    def prepare(self) -> tuple[list[str], list[Any]]:
+        key_name = self.key_name()
+        if self.include_null_values is False:
+            return [f'{key_name}=?'], [self.value]
+
+        return [f'{key_name}=? OR ({key_name} IS NULL)'], [self.value]
+
+
+@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
+class DBMultiValueFilter(DBFilter, Generic[T]):
     """Filter a column having a value out of a selection of values"""
     column: str
-    values: list[T]
+    values: Sequence[T]
     operator: Literal['IN', 'NOT IN'] = 'IN'
 
-    def prepare(self) -> tuple[list[str], list[T]]:
+    def prepare(self) -> tuple[list[str], Sequence[T]]:
         suffix = ''  # for NOT IN comparison remember NULL is a special case
         if self.operator == 'NOT IN':
             suffix = f' OR {self.column} IS NULL'
@@ -576,7 +629,11 @@ class DBMultiIntegerFilter(DBMultiValueFilter[int]):
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
 class DBOptionalChainAddressesFilter(DBFilter):
     """Filter the address column by a selection of optional chain addresses"""
-    optional_chain_addresses: list[OptionalChainAddress] | None
+    optional_chain_addresses: (
+        list[OptionalChainAddress] |
+        list[OptionalBlockchainAddress] |
+        None
+    )
 
     def prepare(self) -> tuple[list[str], list[str]]:
         query_filters = []
@@ -608,6 +665,7 @@ class TradesFilterQuery(DBFilterQuery, FilterWithTimestamp, FilterWithLocation):
             trade_type: list[TradeType] | None = None,
             location: Location | None = None,
             trades_idx_to_ignore: set[str] | None = None,
+            exclude_ignored_assets: bool = False,
     ) -> 'TradesFilterQuery':
         if order_by_rules is None:
             order_by_rules = [('timestamp', True)]
@@ -657,6 +715,18 @@ class TradesFilterQuery(DBFilterQuery, FilterWithTimestamp, FilterWithLocation):
                 values=trades_idx_to_ignore,
             ))
 
+        if exclude_ignored_assets is True:
+            filters.extend((
+                DBIgnoredAssetsFilter(
+                    and_op=True,
+                    asset_key='base_asset',
+                    operator='NOT IN',
+                ), DBIgnoredAssetsFilter(
+                    and_op=True,
+                    asset_key='quote_asset',
+                    operator='NOT IN',
+                )))
+
         filter_query.timestamp_filter = DBTimestampFilter(
             and_op=True,
             from_ts=from_ts,
@@ -681,6 +751,7 @@ class AssetMovementsFilterQuery(DBFilterQuery, FilterWithTimestamp, FilterWithLo
             assets: tuple[Asset, ...] | None = None,
             action: list[AssetMovementCategory] | None = None,
             location: Location | None = None,
+            exclude_ignored_assets: bool = False,
     ) -> 'AssetMovementsFilterQuery':
         if order_by_rules is None:
             order_by_rules = [('timestamp', True)]
@@ -709,6 +780,13 @@ class AssetMovementsFilterQuery(DBFilterQuery, FilterWithTimestamp, FilterWithLo
             filter_query.location_filter = DBLocationFilter(and_op=True, location=location)
             filters.append(filter_query.location_filter)
 
+        if exclude_ignored_assets is True:
+            filters.append(DBIgnoredAssetsFilter(
+                and_op=True,
+                asset_key='asset',
+                operator='NOT IN',
+            ))
+
         filter_query.timestamp_filter = DBTimestampFilter(
             and_op=True,
             from_ts=from_ts,
@@ -730,7 +808,7 @@ class Eth2DailyStatsFilterQuery(DBFilterQuery, FilterWithTimestamp):
             offset: int | None = None,
             from_ts: Timestamp | None = None,
             to_ts: Timestamp | None = None,
-            validators: list[int] | None = None,
+            validator_indices: set[int] | None = None,
     ) -> 'Eth2DailyStatsFilterQuery':
         if order_by_rules is None:
             order_by_rules = [('timestamp', True)]
@@ -748,8 +826,9 @@ class Eth2DailyStatsFilterQuery(DBFilterQuery, FilterWithTimestamp):
             from_ts=from_ts,
             to_ts=to_ts,
         )
-        filters.append(filter_query.timestamp_filter)
-        filters.append(DBEth2ValidatorIndicesFilter(and_op=True, validators=validators))
+        filters.extend((
+            filter_query.timestamp_filter,
+            DBEth2ValidatorIndicesFilter(and_op=True, validators=validator_indices)))
         filter_query.filters = filters
         return filter_query
 
@@ -835,14 +914,14 @@ class HistoryEventCustomizedOnlyJoinsFilter(DBFilter):
     def prepare(self) -> tuple[list[str], list[Any]]:
         query = (
             'INNER JOIN history_events_mappings '
-            'ON history_events_mappings.parent_identifier = history_events.identifier '
+            'ON history_events_mappings.parent_identifier = history_events_identifier '
             'WHERE history_events_mappings.name = ? AND history_events_mappings.value = ?'
         )
         bindings: list[str | int] = [HISTORY_MAPPING_KEY_STATE, HISTORY_MAPPING_STATE_CUSTOMIZED]
         return [query], bindings
 
 
-class HistoryBaseEntryFilterQuery(DBFilterQuery, FilterWithTimestamp, FilterWithLocation, metaclass=ABCMeta):  # noqa: E501
+class HistoryBaseEntryFilterQuery(DBFilterQuery, FilterWithTimestamp, FilterWithLocation, ABC):
 
     @classmethod
     def make(
@@ -859,6 +938,7 @@ class HistoryBaseEntryFilterQuery(DBFilterQuery, FilterWithTimestamp, FilterWith
             exclude_subtypes: list[HistoryEventSubType] | None = None,
             location: Location | None = None,
             location_labels: list[str] | None = None,
+            excluded_locations: list[Location] | None = None,
             ignored_ids: list[str] | None = None,
             null_columns: list[str] | None = None,
             event_identifiers: list[str] | None = None,
@@ -866,6 +946,9 @@ class HistoryBaseEntryFilterQuery(DBFilterQuery, FilterWithTimestamp, FilterWith
             exclude_ignored_assets: bool = False,
             customized_events_only: bool = False,
     ) -> T_HistoryBaseEntryFilterQ:
+        """May raise:
+        - InvalidFilter for invalid combination of filters
+        """
         if order_by_rules is None:
             order_by_rules = [('timestamp', True), ('sequence_index', True)]
 
@@ -877,6 +960,9 @@ class HistoryBaseEntryFilterQuery(DBFilterQuery, FilterWithTimestamp, FilterWith
             group_by_field='event_identifier',
         )
         if customized_events_only is True:
+            if filter_query.join_clause is not None:  # atm "should not happen"
+                raise InvalidFilter('Unable to filter by customized events due to conflicting filter')  # noqa: E501
+
             filter_query.join_clause = HistoryEventCustomizedOnlyJoinsFilter(and_op=True)
 
         filters: list[DBFilter] = []
@@ -922,6 +1008,13 @@ class HistoryBaseEntryFilterQuery(DBFilterQuery, FilterWithTimestamp, FilterWith
         if location is not None:
             filter_query.location_filter = DBLocationFilter(and_op=True, location=location)
             filters.append(filter_query.location_filter)
+        if excluded_locations is not None:
+            filters.append(DBMultiStringFilter(
+                and_op=True,
+                column='location',
+                values=[x.serialize_for_db() for x in excluded_locations],
+                operator='NOT IN',
+            ))
         if location_labels is not None:
             filters.append(DBMultiStringFilter(
                 and_op=True,
@@ -976,8 +1069,9 @@ class HistoryBaseEntryFilterQuery(DBFilterQuery, FilterWithTimestamp, FilterWith
 
     @staticmethod
     @abstractmethod
-    def get_count_query() -> str:
-        """Returns the count query needed for this particular type of history event filter"""
+    def get_columns() -> str:
+        """Returns all the fields/columns of this query. There is places where just using
+        * does not work due to ambiguous fields. This method helps with that."""
 
 
 class HistoryEventFilterQuery(HistoryBaseEntryFilterQuery):
@@ -988,8 +1082,8 @@ class HistoryEventFilterQuery(HistoryBaseEntryFilterQuery):
         return 'FROM history_events '
 
     @staticmethod
-    def get_count_query() -> str:
-        return 'SELECT COUNT(*) FROM history_events '
+    def get_columns() -> str:
+        return HISTORY_BASE_ENTRY_FIELDS
 
 
 class EvmEventFilterQuery(HistoryBaseEntryFilterQuery):
@@ -1008,6 +1102,7 @@ class EvmEventFilterQuery(HistoryBaseEntryFilterQuery):
             exclude_subtypes: list[HistoryEventSubType] | None = None,
             location: Location | None = None,
             location_labels: list[str] | None = None,
+            excluded_locations: list[Location] | None = None,
             ignored_ids: list[str] | None = None,
             null_columns: list[str] | None = None,
             event_identifiers: list[str] | None = None,
@@ -1036,6 +1131,7 @@ class EvmEventFilterQuery(HistoryBaseEntryFilterQuery):
             exclude_subtypes=exclude_subtypes,
             location=location,
             location_labels=location_labels,
+            excluded_locations=excluded_locations,
             ignored_ids=ignored_ids,
             null_columns=null_columns,
             event_identifiers=event_identifiers,
@@ -1063,7 +1159,7 @@ class EvmEventFilterQuery(HistoryBaseEntryFilterQuery):
             filter_query.filters.append(DBMultiBytesFilter(
                 and_op=True,
                 column='tx_hash',
-                values=tx_hashes,  # type: ignore[arg-type]  # EVMTxHash is equal to bytes
+                values=tx_hashes,
                 operator='IN',
             ))
 
@@ -1071,7 +1167,7 @@ class EvmEventFilterQuery(HistoryBaseEntryFilterQuery):
             filter_query.filters.append(DBMultiStringFilter(
                 and_op=True,
                 column='address',
-                values=addresses,  # type: ignore[arg-type]  # ChecksumEvmAddress is equal to str
+                values=addresses,
                 operator='IN',
             ))
 
@@ -1082,11 +1178,11 @@ class EvmEventFilterQuery(HistoryBaseEntryFilterQuery):
         return EVM_EVENT_JOIN
 
     @staticmethod
-    def get_count_query() -> str:
-        return f'SELECT COUNT(*) {EVM_EVENT_JOIN}'
+    def get_columns() -> str:
+        return f'{HISTORY_BASE_ENTRY_FIELDS}, {EVM_EVENT_FIELDS}'
 
 
-class EthStakingEventFilterQuery(HistoryBaseEntryFilterQuery, metaclass=ABCMeta):
+class EthStakingEventFilterQuery(HistoryBaseEntryFilterQuery, ABC):
 
     @classmethod
     def make(
@@ -1103,6 +1199,7 @@ class EthStakingEventFilterQuery(HistoryBaseEntryFilterQuery, metaclass=ABCMeta)
             exclude_subtypes: list[HistoryEventSubType] | None = None,
             location: Location | None = None,
             location_labels: list[str] | None = None,
+            excluded_locations: list[Location] | None = None,
             ignored_ids: list[str] | None = None,
             null_columns: list[str] | None = None,
             event_identifiers: list[str] | None = None,
@@ -1128,6 +1225,7 @@ class EthStakingEventFilterQuery(HistoryBaseEntryFilterQuery, metaclass=ABCMeta)
             exclude_subtypes=exclude_subtypes,
             location=location,
             location_labels=location_labels,
+            excluded_locations=excluded_locations,
             ignored_ids=ignored_ids,
             null_columns=null_columns,
             event_identifiers=event_identifiers,
@@ -1150,12 +1248,85 @@ class EthStakingEventFilterQuery(HistoryBaseEntryFilterQuery, metaclass=ABCMeta)
         return ETH_STAKING_EVENT_JOIN
 
     @staticmethod
-    def get_count_query() -> str:
-        return f'SELECT COUNT(*) {ETH_STAKING_EVENT_JOIN}'
+    def get_columns() -> str:
+        return f'{HISTORY_BASE_ENTRY_FIELDS}, {ETH_STAKING_EVENT_FIELDS}'
+
+
+class WithdrawalTypesFilter(Enum):
+    ALL = auto()
+    ONLY_EXITS = auto()
+    ONLY_PARTIAL = auto()
 
 
 class EthWithdrawalFilterQuery(EthStakingEventFilterQuery):
-    pass
+
+    @classmethod
+    def make(
+            cls: type['EthWithdrawalFilterQuery'],
+            and_op: bool = True,
+            order_by_rules: list[tuple[str, bool]] | None = None,
+            limit: int | None = None,
+            offset: int | None = None,
+            from_ts: Timestamp | None = None,
+            to_ts: Timestamp | None = None,
+            assets: tuple[Asset, ...] | None = None,
+            event_types: list[HistoryEventType] | None = None,
+            event_subtypes: list[HistoryEventSubType] | None = None,
+            exclude_subtypes: list[HistoryEventSubType] | None = None,
+            location: Location | None = None,
+            location_labels: list[str] | None = None,
+            excluded_locations: list[Location] | None = None,
+            ignored_ids: list[str] | None = None,
+            null_columns: list[str] | None = None,
+            event_identifiers: list[str] | None = None,
+            entry_types: IncludeExcludeFilterData | None = None,
+            exclude_ignored_assets: bool = False,
+            customized_events_only: bool = False,
+            validator_indices: list[int] | None = None,
+            withdrawal_types_filter: WithdrawalTypesFilter = WithdrawalTypesFilter.ALL,
+    ) -> 'EthWithdrawalFilterQuery':
+        if entry_types is None:
+            entry_type_values = [HistoryBaseEntryType.ETH_WITHDRAWAL_EVENT]
+            entry_types = IncludeExcludeFilterData(values=entry_type_values)
+
+        filter_query = super().make(
+            and_op=and_op,
+            order_by_rules=order_by_rules,
+            limit=limit,
+            offset=offset,
+            from_ts=from_ts,
+            to_ts=to_ts,
+            assets=assets,
+            event_types=event_types,
+            event_subtypes=event_subtypes,
+            exclude_subtypes=exclude_subtypes,
+            location=location,
+            location_labels=location_labels,
+            excluded_locations=excluded_locations,
+            ignored_ids=ignored_ids,
+            null_columns=null_columns,
+            event_identifiers=event_identifiers,
+            entry_types=entry_types,
+            exclude_ignored_assets=exclude_ignored_assets,
+            customized_events_only=customized_events_only,
+            validator_indices=validator_indices,
+        )
+        if withdrawal_types_filter != WithdrawalTypesFilter.ALL:
+            filter_query.filters.append(DBEqualsFilter(
+                and_op=True,
+                column='is_exit_or_blocknumber',
+                value=0 if withdrawal_types_filter == WithdrawalTypesFilter.ONLY_PARTIAL else 1,
+            ))
+
+        return filter_query
+
+    @staticmethod
+    def get_join_query() -> str:
+        return ETH_STAKING_EVENT_JOIN
+
+    @staticmethod
+    def get_count_query() -> str:
+        return f'SELECT COUNT(*) {ETH_STAKING_EVENT_JOIN}'
 
 
 class EthBlockEventFilterQuery(EthStakingEventFilterQuery):
@@ -1178,6 +1349,7 @@ class EthDepositEventFilterQuery(EvmEventFilterQuery, EthStakingEventFilterQuery
             exclude_subtypes: list[HistoryEventSubType] | None = None,
             location: Location | None = None,
             location_labels: list[str] | None = None,
+            excluded_locations: list[Location] | None = None,
             ignored_ids: list[str] | None = None,
             null_columns: list[str] | None = None,
             event_identifiers: list[str] | None = None,
@@ -1204,6 +1376,7 @@ class EthDepositEventFilterQuery(EvmEventFilterQuery, EthStakingEventFilterQuery
             exclude_subtypes=exclude_subtypes,
             location=location,
             location_labels=location_labels,
+            excluded_locations=excluded_locations,
             ignored_ids=ignored_ids,
             null_columns=null_columns,
             event_identifiers=event_identifiers,
@@ -1227,8 +1400,8 @@ class EthDepositEventFilterQuery(EvmEventFilterQuery, EthStakingEventFilterQuery
         return ETH_DEPOSIT_EVENT_JOIN
 
     @staticmethod
-    def get_count_query() -> str:
-        return f'SELECT COUNT(*) {ETH_DEPOSIT_EVENT_JOIN}'
+    def get_columns() -> str:
+        return f'{HISTORY_BASE_ENTRY_FIELDS}, {EVM_EVENT_FIELDS}, {ETH_STAKING_EVENT_FIELDS}'
 
 
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
@@ -1249,9 +1422,6 @@ class DBSubtableSelectFilter(DBFilter):
             querystr += f' WHERE {self.select_condition}'
         querystr += ')'
         return [querystr], []
-
-    def is_ignored_asset_filter(self) -> bool:
-        return self.select_condition is not None and self.select_condition == 'name="ignored_asset"'  # noqa: E501
 
 
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
@@ -1318,11 +1488,13 @@ class AddressbookFilterQuery(DBFilterQuery):
             blockchain: SupportedBlockchain | None = None,
             optional_chain_addresses: list[OptionalChainAddress] | None = None,
             substring_search: str | None = None,
+            order_by_rules: list[tuple[str, bool]] | None = None,
     ) -> 'AddressbookFilterQuery':
         filter_query = cls.create(
             and_op=and_op,
             limit=limit,
             offset=offset,
+            order_by_rules=order_by_rules,
         )
         filters: list[DBFilter] = []
         if substring_search is not None:
@@ -1347,6 +1519,8 @@ class AddressbookFilterQuery(DBFilterQuery):
 
 
 class AssetsFilterQuery(DBFilterQuery):
+    ignored_assets_handling: IgnoredAssetsHandling = IgnoredAssetsHandling.NONE
+
     @classmethod
     def make(
             cls: type['AssetsFilterQuery'],
@@ -1362,6 +1536,7 @@ class AssetsFilterQuery(DBFilterQuery):
             asset_type: AssetType | None = None,
             identifiers: list[str] | None = None,
             show_user_owned_assets_only: bool = False,
+            show_whitelisted_assets_only: bool = False,
             return_exact_matches: bool = False,
             chain_id: ChainID | None = None,
             identifier_column_name: str = 'identifier',
@@ -1377,6 +1552,7 @@ class AssetsFilterQuery(DBFilterQuery):
             order_by_rules=order_by_rules,
             order_by_case_sensitive=False,
         )
+        filter_query.ignored_assets_handling = ignored_assets_handling
         filters: list[DBFilter] = []
         if name is not None:
             filters.append(DBSubStringFilter(
@@ -1424,12 +1600,6 @@ class AssetsFilterQuery(DBFilterQuery):
                 select_table='user_owned_assets',
                 select_condition=None,
             ))
-        if ignored_assets_handling is not IgnoredAssetsHandling.NONE:
-            filters.append(DBIgnoredAssetsFilter(
-                and_op=True,
-                asset_key=identifier_column_name,
-                operator=ignored_assets_handling.operator(),
-            ))
         if chain_id is not None:
             filters.append(DBEqualsFilter(
                 and_op=True,
@@ -1442,7 +1612,57 @@ class AssetsFilterQuery(DBFilterQuery):
                 column='address',
                 value=address,
             ))
+        if show_whitelisted_assets_only is True:
+            filters.append(DBSubtableSelectFilter(
+                and_op=True,
+                asset_key=identifier_column_name,
+                operator='IN',
+                select_value='value',
+                select_table='general_cache',
+                select_condition=f'key="{compute_cache_key((CacheType.SPAM_ASSET_FALSE_POSITIVE,))}"',
+            ))
         filter_query.filters = filters
+        return filter_query
+
+
+class LocationAssetMappingsFilterQuery(DBFilterQuery):
+    """DBFilterQuery with a nullable DB Location filter. Here the if location_filter is None then
+    no filter is applied. If location_filter exists, but with the `location` value as None then the
+    filter will be applied with `location IS NULL` clause. Other normal values of location in
+    location filter will work similar to DBLocationFilter."""
+    location_filter: DBNullableLocationFilter | None = None
+
+    @classmethod
+    def make(
+            cls: type['LocationAssetMappingsFilterQuery'],
+            limit: int,
+            offset: int,
+            location: Location | None | Literal['common'] = None,
+            location_symbol: str | None = None,
+            and_op: bool = True,
+    ) -> 'LocationAssetMappingsFilterQuery':
+        """Make and return the LocationAssetMappingsFilterQuery instance according to the passed
+        arguments. `limit` and `offset` are for pagination and works with DBFilterPagination.
+        `location` can be a valid Location value, None, or "common". If `location` is None, filter
+        will not be applied. If valid Location value is given, that location will be filtered. If
+        `location` is "common" then filter will be applied for columns where location is NULL."""
+        filter_query = cls.create(
+            and_op=and_op,
+            limit=limit,
+            offset=offset,
+        )
+        if location_symbol is not None:
+            filter_query.filters.append(DBSubStringFilter(
+                and_op=True,
+                field='exchange_symbol',
+                search_string=location_symbol,
+            ))
+        if location is not None:
+            filter_query.location_filter = DBNullableLocationFilter(
+                and_op=True,
+                location=None if location == 'common' else location,
+            )
+            filter_query.filters.append(filter_query.location_filter)
         return filter_query
 
 
@@ -1612,71 +1832,79 @@ class MultiTableFilterQuery:
 @dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
 class LevenshteinFilterQuery(MultiTableFilterQuery):
     """
-    Filter query for levenshtein search. Accepts a substring to filter by and a chain id.
-    Is used for querying both assets and nfts.
+    Filter query for levenshtein search. Accepts a substring or an address to filter by and a
+    chain id. Is used for querying both assets and nfts.
     """
-    substring_search: str
+    substring_search: str | None
+    ignored_assets_handling: IgnoredAssetsHandling = IgnoredAssetsHandling.NONE
 
     @classmethod
     def make(
             cls,
             and_op: bool = True,
-            substring_search: str = '',  # substring is always required for levenstein
+            substring_search: str | None = None,
             chain_id: ChainID | None = None,
+            address: ChecksumEvmAddress | None = None,
             ignored_assets_handling: IgnoredAssetsHandling = IgnoredAssetsHandling.NONE,
     ) -> 'LevenshteinFilterQuery':
+        assert substring_search is not None or address is not None  # substring search and address can't be none at the same time  # noqa: E501
         filter_query = LevenshteinFilterQuery(
             and_op=and_op,
             filters=[],
             substring_search=substring_search,
         )
+        filter_query.ignored_assets_handling = ignored_assets_handling
         filters: list[tuple[DBFilter, str]] = []  # filter + table name for which to use it.
-
-        name_filter = DBSubStringFilter(
-            and_op=True,
-            field='name',
-            search_string=substring_search,
-        )
-        assets_substring_filter = DBNestedFilter(
-            and_op=False,
-            filters=[
-                name_filter,
-                DBSubStringFilter(
-                    and_op=True,
-                    field='symbol',
-                    search_string=substring_search,
-                ),
-            ],
-        )
-        filters.append((assets_substring_filter, 'assets'))
-        nfts_substring_filter = DBNestedFilter(
-            and_op=False,
-            filters=[
-                name_filter,
-                DBSubStringFilter(
-                    and_op=True,
-                    field='collection_name',
-                    search_string=substring_search,
-                ),
-            ],
-        )
-        filters.append((nfts_substring_filter, 'nfts'))
+        if substring_search is not None:
+            name_filter = DBSubStringFilter(
+                and_op=True,
+                field='name',
+                search_string=substring_search,
+            )
+            assets_substring_filter = DBNestedFilter(
+                and_op=False,
+                filters=[
+                    name_filter,
+                    DBSubStringFilter(
+                        and_op=True,
+                        field='symbol',
+                        search_string=substring_search,
+                    ),
+                ],
+            )
+            filters.append((assets_substring_filter, 'assets'))
+            nfts_substring_filter = DBNestedFilter(
+                and_op=False,
+                filters=[
+                    name_filter,
+                    DBSubStringFilter(
+                        and_op=True,
+                        field='collection_name',
+                        search_string=substring_search,
+                    ),
+                ],
+            )
+            filters.append((nfts_substring_filter, 'nfts'))
 
         if chain_id is not None:
-            new_filter = DBEqualsFilter(
-                and_op=True,
-                column='chain',
-                value=chain_id.serialize_for_db(),
+            nested_filter = DBNestedFilter(
+                and_op=False,
+                filters=[
+                    DBEqualsFilter(
+                        and_op=True,
+                        column='chain',
+                        value=chain_id.serialize_for_db(),
+                        include_null_values=True,
+                    ),
+                    DBNullFilter(and_op=True, columns=['chain'], verb='IS'),
+                ],
             )
-            filters.append((new_filter, 'assets'))
+            filters.append((nested_filter, 'assets'))
 
-        if ignored_assets_handling is not IgnoredAssetsHandling.NONE:
-            ignored_assets_filter = DBIgnoredAssetsFilter(
-                and_op=True,
-                asset_key='assets.identifier',
-                operator=ignored_assets_handling.operator(),
+        if address is not None:
+            filters.append(
+                (DBEqualsFilter(and_op=True, column='address', value=address), 'assets'),
             )
-            filters.append((ignored_assets_filter, 'assets'))
 
         filter_query.filters = filters
         return filter_query
@@ -1722,7 +1950,7 @@ class AccountingRulesFilterQuery(DBFilterQuery):
             offset: int | None = None,
             event_types: list[HistoryEventType] | None = None,
             event_subtypes: list[HistoryEventSubType] | None = None,
-            counterparties: list[str] | None = None,
+            counterparties: list[str | None] | None = None,
     ) -> 'AccountingRulesFilterQuery':
         if order_by_rules is None:
             order_by_rules = [('identifier', False)]
@@ -1749,12 +1977,23 @@ class AccountingRulesFilterQuery(DBFilterQuery):
                 operator='IN',
             ))
         if counterparties is not None:
-            filters.append(DBMultiStringFilter(
-                and_op=True,
-                column='counterparty',
-                values=counterparties,
-                operator='IN',
-            ))
+            non_null_counterparties = []
+            has_null = False
+            for counterparty in counterparties:
+                if counterparty is None:
+                    has_null = True
+                    continue
+                non_null_counterparties.append(counterparty)
+
+            if has_null:
+                non_null_counterparties.append('NONE')
+            if len(non_null_counterparties) != 0:
+                filters.append(DBMultiStringFilter(
+                    and_op=True,
+                    column='counterparty',
+                    values=non_null_counterparties,
+                    operator='IN',
+                ))
 
         filter_query.filters = filters
         return filter_query

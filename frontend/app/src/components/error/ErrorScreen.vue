@@ -14,8 +14,8 @@ const props = withDefaults(
     subtitle: '',
     message: '',
     error: '',
-    alternative: ''
-  }
+    alternative: '',
+  },
 );
 
 const { error, message } = toRefs(props);
@@ -32,9 +32,16 @@ const errorText = computed(() => {
 <template>
   <div class="error-screen">
     <div>
-      <RuiIcon size="120" color="error" name="error-warning-line" />
+      <RuiIcon
+        size="120"
+        color="error"
+        name="error-warning-line"
+      />
     </div>
-    <div v-if="header" class="error-screen__title">
+    <div
+      v-if="header"
+      class="error-screen__title"
+    >
       <div class="text-h4">
         {{ header }}
       </div>
@@ -42,7 +49,10 @@ const errorText = computed(() => {
 
     <slot />
 
-    <RuiCard v-if="!alternative" class="error-screen__message mt-3">
+    <RuiCard
+      v-if="!alternative"
+      class="error-screen__message mt-3"
+    >
       <template #header>
         {{ title }}
 
@@ -54,24 +64,35 @@ const errorText = computed(() => {
       <template #subheader>
         {{ subtitle }}
       </template>
-      <div
-        class="font-light text-rui-text-secondary` error-screen__description"
-      >
+      <div class="font-light text-rui-text-secondary` error-screen__description">
         <pre class="text-caption text-wrap error-screen__description__message">
           {{ message }}
-          <RuiDivider v-if="error" class="mt-4 mb-2"/>
+          <RuiDivider
+            v-if="error"
+            class="mt-4 mb-2"
+          />
           {{ error }}
         </pre>
-        <textarea v-model="errorText" class="error-screen__copy-area" />
+        <textarea
+          v-model="errorText"
+          class="error-screen__copy-area"
+        />
       </div>
     </RuiCard>
-    <div v-else class="text-h5 mt-12">{{ alternative }}</div>
+    <div
+      v-else
+      class="text-h5 mt-12"
+    >
+      {{ alternative }}
+    </div>
     <slot name="bottom" />
   </div>
 </template>
 
 <style scoped lang="scss">
 .error-screen {
+  @apply bg-white dark:bg-black;
+
   height: 100%;
   width: 100%;
   z-index: 99999;
@@ -104,7 +125,5 @@ const errorText = computed(() => {
       width: 100%;
     }
   }
-
-  @apply bg-white dark:bg-black;
 }
 </style>

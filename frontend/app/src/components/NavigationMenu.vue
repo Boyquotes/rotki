@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { useAppRoutes } from '@/router/routes';
+import type { RuiIcons } from '@rotki/ui-library';
+import type { RouteLocationRaw } from 'vue-router';
 
 interface NavItemDetails {
   readonly text: string;
-  readonly route: string;
+  readonly route: RouteLocationRaw;
   readonly class?: string;
-  readonly icon: string;
+  readonly icon: RuiIcons;
   readonly image?: string;
   readonly component?: any;
 }
@@ -30,8 +32,8 @@ withDefaults(
     isMini?: boolean;
   }>(),
   {
-    isMini: false
-  }
+    isMini: false,
+  },
 );
 
 const { appRoutes } = useAppRoutes();
@@ -40,7 +42,7 @@ const navItems: MenuItem[] = [
   {
     type: 'item',
     class: 'dashboard',
-    ...Routes.DASHBOARD
+    ...Routes.DASHBOARD,
   },
   {
     type: 'group',
@@ -50,29 +52,29 @@ const navItems: MenuItem[] = [
       {
         type: 'item',
         class: 'accounts-balances-blockchain',
-        ...Routes.ACCOUNTS_BALANCES_BLOCKCHAIN
+        ...Routes.ACCOUNTS_BALANCES_BLOCKCHAIN,
       },
       {
         type: 'item',
         class: 'accounts-balances-exchange',
-        ...Routes.ACCOUNTS_BALANCES_EXCHANGE
+        ...Routes.ACCOUNTS_BALANCES_EXCHANGE,
       },
       {
         type: 'item',
         class: 'accounts-balances-manual',
-        ...Routes.ACCOUNTS_BALANCES_MANUAL
+        ...Routes.ACCOUNTS_BALANCES_MANUAL,
       },
       {
         type: 'item',
         class: 'accounts-balances-non-fungible',
-        ...Routes.ACCOUNTS_BALANCES_NON_FUNGIBLE
-      }
-    ]
+        ...Routes.ACCOUNTS_BALANCES_NON_FUNGIBLE,
+      },
+    ],
   },
   {
     type: 'item',
     class: 'nfts',
-    ...Routes.NFTS
+    ...Routes.NFTS,
   },
   {
     type: 'group',
@@ -82,19 +84,19 @@ const navItems: MenuItem[] = [
       {
         type: 'item',
         class: 'history-trades',
-        ...Routes.HISTORY_TRADES
+        ...Routes.HISTORY_TRADES,
       },
       {
         type: 'item',
         class: 'history-deposits-withdrawals',
-        ...Routes.HISTORY_DEPOSITS_WITHDRAWALS
+        ...Routes.HISTORY_DEPOSITS_WITHDRAWALS,
       },
       {
         type: 'item',
         class: 'history-events',
-        ...Routes.HISTORY_EVENTS
-      }
-    ]
+        ...Routes.HISTORY_EVENTS,
+      },
+    ],
   },
   {
     type: 'group',
@@ -104,43 +106,43 @@ const navItems: MenuItem[] = [
       {
         type: 'item',
         class: 'defi-overview',
-        ...Routes.DEFI_OVERVIEW
+        ...Routes.DEFI_OVERVIEW,
       },
       {
         type: 'item',
         class: 'defi-deposits',
-        ...Routes.DEFI_DEPOSITS
+        ...Routes.DEFI_DEPOSITS,
       },
       {
         type: 'item',
         class: 'defi-liabilities',
-        ...Routes.DEFI_LIABILITIES
+        ...Routes.DEFI_LIABILITIES,
       },
       {
         type: 'item',
         class: 'defi-airdrops',
-        ...Routes.DEFI_AIRDROPS
-      }
-    ]
+        ...Routes.DEFI_AIRDROPS,
+      },
+    ],
   },
   {
     type: 'item',
     class: 'statistics',
-    ...Routes.STATISTICS
+    ...Routes.STATISTICS,
   },
   {
     type: 'item',
     class: 'staking',
     ...Routes.STAKING,
-    route: Routes.STAKING.route.split(':')[0]
+    route: '/staking',
   },
   {
     type: 'item',
     class: 'profit-loss-report',
-    ...Routes.PROFIT_LOSS_REPORTS
+    ...Routes.PROFIT_LOSS_REPORTS,
   },
   {
-    type: 'divider'
+    type: 'divider',
   },
   {
     type: 'group',
@@ -150,19 +152,19 @@ const navItems: MenuItem[] = [
       {
         type: 'item',
         class: 'asset-manager-managed',
-        ...Routes.ASSET_MANAGER_MANAGED
+        ...Routes.ASSET_MANAGER_MANAGED,
       },
       {
         type: 'item',
         class: 'asset-manager-custom',
-        ...Routes.ASSET_MANAGER_CUSTOM
+        ...Routes.ASSET_MANAGER_CUSTOM,
       },
       {
         type: 'item',
-        class: 'asset-manager-newly-detected',
-        ...Routes.ASSET_MANAGER_NEWLY_DETECTED
-      }
-    ]
+        class: 'asset-manager-more',
+        ...Routes.ASSET_MANAGER_MORE,
+      },
+    ],
   },
   {
     type: 'group',
@@ -172,22 +174,22 @@ const navItems: MenuItem[] = [
       {
         type: 'item',
         class: 'price-manager-latest',
-        ...Routes.PRICE_MANAGER_LATEST
+        ...Routes.PRICE_MANAGER_LATEST,
       },
       {
         type: 'item',
         class: 'price-manager-historic',
-        ...Routes.PRICE_MANAGER_HISTORIC
-      }
-    ]
+        ...Routes.PRICE_MANAGER_HISTORIC,
+      },
+    ],
   },
   {
     type: 'item',
     class: 'address-book-manager',
-    ...Routes.ADDRESS_BOOK_MANAGER
+    ...Routes.ADDRESS_BOOK_MANAGER,
   },
   {
-    type: 'divider'
+    type: 'divider',
   },
   {
     type: 'group',
@@ -197,167 +199,118 @@ const navItems: MenuItem[] = [
       {
         type: 'item',
         class: 'api-keys-premium',
-        ...Routes.API_KEYS_ROTKI_PREMIUM
+        ...Routes.API_KEYS_ROTKI_PREMIUM,
       },
       {
         type: 'item',
         class: 'api-keys-exchanges',
-        ...Routes.API_KEYS_EXCHANGES
+        ...Routes.API_KEYS_EXCHANGES,
       },
       {
         type: 'item',
         class: 'api-keys-external-services',
-        ...Routes.API_KEYS_EXTERNAL_SERVICES
-      }
-    ]
+        ...Routes.API_KEYS_EXTERNAL_SERVICES,
+      },
+    ],
   },
   {
     type: 'item',
-    ...Routes.IMPORT
-  }
+    ...Routes.IMPORT,
+  },
+  {
+    type: 'divider',
+  },
+  {
+    type: 'item',
+    ...Routes.CALENDAR,
+  },
 ];
+
+const route = useRoute();
+const router = useRouter();
+
+function isRouteMatch(location: RouteLocationRaw) {
+  return route.path.startsWith(router.resolve(location).path);
+}
 </script>
 
 <template>
-  <div>
-    <VList
-      nav
-      class="navigation-menu"
-      :class="{ 'navigation-menu--mini': isMini }"
+  <div
+    class="p-2"
+    :class="{ '!p-0': isMini }"
+  >
+    <template
+      v-for="(navItem, i) in navItems"
+      :key="i"
     >
-      <VListItemGroup>
-        <template v-for="(navItem, i) in navItems">
-          <VListItem
-            v-if="navItem.type === 'item'"
-            :key="i"
-            :class="`navigation-menu__item navigation__${navItem.class}`"
-            active-class="navigation-menu__item--active"
-            :to="navItem.route"
-          >
+      <RouterLink
+        v-if="navItem.type === 'item'"
+        :to="navItem.route"
+        custom
+      >
+        <template #default="{ isActive, href }">
+          <a :href="href">
             <NavigationMenuItem
-              :show-tooltips="isMini"
+              :class="`navigation__${navItem.class}`"
+              :mini="isMini"
               :text="navItem.text"
               :icon="navItem.icon"
               :image="navItem.image"
+              :active="isActive || isRouteMatch(navItem.route)"
               :icon-component="navItem.component"
             />
-          </VListItem>
-          <VListGroup v-else-if="navItem.type === 'group'" :key="i">
-            <template #activator>
-              <NavigationMenuItem
-                :show-tooltips="isMini"
-                :text="navItem.text"
-                :icon="navItem.icon"
-                :icon-component="navItem.component"
-                :image="navItem.image"
-                :class="`navigation-menu__item navigation__${navItem.class}`"
-              />
-            </template>
-            <div
-              class="navigation-submenu"
-              :class="{ 'navigation-submenu--mini': isMini }"
-            >
-              <VListItem
-                v-for="(subNavItem, si) in navItem.items"
-                :key="si"
-                :class="`navigation-menu__item navigation__${subNavItem.class}`"
-                active-class="navigation-menu__item--active"
-                :to="subNavItem.route"
-              >
-                <template #default="{ active }">
-                  <NavigationMenuItem
-                    :show-tooltips="isMini"
-                    :text="subNavItem.text"
-                    :icon="subNavItem.icon"
-                    :image="subNavItem.image"
-                    :icon-component="subNavItem.component"
-                    :active="active"
-                    sub-menu
-                  />
-                </template>
-              </VListItem>
-            </div>
-          </VListGroup>
-          <VDivider
-            v-else-if="navItem.type === 'divider'"
-            :key="i"
-            class="my-2"
-          />
+          </a>
         </template>
-      </VListItemGroup>
-    </VList>
+      </RouterLink>
+      <template v-else-if="navItem.type === 'group'">
+        <RouterLink
+          :key="navItem.route.toString()"
+          :to="navItem.route"
+          custom
+        >
+          <template #default="{ isActive: isActiveParent }">
+            <NavigationMenuItem
+              :class="`navigation__${navItem.class}`"
+              :mini="isMini"
+              :text="navItem.text"
+              :icon="navItem.icon"
+              :icon-component="navItem.component"
+              :image="navItem.image"
+              :active="isActiveParent"
+              parent
+            >
+              <div :class="{ 'bg-rui-grey-200 dark:bg-rui-grey-800': isMini }">
+                <RouterLink
+                  v-for="(subNavItem, si) in navItem.items"
+                  :key="si"
+                  :to="subNavItem.route"
+                  custom
+                >
+                  <template #default="{ isActive, href }">
+                    <a :href="href">
+                      <NavigationMenuItem
+                        :class="`navigation__${subNavItem.class}`"
+                        :mini="isMini"
+                        :text="subNavItem.text"
+                        :icon="subNavItem.icon"
+                        :image="subNavItem.image"
+                        :icon-component="subNavItem.component"
+                        :active="isActive || isRouteMatch(subNavItem.route)"
+                        sub-menu
+                      />
+                    </a>
+                  </template>
+                </RouterLink>
+              </div>
+            </NavigationMenuItem>
+          </template>
+        </RouterLink>
+      </template>
+      <RuiDivider
+        v-else-if="navItem.type === 'divider'"
+        :key="i"
+        class="my-2"
+      />
+    </template>
   </div>
 </template>
-
-<style scoped lang="scss">
-:deep(.v-list-item) {
-  border-radius: 0.25rem;
-  padding: 0 0.75rem;
-  margin-bottom: 0 !important;
-}
-
-.navigation-menu {
-  &__item {
-    /* stylelint-disable selector-class-pattern,selector-nested-pattern */
-
-    :deep(.v-list-item__icon) {
-      @apply text-rui-text-secondary;
-    }
-
-    &--active {
-      :deep(.v-list-item__icon) {
-        /* stylelint-enable selector-class-pattern,selector-nested-pattern */
-        @apply text-white;
-      }
-
-      :deep(.nav-icon) {
-        opacity: 1 !important;
-        filter: brightness(0) invert(100%);
-      }
-      @apply bg-rui-primary font-bold;
-      @apply text-white;
-    }
-  }
-
-  &--mini {
-    padding: 0;
-
-    :deep(.v-list-item) {
-      padding-left: 1.5rem;
-      justify-content: center;
-
-      .v-list-item {
-        &__content {
-          display: none !important;
-        }
-      }
-    }
-  }
-}
-
-.navigation-submenu {
-  :deep(.v-list-item) {
-    padding-left: 3rem;
-    min-height: 0;
-  }
-
-  &--mini {
-    background: var(--v-rotki-light-grey-darken1);
-
-    :deep(.v-list-item) {
-      padding-left: 1.5rem;
-    }
-  }
-}
-
-.theme {
-  &--dark {
-    /* stylelint-disable selector-class-pattern,selector-nested-pattern */
-
-    :deep(.navigation-submenu--mini) {
-      background: var(--v-secondary-lighten1);
-    }
-    /* stylelint-enable selector-class-pattern,selector-nested-pattern */
-  }
-}
-</style>

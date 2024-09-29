@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import logging
+import os
 import platform
 import time
 from base64 import b64decode, b64encode
@@ -27,7 +28,7 @@ from rotkehlchen.errors.api import (
 from rotkehlchen.errors.misc import RemoteError
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import Timestamp
-from rotkehlchen.utils.misc import set_user_agent
+from rotkehlchen.utils.misc import is_production, set_user_agent
 from rotkehlchen.utils.serialization import jsonloads_dict
 
 logger = logging.getLogger(__name__)
@@ -182,9 +183,13 @@ class Premium:
         )
         self.session.mount('https://', adapter)
         self.apiversion = '1'
-        self.rotki_api = f'https://rotki.com/api/{self.apiversion}/'
-        self.rotki_web = f'https://rotki.com/webapi/{self.apiversion}/'
-        self.rotki_nest = f'https://rotki.com/nest/{self.apiversion}/'
+        rotki_base_url = 'rotki.com'
+        if is_production() is False and os.environ.get('ROTKI_API_ENVIRONMENT') == 'staging':
+            rotki_base_url = 'staging.rotki.com'
+
+        self.rotki_api = f'https://{rotki_base_url}/api/{self.apiversion}/'
+        self.rotki_web = f'https://{rotki_base_url}/webapi/{self.apiversion}/'
+        self.rotki_nest = f'https://{rotki_base_url}/nest/{self.apiversion}/'
         self.reset_credentials(credentials)
         self.username = username
 
@@ -336,7 +341,7 @@ class Premium:
         if method == 'backup':
             # nest uses hex for generating the signature since digest returns a string with the \x
             # format in python.
-            message = urlpath.encode() + hashlib.sha256(hashable).digest().hex().encode()
+            message = urlpath.encode() + hashlib.sha256(hashable).hexdigest().encode()
         else:
             message = urlpath.encode() + hashlib.sha256(hashable).digest()
         signature = hmac.new(
@@ -463,7 +468,7 @@ class Premium:
         there is an error returned by the server
         - Raises PremiumAuthenticationError if the given key is rejected by the Rotkehlchen server
         """
-        data = self.sign('statistics_rendererv2', version=7)
+        data = self.sign('statistics_rendererv2', version=11)
 
         try:
             response = self.session.get(
@@ -527,3 +532,8 @@ def premium_create_and_verify(credentials: PremiumCredentials, username: str) ->
         return premium
 
     raise PremiumAuthenticationError('rotki API key was rejected by server')
+
+
+def has_premium_check(premium: Premium | None) -> bool:
+    """Helper function to check if we have premium"""
+    return premium is not None and premium.is_active()

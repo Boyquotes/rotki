@@ -1,13 +1,12 @@
-import { type ProfitLossModel } from '@rotki/common/lib/defi';
-import { AaveBalances, AaveHistory } from '@rotki/common/lib/defi/aave';
+import { AaveBalances, AaveHistory, type ProfitLossModel } from '@rotki/common';
 import { Module } from '@/types/modules';
 import { Section, Status } from '@/types/status';
-import { type TaskMeta } from '@/types/task';
 import { TaskType } from '@/types/task-type';
+import type { TaskMeta } from '@/types/task';
 
 export const useAaveStore = defineStore('defi/aave', () => {
-  const balances: Ref<AaveBalances> = ref({});
-  const history: Ref<AaveHistory> = ref({});
+  const balances = ref<AaveBalances>({});
+  const history = ref<AaveHistory>({});
 
   const { notify } = useNotificationsStore();
   const { awaitTask } = useTaskStore();
@@ -17,46 +16,43 @@ export const useAaveStore = defineStore('defi/aave', () => {
 
   const { fetchAaveBalances, fetchAaveHistory } = useAaveApi();
 
-  const { resetStatus, setStatus, fetchDisabled } = useStatusUpdater(
-    Section.DEFI_AAVE_BALANCES
-  );
+  const { resetStatus, setStatus, fetchDisabled } = useStatusUpdater(Section.DEFI_AAVE_BALANCES);
 
-  const aaveTotalEarned = (addresses: string[]) =>
-    computed(() => {
-      const earned: ProfitLossModel[] = [];
-      const aaveHistory = get(history);
+  const aaveTotalEarned = (addresses: string[]): ComputedRef<ProfitLossModel[]> => computed<ProfitLossModel[]>(() => {
+    const earned: ProfitLossModel[] = [];
+    const aaveHistory = get(history);
 
-      for (const address in aaveHistory) {
-        if (addresses.length > 0 && !addresses.includes(address)) {
-          continue;
+    for (const address in aaveHistory) {
+      if (addresses.length > 0 && !addresses.includes(address))
+        continue;
+
+      const totalEarned = aaveHistory[address].totalEarnedInterest;
+      for (const asset in totalEarned) {
+        const index = earned.findIndex(e => e.asset === asset);
+        if (index < 0) {
+          earned.push({
+            address: '',
+            asset,
+            value: totalEarned[asset],
+          });
         }
-        const totalEarned = aaveHistory[address].totalEarnedInterest;
-        for (const asset in totalEarned) {
-          const index = earned.findIndex(e => e.asset === asset);
-          if (index < 0) {
-            earned.push({
-              address: '',
-              asset,
-              value: totalEarned[asset]
-            });
-          } else {
-            earned[index] = {
-              ...earned[index],
-              value: balanceSum(earned[index].value, totalEarned[asset])
-            };
-          }
+        else {
+          earned[index] = {
+            ...earned[index],
+            value: balanceSum(earned[index].value, totalEarned[asset]),
+          };
         }
       }
-      return earned;
-    });
+    }
+    return earned;
+  });
 
-  const fetchBalances = async (refresh = false) => {
-    if (!get(activeModules).includes(Module.AAVE)) {
+  const fetchBalances = async (refresh = false): Promise<void> => {
+    if (!get(activeModules).includes(Module.AAVE))
       return;
-    }
-    if (fetchDisabled(refresh)) {
+
+    if (fetchDisabled(refresh))
       return;
-    }
 
     const newStatus = refresh ? Status.REFRESHING : Status.LOADING;
     setStatus(newStatus);
@@ -64,40 +60,37 @@ export const useAaveStore = defineStore('defi/aave', () => {
     try {
       const taskType = TaskType.AAVE_BALANCES;
       const { taskId } = await fetchAaveBalances();
-      const { result } = await awaitTask<AaveBalances, TaskMeta>(
-        taskId,
-        taskType,
-        {
-          title: t('actions.defi.aave_balances.task.title')
-        }
-      );
+      const { result } = await awaitTask<AaveBalances, TaskMeta>(taskId, taskType, {
+        title: t('actions.defi.aave_balances.task.title'),
+      });
       set(balances, AaveBalances.parse(result));
-    } catch (e: any) {
-      const message = t('actions.defi.aave_balances.error.description', {
-        error: e.message
-      });
-      const title = t('actions.defi.aave_balances.error.title');
-      notify({
-        title,
-        message,
-        display: true
-      });
+    }
+    catch (error: any) {
+      if (!isTaskCancelled(error)) {
+        const message = t('actions.defi.aave_balances.error.description', {
+          error: error.message,
+        });
+        const title = t('actions.defi.aave_balances.error.title');
+        notify({
+          title,
+          message,
+          display: true,
+        });
+      }
     }
 
     setStatus(Status.LOADED);
   };
 
-  const fetchHistory = async (payload: { refresh?: boolean }) => {
-    if (!get(activeModules).includes(Module.AAVE) || !get(premium)) {
+  const fetchHistory = async (payload: { refresh?: boolean }): Promise<void> => {
+    if (!get(activeModules).includes(Module.AAVE) || !get(premium))
       return;
-    }
 
-    const section = Section.DEFI_AAVE_HISTORY;
+    const section = { section: Section.DEFI_AAVE_HISTORY };
     const refresh = payload?.refresh;
 
-    if (fetchDisabled(!!refresh, section)) {
+    if (fetchDisabled(!!refresh, section))
       return;
-    }
 
     const newStatus = refresh ? Status.REFRESHING : Status.LOADING;
     setStatus(newStatus, section);
@@ -105,42 +98,39 @@ export const useAaveStore = defineStore('defi/aave', () => {
     try {
       const taskType = TaskType.AAVE_HISTORY;
       const { taskId } = await fetchAaveHistory();
-      const { result } = await awaitTask<AaveHistory, TaskMeta>(
-        taskId,
-        taskType,
-        {
-          title: t('actions.defi.aave_history.task.title')
-        }
-      );
+      const { result } = await awaitTask<AaveHistory, TaskMeta>(taskId, taskType, {
+        title: t('actions.defi.aave_history.task.title'),
+      });
 
       set(history, AaveHistory.parse(result));
-    } catch (e: any) {
-      logger.error(e);
-      const message = t('actions.defi.aave_history.error.description', {
-        error: e.message
-      });
-      const title = t('actions.defi.aave_history.error.title');
+    }
+    catch (error: any) {
+      if (!isTaskCancelled(error)) {
+        logger.error(error);
+        const message = t('actions.defi.aave_history.error.description', {
+          error: error.message,
+        });
+        const title = t('actions.defi.aave_history.error.title');
 
-      notify({
-        title,
-        message,
-        display: true
-      });
+        notify({
+          title,
+          message,
+          display: true,
+        });
+      }
     }
 
     setStatus(Status.LOADED, section);
   };
 
-  const reset = () => {
+  const reset = (): void => {
     set(balances, {});
     set(history, {});
     resetStatus();
-    resetStatus(Section.DEFI_AAVE_HISTORY);
+    resetStatus({ section: Section.DEFI_AAVE_HISTORY });
   };
 
-  const addresses: ComputedRef<string[]> = computed(() =>
-    getProtocolAddresses(get(balances), get(history))
-  );
+  const addresses = computed<string[]>(() => getProtocolAddresses(get(balances), get(history)));
 
   return {
     balances,
@@ -149,10 +139,9 @@ export const useAaveStore = defineStore('defi/aave', () => {
     aaveTotalEarned,
     fetchBalances,
     fetchHistory,
-    reset
+    reset,
   };
 });
 
-if (import.meta.hot) {
+if (import.meta.hot)
   import.meta.hot.accept(acceptHMRUpdate(useAaveStore, import.meta.hot));
-}

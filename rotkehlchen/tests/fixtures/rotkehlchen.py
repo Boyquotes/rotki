@@ -1,5 +1,6 @@
 import base64
 import json
+from collections.abc import Generator
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -14,7 +15,7 @@ from rotkehlchen.db.updates import RotkiDataUpdater
 from rotkehlchen.exchanges.constants import EXCHANGES_WITH_PASSPHRASE
 from rotkehlchen.history.price import PriceHistorian
 from rotkehlchen.inquirer import Inquirer
-from rotkehlchen.premium.premium import Premium, PremiumCredentials
+from rotkehlchen.premium.premium import Premium, PremiumCredentials, SubscriptionStatus
 from rotkehlchen.rotkehlchen import Rotkehlchen
 from rotkehlchen.tests.utils.api import create_api_server
 from rotkehlchen.tests.utils.args import default_args
@@ -37,18 +38,14 @@ from rotkehlchen.tests.utils.evm import maybe_mock_evm_inquirer
 from rotkehlchen.tests.utils.factories import make_random_b64bytes
 from rotkehlchen.tests.utils.history import maybe_mock_historical_price_queries
 from rotkehlchen.tests.utils.inquirer import inquirer_inject_ethereum_set_order
-from rotkehlchen.tests.utils.mock import mock_proxies, patch_avalanche_request
+from rotkehlchen.tests.utils.mock import mock_proxies
 from rotkehlchen.tests.utils.substrate import wait_until_all_substrate_nodes_connected
 from rotkehlchen.types import AVAILABLE_MODULES_MAP, Location, SupportedBlockchain, Timestamp
 
 
-@pytest.fixture(name='max_tasks_num')
-def fixture_max_tasks_num() -> int:
-    """The max number of tasks below which the manager can schedule tasks
-
-    By default -1 which disables the task manager
-    """
-    return -1
+@pytest.fixture(name='should_mock_settings')
+def fixture_should_mock_settings():
+    return True
 
 
 @pytest.fixture(name='start_with_logged_in_user')
@@ -73,6 +70,14 @@ def fixture_rotki_premium_credentials() -> PremiumCredentials:
         given_api_key=base64.b64encode(make_random_b64bytes(128)).decode(),
         given_api_secret=base64.b64encode(make_random_b64bytes(128)).decode(),
     )
+
+
+@pytest.fixture(name='rotki_premium_object')
+def fixture_rotki_premium_object(rotki_premium_credentials, username) -> Premium:
+    """Create an active rotki premium object with valid credentials"""
+    premium = Premium(credentials=rotki_premium_credentials, username=username)
+    premium.status = SubscriptionStatus.ACTIVE
+    return premium
 
 
 @pytest.fixture(name='data_migration_version', scope='session')
@@ -124,6 +129,9 @@ def patch_and_enter_before_unlock(
         optimism_manager_connect_at_start,
         polygon_pos_manager_connect_at_start,
         arbitrum_one_manager_connect_at_start,
+        gnosis_manager_connect_at_start,
+        base_manager_connect_at_start,
+        scroll_manager_connect_at_start,
         kusama_manager_connect_at_start,
         have_decoders,
         use_custom_database,
@@ -145,6 +153,12 @@ def patch_and_enter_before_unlock(
             return polygon_pos_manager_connect_at_start
         elif blockchain == SupportedBlockchain.ARBITRUM_ONE:
             return arbitrum_one_manager_connect_at_start
+        elif blockchain == SupportedBlockchain.SCROLL:
+            return scroll_manager_connect_at_start
+        elif blockchain == SupportedBlockchain.GNOSIS:
+            return gnosis_manager_connect_at_start
+        elif blockchain == SupportedBlockchain.BASE:
+            return base_manager_connect_at_start
 
         raise AssertionError(f'Got to get_rpc_nodes during test with unknown {blockchain=}')
     evm_rpcconnect_patch = patch(
@@ -156,10 +170,6 @@ def patch_and_enter_before_unlock(
         'rotkehlchen.rotkehlchen.KUSAMA_NODES_TO_CONNECT_AT_START',
         new=kusama_manager_connect_at_start,
     )
-    # patch the constants to make sure that the periodic query for icons
-    # does not run during tests
-    size_patch = patch('rotkehlchen.rotkehlchen.ICONS_BATCH_SIZE', new=0)
-    sleep_patch = patch('rotkehlchen.rotkehlchen.ICONS_QUERY_SLEEP', new=999999)
     # don't perform checks for updates
     rotki_updates_patch = patch(
         'rotkehlchen.db.updates.RotkiDataUpdater.check_for_updates',
@@ -169,8 +179,6 @@ def patch_and_enter_before_unlock(
     # And now enter all patched contexts
     stack.enter_context(evm_rpcconnect_patch)
     stack.enter_context(ksm_rpcconnect_patch)
-    stack.enter_context(size_patch)
-    stack.enter_context(sleep_patch)
     stack.enter_context(rotki_updates_patch)
 
     # Mock the initial get settings to include the specified ethereum modules
@@ -224,6 +232,9 @@ def patch_no_op_unlock(rotki, stack, should_mock_settings=True):
         optimism_manager_connect_at_start=[],
         polygon_pos_manager_connect_at_start=[],
         arbitrum_one_manager_connect_at_start=[],
+        gnosis_manager_connect_at_start=[],
+        base_manager_connect_at_start=[],
+        scroll_manager_connect_at_start=[],
         kusama_manager_connect_at_start=[],
         have_decoders=False,
         use_custom_database=False,
@@ -238,7 +249,7 @@ def initialize_mock_rotkehlchen_instance(
         start_with_logged_in_user,
         start_with_valid_premium,
         db_password,
-        rotki_premium_credentials,
+        rotki_premium_object,
         username,
         blockchain_accounts,
         include_etherscan_key,
@@ -255,6 +266,9 @@ def initialize_mock_rotkehlchen_instance(
         optimism_manager_connect_at_start,
         polygon_pos_manager_connect_at_start,
         arbitrum_one_manager_connect_at_start,
+        gnosis_manager_connect_at_start,
+        base_manager_connect_at_start,
+        scroll_manager_connect_at_start,
         kusama_manager_connect_at_start,
         ksm_rpc_endpoint,
         max_tasks_num,
@@ -270,6 +284,7 @@ def initialize_mock_rotkehlchen_instance(
         add_accounts_to_db,
         latest_accounting_rules,
         initialize_accounting_rules,
+        should_mock_settings=True,
 ) -> None:
     if not start_with_logged_in_user:
         return
@@ -321,11 +336,15 @@ def initialize_mock_rotkehlchen_instance(
             optimism_manager_connect_at_start=optimism_manager_connect_at_start,
             polygon_pos_manager_connect_at_start=polygon_pos_manager_connect_at_start,
             arbitrum_one_manager_connect_at_start=arbitrum_one_manager_connect_at_start,
+            gnosis_manager_connect_at_start=gnosis_manager_connect_at_start,
+            base_manager_connect_at_start=base_manager_connect_at_start,
+            scroll_manager_connect_at_start=scroll_manager_connect_at_start,
             kusama_manager_connect_at_start=kusama_manager_connect_at_start,
             have_decoders=have_decoders,
             use_custom_database=use_custom_database,
             new_db_unlock_actions=new_db_unlock_actions,
             perform_upgrades_at_unlock=perform_upgrades_at_unlock,
+            should_mock_settings=should_mock_settings,
         )
         rotki.unlock_user(
             user=username,
@@ -354,6 +373,9 @@ def initialize_mock_rotkehlchen_instance(
             (SupportedBlockchain.OPTIMISM, optimism_manager_connect_at_start, rotki.chains_aggregator.optimism),  # noqa: E501
             (SupportedBlockchain.POLYGON_POS, polygon_pos_manager_connect_at_start, rotki.chains_aggregator.polygon_pos),  # noqa: E501
             (SupportedBlockchain.ARBITRUM_ONE, arbitrum_one_manager_connect_at_start, rotki.chains_aggregator.arbitrum_one),  # noqa: E501
+            (SupportedBlockchain.GNOSIS, gnosis_manager_connect_at_start, rotki.chains_aggregator.gnosis),  # noqa: E501
+            (SupportedBlockchain.BASE, base_manager_connect_at_start, rotki.chains_aggregator.base),  # noqa: E501
+            (SupportedBlockchain.SCROLL, scroll_manager_connect_at_start, rotki.chains_aggregator.scroll),  # noqa: E501
     ):
         maybe_modify_rpc_nodes(rotki.data.db, blockchain, connect_at_start)
         # since we are past evm inquirer initialization and we just wrote rpc nodes up we need to start the connection  # noqa: E501
@@ -363,7 +385,7 @@ def initialize_mock_rotkehlchen_instance(
             evm_nodes_wait.append((evm_manager.node_inquirer, connect_at_start))
 
     if start_with_valid_premium:
-        rotki.premium = Premium(credentials=rotki_premium_credentials, username=username)
+        rotki.premium = rotki_premium_object
         rotki.premium_sync_manager.premium = rotki.premium
         rotki.chains_aggregator.premium = rotki.premium
         # Add premium to all the modules
@@ -403,11 +425,10 @@ def initialize_mock_rotkehlchen_instance(
             user_db=rotki.data.db,
         )
 
-        with open(latest_accounting_rules, encoding='utf-8') as f:
-            data_updater.update_accounting_rules(
-                data=json.loads(f.read())['accounting_rules'],
-                version=999999,  # only for logs
-            )
+        data_updater.update_accounting_rules(
+            data=json.loads(latest_accounting_rules.read_text(encoding='utf-8'))['accounting_rules'],
+            version=999999,  # only for logs
+        )
         with accountant.db.conn.read_ctx() as cursor:
             db_settings = accountant.db.get_settings(cursor)
 
@@ -421,7 +442,7 @@ def initialize_mock_rotkehlchen_instance(
 
 
 @pytest.fixture(name='uninitialized_rotkehlchen')
-def fixture_uninitialized_rotkehlchen(cli_args, inquirer, asset_resolver, globaldb) -> Rotkehlchen:  # pylint: disable=unused-argument
+def fixture_uninitialized_rotkehlchen(cli_args, inquirer, asset_resolver, globaldb) -> Generator[Rotkehlchen, None, None]:  # noqa: E501  # pylint: disable=unused-argument
     """A rotkehlchen instance that has only had __init__ run but is not unlocked
 
     Adding the inquirer fixture as a requirement to make sure that any mocking that
@@ -433,7 +454,8 @@ def fixture_uninitialized_rotkehlchen(cli_args, inquirer, asset_resolver, global
     Adding the AssetResolver as a requirement so that the first initialization happens here
     """
     rotki = Rotkehlchen(cli_args)
-    return rotki
+    yield rotki
+    rotki.data.logout()
 
 
 @pytest.fixture(name='mocked_proxies')
@@ -448,7 +470,7 @@ def fixture_rotkehlchen_api_server(
         start_with_logged_in_user,
         start_with_valid_premium,
         db_password,
-        rotki_premium_credentials,
+        rotki_premium_object,
         username,
         blockchain_accounts,
         include_etherscan_key,
@@ -465,6 +487,9 @@ def fixture_rotkehlchen_api_server(
         optimism_manager_connect_at_start,
         polygon_pos_manager_connect_at_start,
         arbitrum_one_manager_connect_at_start,
+        gnosis_manager_connect_at_start,
+        base_manager_connect_at_start,
+        scroll_manager_connect_at_start,
         kusama_manager_connect_at_start,
         ksm_rpc_endpoint,
         max_tasks_num,
@@ -479,12 +504,12 @@ def fixture_rotkehlchen_api_server(
         mock_other_web3,
         ethereum_mock_data,
         optimism_mock_data,
-        avalanche_mock_data,
         mocked_proxies,
         have_decoders,
         add_accounts_to_db,
         latest_accounting_rules,
         initialize_accounting_rules,
+        should_mock_settings,
 ):
     """A partially mocked rotkehlchen server instance"""
 
@@ -492,13 +517,12 @@ def fixture_rotkehlchen_api_server(
         rotki=uninitialized_rotkehlchen,
         rest_port_number=rest_api_port,
     )
-
     initialize_mock_rotkehlchen_instance(
         rotki=api_server.rest_api.rotkehlchen,
         start_with_logged_in_user=start_with_logged_in_user,
         start_with_valid_premium=start_with_valid_premium,
         db_password=db_password,
-        rotki_premium_credentials=rotki_premium_credentials,
+        rotki_premium_object=rotki_premium_object,
         username=username,
         blockchain_accounts=blockchain_accounts,
         include_etherscan_key=include_etherscan_key,
@@ -515,6 +539,9 @@ def fixture_rotkehlchen_api_server(
         optimism_manager_connect_at_start=optimism_manager_connect_at_start,
         polygon_pos_manager_connect_at_start=polygon_pos_manager_connect_at_start,
         arbitrum_one_manager_connect_at_start=arbitrum_one_manager_connect_at_start,
+        gnosis_manager_connect_at_start=gnosis_manager_connect_at_start,
+        base_manager_connect_at_start=base_manager_connect_at_start,
+        scroll_manager_connect_at_start=scroll_manager_connect_at_start,
         kusama_manager_connect_at_start=kusama_manager_connect_at_start,
         ksm_rpc_endpoint=ksm_rpc_endpoint,
         max_tasks_num=max_tasks_num,
@@ -530,19 +557,19 @@ def fixture_rotkehlchen_api_server(
         add_accounts_to_db=add_accounts_to_db,
         latest_accounting_rules=latest_accounting_rules,
         initialize_accounting_rules=initialize_accounting_rules,
+        should_mock_settings=should_mock_settings,
     )
     with ExitStack() as stack:
         if start_with_logged_in_user is True:
             if network_mocking is True:
-                stack.enter_context(patch_avalanche_request(
-                    api_server.rest_api.rotkehlchen.chains_aggregator.avalanche,
-                    avalanche_mock_data,
-                ))
                 for evm_chain, connect_at_start, mock_data in (
                         ('ethereum', ethereum_manager_connect_at_start, ethereum_mock_data),
                         ('optimism', optimism_manager_connect_at_start, optimism_mock_data),
                         ('polygon_pos', [], {}),
                         ('arbitrum_one', [], {}),
+                        ('scroll', [], {}),
+                        ('gnosis', [], {}),
+                        ('base', [], {}),
                 ):
                     maybe_mock_evm_inquirer(
                         should_mock=mock_other_web3,
@@ -562,13 +589,13 @@ def fixture_rotkehlchen_api_server(
     api_server.stop()
 
 
-@pytest.fixture()
+@pytest.fixture
 def rotkehlchen_instance(
         uninitialized_rotkehlchen,
         start_with_logged_in_user,
         start_with_valid_premium,
         db_password,
-        rotki_premium_credentials,
+        rotki_premium_object,
         username,
         blockchain_accounts,
         include_etherscan_key,
@@ -585,6 +612,9 @@ def rotkehlchen_instance(
         optimism_manager_connect_at_start,
         polygon_pos_manager_connect_at_start,
         arbitrum_one_manager_connect_at_start,
+        gnosis_manager_connect_at_start,
+        base_manager_connect_at_start,
+        scroll_manager_connect_at_start,
         kusama_manager_connect_at_start,
         ksm_rpc_endpoint,
         max_tasks_num,
@@ -608,7 +638,7 @@ def rotkehlchen_instance(
         start_with_logged_in_user=start_with_logged_in_user,
         start_with_valid_premium=start_with_valid_premium,
         db_password=db_password,
-        rotki_premium_credentials=rotki_premium_credentials,
+        rotki_premium_object=rotki_premium_object,
         username=username,
         blockchain_accounts=blockchain_accounts,
         include_etherscan_key=include_etherscan_key,
@@ -625,6 +655,9 @@ def rotkehlchen_instance(
         optimism_manager_connect_at_start=optimism_manager_connect_at_start,
         polygon_pos_manager_connect_at_start=polygon_pos_manager_connect_at_start,
         arbitrum_one_manager_connect_at_start=arbitrum_one_manager_connect_at_start,
+        gnosis_manager_connect_at_start=gnosis_manager_connect_at_start,
+        base_manager_connect_at_start=base_manager_connect_at_start,
+        scroll_manager_connect_at_start=scroll_manager_connect_at_start,
         kusama_manager_connect_at_start=kusama_manager_connect_at_start,
         ksm_rpc_endpoint=ksm_rpc_endpoint,
         max_tasks_num=max_tasks_num,
@@ -644,7 +677,7 @@ def rotkehlchen_instance(
     return uninitialized_rotkehlchen
 
 
-@pytest.fixture()
+@pytest.fixture
 def rotkehlchen_api_server_with_exchanges(
         rotkehlchen_api_server,
         added_exchanges,

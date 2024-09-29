@@ -1,4 +1,5 @@
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, DefaultContext, InvalidOperation, setcontext
+from math import ceil, log10
 from typing import Any, Union
 
 from rotkehlchen.errors.serialization import ConversionError
@@ -6,6 +7,9 @@ from rotkehlchen.errors.serialization import ConversionError
 # Here even though we got __future__ annotations using FVal does not seem to work
 AcceptableFValInitInput = Union[float, bytes, Decimal, int, str, 'FVal']
 AcceptableFValOtherInput = Union[int, 'FVal']
+
+DefaultContext.prec = ceil(log10(2 ** 256))  # support up to uint256 max value
+setcontext(DefaultContext)
 
 
 class FVal:
@@ -56,19 +60,19 @@ class FVal:
 
     def __gt__(self, other: AcceptableFValOtherInput) -> bool:
         evaluated_other = _evaluate_input(other)
-        return self.num.compare_signal(evaluated_other) == Decimal('1')
+        return self.num.compare_signal(evaluated_other) == Decimal(1)
 
     def __lt__(self, other: AcceptableFValOtherInput) -> bool:
         evaluated_other = _evaluate_input(other)
-        return self.num.compare_signal(evaluated_other) == Decimal('-1')
+        return self.num.compare_signal(evaluated_other) == Decimal(-1)
 
     def __le__(self, other: AcceptableFValOtherInput) -> bool:
         evaluated_other = _evaluate_input(other)
-        return self.num.compare_signal(evaluated_other) in (Decimal('-1'), Decimal('0'))
+        return self.num.compare_signal(evaluated_other) in (Decimal(-1), Decimal(0))
 
     def __ge__(self, other: AcceptableFValOtherInput) -> bool:
         evaluated_other = _evaluate_input(other)
-        return self.num.compare_signal(evaluated_other) in (Decimal('1'), Decimal('0'))
+        return self.num.compare_signal(evaluated_other) in (Decimal(1), Decimal(0))
 
     def __eq__(self, other: object) -> bool:
         evaluated_other: Decimal | int
@@ -79,7 +83,7 @@ class FVal:
         else:
             evaluated_other = other
 
-        return self.num.compare_signal(evaluated_other) == Decimal('0')
+        return self.num.compare_signal(evaluated_other) == Decimal(0)
 
     def __add__(self, other: AcceptableFValOtherInput) -> 'FVal':
         evaluated_other = _evaluate_input(other)
@@ -132,6 +136,9 @@ class FVal:
     def __rmod__(self, other: AcceptableFValOtherInput) -> 'FVal':
         evaluated_other = _evaluate_input(other)
         return FVal(self.num.__rmod__(evaluated_other))
+
+    def __round__(self, ndigits: int) -> 'FVal':
+        return FVal(round(self.num, ndigits))
 
     def __float__(self) -> float:
         return float(self.num)

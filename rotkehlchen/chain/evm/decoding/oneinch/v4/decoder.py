@@ -1,4 +1,4 @@
-from abc import ABCMeta
+from abc import ABC
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -9,34 +9,34 @@ from rotkehlchen.chain.ethereum.modules.oneinch.constants import CPT_ONEINCH_V4
 from rotkehlchen.chain.ethereum.modules.uniswap.v2.constants import (
     SWAP_SIGNATURE as UNISWAP_V2_SWAP_SIGNATURE,
 )
-from rotkehlchen.chain.ethereum.modules.uniswap.v3.constants import (
-    SWAP_SIGNATURE as UNISWAP_V3_SWAP_SIGNATURE,
-)
+from rotkehlchen.chain.evm.decoding.curve.constants import TOKEN_EXCHANGE
+from rotkehlchen.chain.evm.decoding.kyber.constants import KYBER_AGGREGATOR_SWAPPED
 from rotkehlchen.chain.evm.decoding.oneinch.decoder import OneinchCommonDecoder
+from rotkehlchen.chain.evm.decoding.oneinch.v4.constants import ORDERFILLED_RFQ
 from rotkehlchen.chain.evm.decoding.structures import (
     DEFAULT_DECODING_OUTPUT,
     DecoderContext,
     DecodingOutput,
 )
 from rotkehlchen.chain.evm.decoding.types import CounterpartyDetails
-from rotkehlchen.chain.evm.decoding.utils import maybe_reshuffle_events
-from rotkehlchen.chain.evm.structures import EvmTxReceiptLog
-from rotkehlchen.chain.optimism.modules.velodrome.decoder import (
-    SWAP_V2 as VELODROME_SWAP_SIGNATURE,
+from rotkehlchen.chain.evm.decoding.uniswap.v3.constants import (
+    SWAP_SIGNATURE as UNISWAP_V3_SWAP_SIGNATURE,
 )
+from rotkehlchen.chain.evm.decoding.utils import maybe_reshuffle_events
+from rotkehlchen.chain.evm.decoding.velodrome.decoder import SWAP_V2 as VELODROME_SWAP_SIGNATURE
+from rotkehlchen.chain.evm.decoding.weth.decoder import WETH_DEPOSIT_TOPIC, WETH_WITHDRAW_TOPIC
+from rotkehlchen.chain.evm.structures import EvmTxReceiptLog
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.types import ChecksumEvmAddress, EvmTransaction
 
 if TYPE_CHECKING:
-    from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
-    from rotkehlchen.user_messages import MessagesAggregator
     from rotkehlchen.chain.evm.decoding.base import BaseDecoderTools
+    from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
     from rotkehlchen.history.events.structures.evm_event import EvmEvent
+    from rotkehlchen.user_messages import MessagesAggregator
 
-from rotkehlchen.chain.ethereum.modules.weth.decoder import WETH_DEPOSIT_TOPIC, WETH_WITHDRAW_TOPIC
 
-
-class Oneinchv3n4DecoderBase(OneinchCommonDecoder, metaclass=ABCMeta):
+class Oneinchv3n4DecoderBase(OneinchCommonDecoder, ABC):
     """Base class for Oneinch v3 and v4"""
 
     def __init__(
@@ -57,6 +57,9 @@ class Oneinchv3n4DecoderBase(OneinchCommonDecoder, metaclass=ABCMeta):
                 UNISWAP_V3_SWAP_SIGNATURE,
                 UNISWAP_V2_SWAP_SIGNATURE,  # uniswap v2 is also used by sushiswap
                 BALANCER_V2_SWAP_SIGNATURE,
+                ORDERFILLED_RFQ,
+                TOKEN_EXCHANGE,  # curve is also used by 1inch
+                KYBER_AGGREGATOR_SWAPPED,
             ],
             counterparty=counterparty,
         )
@@ -124,7 +127,7 @@ class Oneinchv3n4DecoderBase(OneinchCommonDecoder, metaclass=ABCMeta):
 
             if (
                 event.event_type == HistoryEventType.RECEIVE or
-                event.event_type == HistoryEventType.TRADE and event.event_subtype == HistoryEventSubType.RECEIVE  # It can happen that a leg of the swap was processed by a previous decoder like uniswap # noqa: E501
+                (event.event_type == HistoryEventType.TRADE and event.event_subtype == HistoryEventSubType.RECEIVE)  # It can happen that a leg of the swap was processed by a previous decoder like uniswap # noqa: E501
             ):
                 event.event_type = HistoryEventType.TRADE
                 event.event_subtype = HistoryEventSubType.RECEIVE
@@ -135,7 +138,7 @@ class Oneinchv3n4DecoderBase(OneinchCommonDecoder, metaclass=ABCMeta):
             elif (
                 (
                     event.event_type == HistoryEventType.SPEND or
-                    event.event_type == HistoryEventType.TRADE and event.event_subtype == HistoryEventSubType.SPEND  # noqa: E501
+                    (event.event_type == HistoryEventType.TRADE and event.event_subtype == HistoryEventSubType.SPEND)  # noqa: E501
                 ) and
                 event.event_subtype != HistoryEventSubType.FEE
             ):

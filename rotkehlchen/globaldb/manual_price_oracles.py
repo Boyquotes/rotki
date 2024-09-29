@@ -37,7 +37,7 @@ class ManualPriceOracle:
             to_asset: Asset,
             timestamp: Timestamp,
     ) -> Price:
-        price_entry = GlobalDBHandler().get_historical_price(
+        price_entry = GlobalDBHandler.get_historical_price(
             from_asset=from_asset,
             to_asset=to_asset,
             timestamp=timestamp,
@@ -80,7 +80,7 @@ class ManualCurrentOracle(CurrentPriceOracleInterface):
         Otherwise converts it to a price in `to_asset` and returns it along with a False value to
         indicate no main currency matching happened.
         """
-        manual_current_result = GlobalDBHandler().get_manual_current_price(
+        manual_current_result = GlobalDBHandler.get_manual_current_price(
             asset=from_asset,
         )
         if manual_current_result is None:
@@ -93,7 +93,11 @@ class ManualCurrentOracle(CurrentPriceOracleInterface):
                 if current_to_asset == main_currency:
                     return current_price, True
 
-        current_to_asset_price, _, used_main_currency = Inquirer().find_price_and_oracle(
+        # we call _find_price to avoid catching the recursion error at `find_price_and_oracle`.
+        # ManualCurrentOracle does a special handling of RecursionError using
+        # `coming_from_latest_price` to detect recursions on the manual prices and break
+        # it to continue to the next oracle.
+        current_to_asset_price, _, used_main_currency = Inquirer._find_price(
             from_asset=current_to_asset,
             to_asset=to_asset,
             coming_from_latest_price=True,

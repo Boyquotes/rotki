@@ -1,35 +1,30 @@
 <script setup lang="ts">
-import { type Blockchain } from '@rotki/common/lib/blockchain';
+import type { Blockchain } from '@rotki/common';
 
 const props = withDefaults(
   defineProps<{
     onlyChains?: Blockchain[];
   }>(),
   {
-    onlyChains: () => []
-  }
+    onlyChains: () => [],
+  },
 );
 
 const { onlyChains } = toRefs(props);
 
 const { t } = useI18n();
 
-const { queryingLength, length, isAllFinished } =
-  useTransactionQueryStatus(onlyChains);
+const { queryingLength, length, isAllFinished } = useTransactionQueryStatus(onlyChains);
 </script>
 
 <template>
-  <QueryStatusCurrent :finished="isAllFinished">
+  <HistoryQueryStatusCurrent :finished="isAllFinished">
     <template #finished>
-      {{ t('transactions.query_status.done_group', { length }) }}
+      {{ t('transactions.query_status.done_group', length) }}
     </template>
 
     <template #running>
-      {{
-        t('transactions.query_status.group', {
-          length: queryingLength
-        })
-      }}
+      {{ t('transactions.query_status.group', queryingLength) }}
     </template>
-  </QueryStatusCurrent>
+  </HistoryQueryStatusCurrent>
 </template>

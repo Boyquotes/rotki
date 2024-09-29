@@ -2,12 +2,11 @@ import logging
 from typing import TYPE_CHECKING
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.chain.ethereum.interfaces.balances import ProtocolWithGauges
+from rotkehlchen.chain.ethereum.interfaces.balances import BalancesSheetType, ProtocolWithGauges
 from rotkehlchen.chain.ethereum.utils import asset_normalized_value
 from rotkehlchen.chain.evm.contracts import EvmContract
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import A_CVX
-from rotkehlchen.db.dbhandler import DBHandler
 from rotkehlchen.errors.misc import RemoteError
 from rotkehlchen.history.events.structures.evm_event import EvmProduct
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
@@ -18,10 +17,9 @@ from rotkehlchen.types import ChecksumEvmAddress
 from .constants import CPT_CONVEX, CVX_LOCKER_V2, CVX_REWARDS
 
 if TYPE_CHECKING:
-    from rotkehlchen.chain.ethereum.interfaces.balances import BalancesType
-    from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
+    from rotkehlchen.chain.ethereum.decoding.decoder import EthereumTransactionDecoder
+    from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
     from rotkehlchen.history.events.structures.evm_event import EvmEvent
-    from rotkehlchen.types import CHAIN_IDS_WITH_BALANCE_PROTOCOLS
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -32,14 +30,12 @@ class ConvexBalances(ProtocolWithGauges):
 
     def __init__(
             self,
-            database: DBHandler,
-            evm_inquirer: 'EvmNodeInquirer',
-            chain_id: 'CHAIN_IDS_WITH_BALANCE_PROTOCOLS',
+            evm_inquirer: 'EthereumInquirer',
+            tx_decoder: 'EthereumTransactionDecoder',
     ):
         super().__init__(
-            database=database,
             evm_inquirer=evm_inquirer,
-            chain_id=chain_id,
+            tx_decoder=tx_decoder,
             counterparty=CPT_CONVEX,
             deposit_event_types={(HistoryEventType.DEPOSIT, HistoryEventSubType.DEPOSIT_ASSET)},
             gauge_deposit_event_types={(HistoryEventType.DEPOSIT, HistoryEventSubType.DEPOSIT_ASSET)},  # noqa: E501
@@ -53,7 +49,7 @@ class ConvexBalances(ProtocolWithGauges):
 
     def _query_staked_cvx(
             self,
-            balances: 'BalancesType',
+            balances: 'BalancesSheetType',
             staking_contract: EvmContract,
             addresses_with_stake: list[ChecksumEvmAddress],
     ) -> None:
@@ -63,7 +59,7 @@ class ConvexBalances(ProtocolWithGauges):
         is variable.
         The balances variable is mutated in this function.
         """
-        cvx_price = Inquirer().find_usd_price(self.cvx)
+        cvx_price = Inquirer.find_usd_price(self.cvx)
         try:
             call_output = self.evm_inquirer.multicall(
                 calls=[(
@@ -83,11 +79,11 @@ class ConvexBalances(ProtocolWithGauges):
                 continue
 
             balance = Balance(amount=amount, usd_value=cvx_price * amount)
-            balances[address][self.cvx] += balance
+            balances[address].assets[self.cvx] += balance
 
         return None
 
-    def query_balances(self) -> 'BalancesType':
+    def query_balances(self) -> 'BalancesSheetType':
         balances = super().query_balances()  # Query the gauges
         addresses_with_stake_mapping = self.addresses_with_deposits(
             products=[EvmProduct.STAKING],

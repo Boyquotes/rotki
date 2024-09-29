@@ -3,12 +3,12 @@ import requests
 
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.constants import ZERO
-from rotkehlchen.constants.assets import A_ETH, A_OP
+from rotkehlchen.constants.assets import A_ETH
 from rotkehlchen.fval import FVal
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_proper_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
 )
 from rotkehlchen.types import SupportedBlockchain
 from rotkehlchen.utils.misc import ts_now
@@ -40,7 +40,7 @@ def test_add_optimism_blockchain_account(rotkehlchen_api_server):
         'named_blockchain_balances_resource',
         blockchain=optimism_chain_key,
     ))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
 
     # Check per account
     account_balances = result['per_account'][optimism_chain_key][TEST_ADDY]
@@ -64,14 +64,15 @@ def test_add_optimism_blockchain_account(rotkehlchen_api_server):
             blockchain=optimism_chain_key,
         ),
     )
-    result = assert_proper_response_with_result(response)
-    optimism_tokens = [
-        A_OP,
+    result = assert_proper_sync_response_with_result(response)
+    optimism_tokens = {
         Asset('eip155:10/erc20:0x7F5c764cBc14f9669B88837ca1490cCa17c31607'),
+        Asset('eip155:10/erc20:0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85'),
         Asset('eip155:10/erc20:0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1'),
-    ]
+        Asset('eip155:10/erc20:0x4F604735c1cF31399C6E711D5962b2B3E0225AD3'),
+    }
     assert result[TEST_ADDY]['last_update_timestamp'] >= now
-    assert result[TEST_ADDY]['tokens'] == optimism_tokens
+    assert set(result[TEST_ADDY]['tokens']) == optimism_tokens
 
     # and query balances again to see tokens also appear
     response = requests.get(
@@ -84,7 +85,7 @@ def test_add_optimism_blockchain_account(rotkehlchen_api_server):
             'ignore_cache': True,
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
 
     # Check per account
     account_balances = result['per_account'][optimism_chain_key][TEST_ADDY]

@@ -1,16 +1,15 @@
 from http import HTTPStatus
 
 import pytest
-
 import requests
+
 from rotkehlchen.constants.limits import FREE_USER_NOTES_LIMIT
 from rotkehlchen.db.filtering import UserNotesFilterQuery
-
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_proper_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     assert_simple_ok_response,
 )
 from rotkehlchen.tests.utils.factories import make_random_user_notes, make_user_notes_entries
@@ -29,7 +28,7 @@ def test_add_get_user_notes(rotkehlchen_api_server):
             'is_pinned': True,
         },
     )
-    result = assert_proper_response_with_result(response, status_code=HTTPStatus.OK)
+    result = assert_proper_sync_response_with_result(response, status_code=HTTPStatus.OK)
     assert result == 1
 
     # try adding more user notes
@@ -41,11 +40,11 @@ def test_add_get_user_notes(rotkehlchen_api_server):
         json={
             'title': '#2',
             'content': 'ETH/MOON TP@GOBLIN',
-            'location': 'ledger actions',
+            'location': 'history events',
             'is_pinned': False,
         },
     )
-    result = assert_proper_response_with_result(response, status_code=HTTPStatus.OK)
+    result = assert_proper_sync_response_with_result(response, status_code=HTTPStatus.OK)
     assert result == 2
     response = requests.put(
         api_url_for(
@@ -59,7 +58,7 @@ def test_add_get_user_notes(rotkehlchen_api_server):
             'is_pinned': True,
         },
     )
-    result = assert_proper_response_with_result(response, status_code=HTTPStatus.OK)
+    result = assert_proper_sync_response_with_result(response, status_code=HTTPStatus.OK)
     assert result == 3
 
     # check that a total of user notes are in the db.
@@ -69,7 +68,7 @@ def test_add_get_user_notes(rotkehlchen_api_server):
             'usernotesresource',
         ),
     )
-    result = assert_proper_response_with_result(response, status_code=HTTPStatus.OK)
+    result = assert_proper_sync_response_with_result(response, status_code=HTTPStatus.OK)
     assert len(result['entries']) == 3
 
     # check that filtering by title substring works
@@ -80,7 +79,7 @@ def test_add_get_user_notes(rotkehlchen_api_server):
         ),
         json={'title_substring': '3'},
     )
-    result = assert_proper_response_with_result(response, status_code=HTTPStatus.OK)
+    result = assert_proper_sync_response_with_result(response, status_code=HTTPStatus.OK)
     assert result['entries_found'] == 1
     assert len(result['entries']) == 1
 
@@ -92,7 +91,7 @@ def test_add_get_user_notes(rotkehlchen_api_server):
         ),
         json={'location': 'trades'},
     )
-    result = assert_proper_response_with_result(response, status_code=HTTPStatus.OK)
+    result = assert_proper_sync_response_with_result(response, status_code=HTTPStatus.OK)
     assert result['entries_found'] == 1
     assert result['entries_total'] == 3
     assert result['entries'][0]['location'] == 'trades'
@@ -108,7 +107,7 @@ def test_add_get_user_notes(rotkehlchen_api_server):
             'ascending': [False, True],
         },
     )
-    result = assert_proper_response_with_result(response, status_code=HTTPStatus.OK)
+    result = assert_proper_sync_response_with_result(response, status_code=HTTPStatus.OK)
     assert len(result['entries']) == 3
     assert result['entries'][0]['title'] == '#1'
     assert result['entries'][1]['title'] == '#3'
@@ -135,7 +134,7 @@ def test_edit_user_notes(rotkehlchen_api_server):
             'identifier': 1,
             'title': 'My TODO List',
             'content': 'Dont sleep, wake up!!!!!',
-            'location': 'ledger actions',
+            'location': 'history events',
             'last_update_timestamp': 12345678,
             'is_pinned': True,
         },
@@ -207,7 +206,7 @@ def test_delete_user_notes(rotkehlchen_api_server):
             'usernotesresource',
         ),
     )
-    result = assert_proper_response_with_result(response, status_code=HTTPStatus.OK)
+    result = assert_proper_sync_response_with_result(response, status_code=HTTPStatus.OK)
     assert result['entries_found'] == 2
 
     # check that deleting a user note that is deleted already fails.
@@ -249,7 +248,7 @@ def test_premium_limits(rotkehlchen_api_server, start_with_valid_premium):
             'ascending': [False, True],
         },
     )
-    result = assert_proper_response_with_result(response, status_code=HTTPStatus.OK)
+    result = assert_proper_sync_response_with_result(response, status_code=HTTPStatus.OK)
 
     if start_with_valid_premium is False:
         assert result['entries_limit'] == FREE_USER_NOTES_LIMIT

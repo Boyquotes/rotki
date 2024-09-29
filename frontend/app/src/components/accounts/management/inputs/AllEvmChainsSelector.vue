@@ -1,32 +1,32 @@
 <script setup lang="ts">
+defineOptions({
+  inheritAttrs: false,
+});
+
 withDefaults(
   defineProps<{
-    value: boolean;
     disabled?: boolean;
   }>(),
   {
-    disabled: false
-  }
+    disabled: false,
+  },
 );
 
-const emit = defineEmits<{
-  (e: 'input', value: boolean): void;
-}>();
-
 const { t } = useI18n();
+
+const modelValue = defineModel<boolean>({ required: true });
 </script>
 
 <template>
   <RuiCard class="rounded">
     <label class="flex items-center gap-3 cursor-pointer">
       <RuiCheckbox
+        v-model="modelValue"
         data-cy="account-all-evm-chains"
         class="mt-0 p-1"
         color="primary"
-        :value="value"
         :disabled="disabled"
         hide-details
-        @input="emit('input', !value)"
       />
       <div :class="{ 'opacity-50': disabled }">
         <div class="text-body-1">

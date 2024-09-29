@@ -64,7 +64,7 @@ def assert_serialized_dicts_equal(
                 compare_val = FVal(a_val)
             except ValueError:
                 raise AssertionError(
-                    f'Could not turn {a_key} value {a[a_key]} into an FVal',
+                    f'Could not turn {a_key} value {a_val} into an FVal',
                 ) from None
             msg = f"{a_key} doesn't match. {compare_val} != {b[a_key]}"
             assert compare_val.is_close(b[a_key], max_diff=max_diff), msg
@@ -113,6 +113,8 @@ def assert_serialized_dicts_equal(
                 ignore_keys=ignore_keys,
                 length_list_keymap=length_list_keymap,
             )
+        elif isinstance(a_val, bytes):
+            assert a_val.hex() == b[a_key]
         else:
             assert a_val == b[a_key], f"{a_key} doesn't match. {a_val} != {b[a_key]}"
 

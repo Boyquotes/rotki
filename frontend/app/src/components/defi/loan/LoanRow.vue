@@ -1,7 +1,7 @@
 <script setup lang="ts">
 withDefaults(defineProps<{ title?: string; medium?: boolean }>(), {
   title: '',
-  medium: true
+  medium: true,
 });
 </script>
 
@@ -9,11 +9,13 @@ withDefaults(defineProps<{ title?: string; medium?: boolean }>(), {
   <div
     class="flex justify-between py-1"
     :class="{
-      'font-weight-medium': medium
+      'font-medium': medium,
     }"
   >
     <div>
-      {{ title }}
+      <slot name="title">
+        {{ title }}
+      </slot>
     </div>
     <div>
       <slot />

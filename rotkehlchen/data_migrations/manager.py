@@ -10,6 +10,10 @@ from rotkehlchen.data_migrations.migrations.migration_5 import data_migration_5
 from rotkehlchen.data_migrations.migrations.migration_10 import data_migration_10
 from rotkehlchen.data_migrations.migrations.migration_11 import data_migration_11
 from rotkehlchen.data_migrations.migrations.migrations_13 import data_migration_13
+from rotkehlchen.data_migrations.migrations.migrations_14 import data_migration_14
+from rotkehlchen.data_migrations.migrations.migrations_15 import data_migration_15
+from rotkehlchen.data_migrations.migrations.migrations_16 import data_migration_16
+from rotkehlchen.data_migrations.migrations.migrations_17 import data_migration_17
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 
 from .constants import LAST_DATA_MIGRATION
@@ -35,6 +39,10 @@ MIGRATION_LIST = [  # remember to bump LAST_DATA_MIGRATION if editing this
     MigrationRecord(version=10, function=data_migration_10),
     MigrationRecord(version=11, function=data_migration_11),
     MigrationRecord(version=13, function=data_migration_13),
+    MigrationRecord(version=14, function=data_migration_14),
+    MigrationRecord(version=15, function=data_migration_15),
+    MigrationRecord(version=16, function=data_migration_16),
+    MigrationRecord(version=17, function=data_migration_17),
 ]
 
 
@@ -45,15 +53,14 @@ class DataMigrationManager:
 
     def maybe_migrate_data(self) -> None:
         with self.rotki.data.db.conn.read_ctx() as cursor:
-            settings = self.rotki.data.db.get_settings(cursor)
-        last_migration_version = settings.last_data_migration
+            last_migration_version = self.rotki.data.db.get_setting(cursor, 'last_data_migration')
 
         self.progress_handler = MigrationProgressHandler(
             messages_aggregator=self.rotki.msg_aggregator,
             target_version=LAST_DATA_MIGRATION,
         )
         for migration in MIGRATION_LIST:
-            if last_migration_version < migration.version:
+            if last_migration_version is not None and last_migration_version < migration.version:
                 if self._perform_migration(migration) is False:
                     break  # a migration failed -- no point continuing
 

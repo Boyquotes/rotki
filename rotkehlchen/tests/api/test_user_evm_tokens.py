@@ -18,7 +18,7 @@ from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_proper_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
 )
 from rotkehlchen.tests.utils.constants import A_MKR
 from rotkehlchen.tests.utils.factories import make_evm_address
@@ -60,7 +60,7 @@ def test_query_user_tokens(rotkehlchen_api_server):
         ),
         json={'address': user_token_address1, 'evm_chain': ChainID.ETHEREUM.to_name()},
     )
-    result = assert_proper_response_with_result(response)['entries'][0]
+    result = assert_proper_sync_response_with_result(response)['entries'][0]
     expected_result = expected_tokens[0].to_dict()
     expected_result['identifier'] = ethaddress_to_identifier(user_token_address1)
     assert result == expected_result
@@ -73,7 +73,7 @@ def test_query_user_tokens(rotkehlchen_api_server):
         ),
         json={'asset_type': 'evm token'},
     )
-    result = assert_proper_response_with_result(response)['entries']
+    result = assert_proper_sync_response_with_result(response)['entries']
     expected_result = [x.to_dict() for x in expected_tokens]
     assert_token_entry_exists_in_result(result, expected_result)
     # This check is to make sure the sqlite query works correctly and queries only for tokens
@@ -88,7 +88,7 @@ def test_query_user_tokens(rotkehlchen_api_server):
         ),
         json={'address': unknown_address, 'evm_chain': ChainID.ETHEREUM.to_name()},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 0
 
 
@@ -96,7 +96,11 @@ def test_query_user_tokens(rotkehlchen_api_server):
 @pytest.mark.parametrize('start_with_logged_in_user', [True])
 @pytest.mark.parametrize('generatable_user_ethereum_tokens', [True])
 @pytest.mark.parametrize('user_ethereum_tokens', [create_initial_globaldb_test_tokens])
-def test_adding_user_tokens(rotkehlchen_api_server):
+@pytest.mark.parametrize('coingecko_cache_coinlist', [{
+    'internet-computer': {'symbol': 'ICP', 'name': 'Internet computer'},
+}])
+@pytest.mark.parametrize('cryptocompare_cache_coinlist', [{'ICP': {}}])
+def test_adding_user_tokens(rotkehlchen_api_server, cache_coinlist):  # pylint: disable=unused-argument
     """Test that the endpoint for adding a user ethereum token works"""
     initial_tokens = create_initial_globaldb_test_tokens()
     expected_tokens = create_initial_expected_globaldb_test_tokens()
@@ -110,7 +114,7 @@ def test_adding_user_tokens(rotkehlchen_api_server):
         ),
         json=serialized_token,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == {'identifier': USER_TOKEN3.identifier}
 
     response = requests.post(
@@ -120,7 +124,7 @@ def test_adding_user_tokens(rotkehlchen_api_server):
         ),
         json={'asset_type': 'evm token'},
     )
-    result = assert_proper_response_with_result(response)['entries']
+    result = assert_proper_sync_response_with_result(response)['entries']
     expected_tokens = expected_tokens.copy() + [
         USER_TOKEN3,
         EvmToken.initialize(
@@ -301,7 +305,11 @@ def test_adding_user_tokens(rotkehlchen_api_server):
 @pytest.mark.parametrize('start_with_logged_in_user', [True])
 @pytest.mark.parametrize('generatable_user_ethereum_tokens', [True])
 @pytest.mark.parametrize('user_ethereum_tokens', [create_initial_globaldb_test_tokens])
-def test_editing_user_tokens(rotkehlchen_api_server):
+@pytest.mark.parametrize('coingecko_cache_coinlist', [{
+    'internet-computer': {'symbol': 'ICP', 'name': 'Internet computer'},
+}])
+@pytest.mark.parametrize('cryptocompare_cache_coinlist', [{'ICP': {}}])
+def test_editing_user_tokens(rotkehlchen_api_server, cache_coinlist):  # pylint: disable=unused-argument
     """Test that the endpoint for editing a user ethereum token works"""
     expected_tokens = create_initial_expected_globaldb_test_tokens()
     new_token1 = expected_tokens[0].to_dict()
@@ -331,7 +339,7 @@ def test_editing_user_tokens(rotkehlchen_api_server):
         ),
         json={'asset_type': 'evm token'},
     )
-    result = assert_proper_response_with_result(response)['entries']
+    result = assert_proper_sync_response_with_result(response)['entries']
     expected_tokens = deepcopy(expected_tokens)
     object.__setattr__(expected_tokens[0], 'name', new_name)
     object.__setattr__(expected_tokens[0], 'symbol', new_symbol)
@@ -436,7 +444,7 @@ def test_deleting_user_tokens(rotkehlchen_api_server):
         ),
         json={'asset_type': 'evm token'},
     )
-    result = assert_proper_response_with_result(response)['entries']
+    result = assert_proper_sync_response_with_result(response)['entries']
     expected_tokens = initial_expected_tokens[:-1]
     expected_result = [x.to_dict() for x in expected_tokens]
     assert_token_entry_exists_in_result(result, expected_result)
@@ -492,7 +500,7 @@ def test_deleting_user_tokens(rotkehlchen_api_server):
         ),
         json={'address': initial_tokens[0].evm_address, 'evm_chain': ChainID.ETHEREUM.to_name()},
     )
-    result = assert_proper_response_with_result(response)['entries'][0]
+    result = assert_proper_sync_response_with_result(response)['entries'][0]
     assert result['swapped_for'] == A_MKR.identifier
 
     # test that trying to delete a token (MKR) that is used as swapped_for
@@ -526,13 +534,13 @@ def test_deleting_user_tokens(rotkehlchen_api_server):
         ),
         json={'asset_type': 'evm token'},
     )
-    result = assert_proper_response_with_result(response)['entries']
+    result = assert_proper_sync_response_with_result(response)['entries']
     expected_tokens = initial_expected_tokens[2:-1]
     expected_result = [x.to_dict() for x in expected_tokens]
     assert_token_entry_exists_in_result(result, expected_result)
     # and removes the mapping of all underlying tokens
     result = cursor.execute('SELECT COUNT(*) from underlying_tokens_list').fetchone()[0]
-    assert result == initial_underlying_num - 3
+    assert result == initial_underlying_num - 7
     # and that the equivalent asset entries were also deleted
     result = cursor.execute(
         'SELECT COUNT(*) from assets WHERE identifier IN (?, ?)',
@@ -552,7 +560,7 @@ def test_user_tokens_delete_guard(rotkehlchen_api_server):
     token0_id = ethaddress_to_identifier(expected_tokens[0].evm_address)
     with user_db.user_write() as cursor:
         user_db.add_manually_tracked_balances(cursor, [ManuallyTrackedBalance(
-            id=-1,
+            identifier=-1,
             asset=Asset(token0_id),
             label='manual1',
             amount=ONE,
@@ -599,7 +607,7 @@ def test_add_non_ethereum_token(rotkehlchen_api_server):
             'underlying_tokens': None,
         },
     )
-    identifier = assert_proper_response_with_result(response)['identifier']
+    identifier = assert_proper_sync_response_with_result(response)['identifier']
     assert identifier == 'eip155:56/erc20:0xC88eA7a5df3A7BA59C72393C5b2dc2CE260ff04D'
     token = EvmToken(identifier)
     assert token.name == 'Some random name'
@@ -609,7 +617,10 @@ def test_add_non_ethereum_token(rotkehlchen_api_server):
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
-def test_adding_evm_token_with_underlying_token(rotkehlchen_api_server):
+@pytest.mark.parametrize('coingecko_cache_coinlist', [{
+    'blackpool-token': {'symbol': 'BPT', 'name': 'Blackpool token'},
+}])
+def test_adding_evm_token_with_underlying_token(rotkehlchen_api_server, cache_coinlist):  # pylint: disable=unused-argument
     """
     Test that the adding an evm token with underlying tokens is correctly processed by the API
     """
@@ -673,7 +684,7 @@ def test_adding_evm_token_with_underlying_token(rotkehlchen_api_server):
             ),
         ],
     )
-    GlobalDBHandler().add_asset(bp_token_2)
+    GlobalDBHandler.add_asset(bp_token_2)
     response = requests.put(
         api_url_for(
             rotkehlchen_api_server,
@@ -681,7 +692,7 @@ def test_adding_evm_token_with_underlying_token(rotkehlchen_api_server):
         ),
         json=payload,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['identifier'] == token_identifier
 
     response = requests.post(
@@ -693,7 +704,7 @@ def test_adding_evm_token_with_underlying_token(rotkehlchen_api_server):
             'identifiers': [token_identifier],
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     underlying_tokens = [
         {
             'address': '0xB2FdD60AD80ca7bA89B9BAb3b5336c2601C020b4',
@@ -738,7 +749,7 @@ def test_adding_evm_token_with_underlying_token(rotkehlchen_api_server):
             'limit': 2,
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries_found'] == 2
     assert result['entries'][1]['underlying_tokens'] == underlying_tokens
     assert len(result['entries'][0]['underlying_tokens']) == 2
@@ -756,7 +767,7 @@ def test_adding_evm_token_with_underlying_token(rotkehlchen_api_server):
             'ascending': [True],
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries_found'] == 2
     assert result['entries'][0]['underlying_tokens'] == [
         {

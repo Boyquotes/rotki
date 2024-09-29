@@ -1,245 +1,227 @@
-import {
-  type ThisTypedMountOptions,
-  type Wrapper,
-  mount
-} from '@vue/test-utils';
-import Vuetify from 'vuetify';
+import { type ComponentMountingOptions, type VueWrapper, mount } from '@vue/test-utils';
 import { setActivePinia } from 'pinia';
-import { type StringSuggestionMatcher } from '@/types/filtering';
+import { afterEach, describe, expect, it } from 'vitest';
+import flushPromises from 'flush-promises';
 import TableFilter from '@/components/table-filter/TableFilter.vue';
-import createCustomPinia from '../../../utils/create-pinia';
+import { createCustomPinia } from '../../../utils/create-pinia';
+import type { StringSuggestionMatcher } from '@/types/filtering';
 
-vi.mocked(useCssModule).mockReturnValue({
-  suggestions: 'suggestions'
-});
-
-describe('table-filter/FilterDropdown.vue', () => {
-  let wrapper: Wrapper<any>;
-  const createWrapper = (options: ThisTypedMountOptions<any> = {}) => {
-    const vuetify = new Vuetify();
+describe('table-filter/TableFilter.vue', () => {
+  let wrapper: VueWrapper<InstanceType<typeof TableFilter>>;
+  const createWrapper = (options: ComponentMountingOptions<typeof TableFilter> = {}) => {
     const pinia = createCustomPinia();
     setActivePinia(pinia);
     return mount(TableFilter, {
-      pinia,
-      vuetify,
-      stubs: {
-        VCombobox: {
-          template: `
-            <div>
-              <input :value="searchInput" class="search-input" type="text" @input="$emit('update:search-input', $event.value)">
-              <div class="selections">
-                <span v-for="item in value"><slot name="selection" v-bind="{ item, selection: item }"/></span>
-              </div>
-              <span><slot name="no-data" /></span>
-            </div>
-          `,
-          props: {
-            value: { type: Array },
-            searchInput: { type: String }
-          }
-        }
+      global: {
+        plugins: [pinia],
+        stubs: {
+          RuiAutoComplete: false,
+          Transition: false,
+          TransitionGroup: false,
+          Teleport: true,
+        },
       },
-      ...options
+      ...options,
     });
   };
 
-  const matchers: StringSuggestionMatcher<any, any>[] = [
+  enum FilterKeys {
+    START = 'start',
+    TYPE = 'type',
+  }
+
+  enum FilterKeyValues {
+    START = 'start',
+    TYPE = 'type',
+  }
+
+  const matchers: StringSuggestionMatcher<FilterKeys, FilterKeyValues>[] = [
     {
-      key: 'start',
-      keyValue: 'start',
+      key: FilterKeys.START,
+      keyValue: FilterKeyValues.START,
       description: 'filter by start date',
       string: true,
       suggestions: () => [],
-      validate: () => true
+      validate: () => true,
     },
     {
-      key: 'type',
-      keyValue: 'type',
+      key: FilterKeys.TYPE,
+      keyValue: FilterKeyValues.TYPE,
       description: 'filter by type',
       string: true,
       allowExclusion: true,
       multiple: true,
       suggestions: () => ['type 1', 'type 2', 'type 3'],
-      validate: () => true
-    }
+      validate: () => true,
+    },
   ];
 
-  it('Filter matchers', async () => {
-    const propsData = {
-      matchers,
-      matches: {}
-    };
-
-    wrapper = createWrapper({ propsData });
-
-    expect(wrapper.findAll('.suggestions > button')).toHaveLength(
-      matchers.length
-    );
-
-    await wrapper.find('.search-input').trigger('input', { value: 'ty' });
-
-    await wrapper.vm.$nextTick();
-
-    expect(wrapper.findAll('.suggestions > button')).toHaveLength(1);
-    expect(wrapper.find('.suggestions > button:first-child').text()).toBe(
-      `${matchers[1].key}:  ${matchers[1].description}`
-    );
+  afterEach(() => {
+    wrapper.unmount();
   });
 
-  it('Choose suggestions', async () => {
-    const propsData = {
-      matchers,
-      matches: {}
-    };
+  it('filter matchers', async () => {
+    wrapper = createWrapper({
+      props: {
+        matchers,
+        matches: {},
+      },
+    });
+    await nextTick();
+    await flushPromises();
 
-    wrapper = createWrapper({ propsData });
+    await wrapper.find('[data-id=activator]').trigger('click');
+    await nextTick();
+    await flushPromises();
 
-    // Set matcher to `type`
-    await wrapper.find('.search-input').trigger('input', { value: 'type' });
+    expect(wrapper.findAll('[data-cy=suggestions] > button')).toHaveLength(matchers.length);
 
-    await wrapper.vm.$nextTick();
+    await wrapper.find('input').setValue('ty');
+    await nextTick();
+    await flushPromises();
 
-    // Suggestions for `type`
-    const suggestions = matchers[1].suggestions();
-    expect(wrapper.findAll('.suggestions > button')).toHaveLength(
-      suggestions.length
+    expect(wrapper.findAll('[data-cy=suggestions] > button')).toHaveLength(1);
+    expect(wrapper.find('[data-cy=suggestions] > button:first-child').text()).toBe(
+      `${matchers[1].key}: ${matchers[1].description}`,
     );
 
+    await wrapper.find('[data-cy=suggestions] > button:first-child').trigger('click');
+    await nextTick();
+    expect((wrapper.find('input').element as HTMLInputElement).value).toBe(`${matchers[1].key}=`);
+  });
+
+  it('choose suggestions', async () => {
+    wrapper = createWrapper({
+      props: {
+        matchers,
+        matches: {},
+      },
+    });
+    await nextTick();
+    await flushPromises();
+
+    await wrapper.find('[data-id=activator]').trigger('click');
+    await nextTick();
+    await flushPromises();
+
+    // Set matcher to `type`
+    await wrapper.find('input').setValue('type');
+    await nextTick();
+
+    // When no symbol, then we don't show the suggestions yet
+    expect(wrapper.findAll('[data-cy=suggestions] > button')).toHaveLength(1);
+
+    // Suggestions for `type`
+    await wrapper.find('input').setValue('type=');
+    await nextTick();
+    const suggestions = matchers[1].suggestions();
+    expect(wrapper.findAll('[data-cy=suggestions] > button')).toHaveLength(suggestions.length);
+
     suggestions.forEach((item, index) => {
-      expect(
-        wrapper.find(`.suggestions > button:nth-child(${index + 1})`).text()
-      ).toBe(`type = ${item}`);
+      expect(wrapper.find(`[data-cy=suggestions] > button:nth-child(${index + 1})`).text()).toBe(`type=${item}`);
     });
 
     // Choose first suggestions (type 1)
-    await wrapper.find('.suggestions > button:first-child').trigger('click');
+    await wrapper.find('[data-cy=suggestions] > button:first-child').trigger('click');
+    await nextTick();
 
-    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-id="activator"] .flex:nth-child(1) > [role=button]> span').text()).toBe('type=type 1');
 
-    expect(wrapper.find('.selections > span:nth-child(1) .v-chip').text()).toBe(
-      'type = type 1'
-    );
-
-    expect(wrapper.emitted()['update:matches']?.[0]).toEqual([
-      { type: ['type 1'] }
-    ]);
+    expect(wrapper.emitted('update:matches')?.at(-1)).toEqual([{ type: ['type 1'] }]);
 
     // Choose second suggestion (type 2)
-    await wrapper
-      .find('.search-input')
-      .trigger('input', { value: 'type = type 2' });
+    await wrapper.find('input').setValue('type = type 2');
+    await nextTick();
 
-    await wrapper.vm.$nextTick();
+    await wrapper.find('[data-cy=suggestions] > button:first-child').trigger('click');
+    await nextTick();
 
-    await wrapper.find('.suggestions > button:first-child').trigger('click');
+    expect(wrapper.find('[data-id="activator"] .flex:nth-child(2) > [role=button] > span').text()).toBe('type=type 2');
 
-    await wrapper.vm.$nextTick();
-
-    expect(wrapper.find('.selections > span:nth-child(2) .v-chip').text()).toBe(
-      'type = type 2'
-    );
-
-    expect(wrapper.emitted()['update:matches']?.[1]).toEqual([
-      { type: ['type 1', 'type 2'] }
-    ]);
+    expect(wrapper.emitted('update:matches')?.at(-1)).toEqual([{ type: ['type 1', 'type 2'] }]);
 
     // Remove first selected item (type 1)
-    await wrapper
-      .find('.selections > span:nth-child(1) .v-chip .v-chip__close')
-      .trigger('click');
+    await wrapper.find('[data-id="activator"] .flex:nth-child(1) > [role=button] > button').trigger('click');
 
-    await wrapper.vm.$nextTick();
+    await nextTick();
 
-    expect(wrapper.emitted()['update:matches']?.[2]).toEqual([
-      { type: ['type 2'] }
-    ]);
+    expect(wrapper.emitted('update:matches')?.at(-1)).toEqual([{ type: ['type 2'] }]);
 
     // Click selected item remains (type 2), set it to text field
-    await wrapper
-      .find('.selections > span:nth-child(1) .v-chip')
-      .trigger('click');
+    await wrapper.find('[data-id="activator"] .flex:nth-child(1) > [role=button]').trigger('click');
 
-    await wrapper.vm.$nextTick();
+    await nextTick();
 
-    expect(wrapper.emitted()['update:matches']?.[3]).toEqual([{}]);
-    expect(
-      (wrapper.find('.search-input').element as HTMLInputElement).value
-    ).toBe('type=type 2');
+    expect(wrapper.emitted('update:matches')?.at(-1)).toEqual([{}]);
+    expect((wrapper.find('input').element as HTMLInputElement).value).toBe('type=type 2');
   });
 
-  it('Choose suggestions with exclusion', async () => {
-    const propsData = {
-      matchers,
-      matches: {}
-    };
+  it('choose suggestions with exclusion', async () => {
+    wrapper = createWrapper({
+      props: {
+        matchers,
+        matches: {},
+      },
+    });
 
-    wrapper = createWrapper({ propsData });
+    await nextTick();
+    await flushPromises();
+
+    await wrapper.find('[data-id=activator]').trigger('click');
+    await nextTick();
+    await flushPromises();
 
     // Set matcher to `type`
-    await wrapper.find('.search-input').trigger('input', { value: 'type !=' });
-
-    await wrapper.vm.$nextTick();
+    await wrapper.find('input').setValue('type !=');
+    await nextTick();
 
     // Suggestions for `type`
     const suggestions = matchers[1].suggestions();
-    expect(wrapper.findAll('.suggestions > button')).toHaveLength(
-      suggestions.length
-    );
+    expect(wrapper.findAll('[data-cy=suggestions] > button')).toHaveLength(suggestions.length);
 
     suggestions.forEach((item, index) => {
-      expect(
-        wrapper.find(`.suggestions > button:nth-child(${index + 1})`).text()
-      ).toBe(`type != ${item}`);
+      expect(wrapper.find(`[data-cy=suggestions] > button:nth-child(${index + 1})`).text()).toBe(`type!=${item}`);
     });
 
     // Choose first suggestions with exclusion (type 1)
-    await wrapper.find('.suggestions > button:first-child').trigger('click');
+    await wrapper.find('[data-cy=suggestions] > button:first-child').trigger('click');
+    await nextTick();
 
-    await wrapper.vm.$nextTick();
+    expect(wrapper.find('[data-id="activator"] .flex:nth-child(1) > [role=button] > span').text()).toBe('type!=type 1');
 
-    expect(wrapper.find('.selections > span:nth-child(1) .v-chip').text()).toBe(
-      'type != type 1'
-    );
-
-    expect(wrapper.emitted()['update:matches']?.[0]).toEqual([
-      { type: ['!type 1'] }
-    ]);
+    expect(wrapper.emitted('update:matches')?.at(-1)).toEqual([{ type: ['!type 1'] }]);
   });
 
-  it('Restore selection', async () => {
-    const propsData = {
-      matchers,
-      matches: {
-        type: ['type 1', 'type 2']
-      }
-    };
+  it('restore selection', async () => {
+    wrapper = createWrapper({
+      props: {
+        matchers,
+        matches: {
+          type: ['type 1', 'type 2'],
+        },
+      },
+    });
 
-    wrapper = createWrapper({ propsData });
+    await nextTick();
+    await flushPromises();
 
-    await wrapper.vm.$nextTick();
-
-    expect(wrapper.find('.selections > span:nth-child(1) .v-chip').text()).toBe(
-      'type = type 1'
-    );
-    expect(wrapper.find('.selections > span:nth-child(2) .v-chip').text()).toBe(
-      'type = type 2'
-    );
+    expect(wrapper.find('[data-id="activator"] .flex:nth-child(1) > [role=button] > span').text()).toBe('type=type 1');
+    expect(wrapper.find('[data-id="activator"] .flex:nth-child(2) > [role=button] > span').text()).toBe('type=type 2');
   });
 
-  it('Restore selection with exclusion', async () => {
-    const propsData = {
-      matchers,
-      matches: {
-        type: '!type 1'
-      }
-    };
+  it('restore selection with exclusion', async () => {
+    wrapper = createWrapper({
+      props: {
+        matchers,
+        matches: {
+          type: '!type 1',
+        },
+      },
+    });
 
-    wrapper = createWrapper({ propsData });
+    await nextTick();
+    await flushPromises();
 
-    await wrapper.vm.$nextTick();
-
-    expect(wrapper.find('.selections > span:nth-child(1) .v-chip').text()).toBe(
-      'type != type 1'
-    );
+    expect(wrapper.find('[data-id="activator"] .flex:nth-child(1) > [role=button] > span').text()).toBe('type!=type 1');
   });
 });

@@ -1,4 +1,5 @@
 import operator
+from collections.abc import Callable
 from contextlib import ExitStack
 from http import HTTPStatus
 from typing import TYPE_CHECKING
@@ -10,22 +11,25 @@ import requests
 from eth_utils import to_checksum_address
 
 from rotkehlchen.chain.evm.types import string_to_evm_address
+from rotkehlchen.chain.gnosis.constants import GNOSIS_ETHERSCAN_NODE
+from rotkehlchen.chain.scroll.constants import SCROLL_ETHERSCAN_NODE
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import A_AVAX, A_ETH
+from rotkehlchen.errors.misc import RemoteError
 from rotkehlchen.fval import FVal
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_ok_async_response,
     assert_proper_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     wait_for_async_task,
 )
 from rotkehlchen.tests.utils.avalanche import AVALANCHE_ACC1_AVAX_ADDR
 from rotkehlchen.tests.utils.blockchain import setup_evm_addresses_activity_mock
 from rotkehlchen.tests.utils.factories import make_evm_address
 from rotkehlchen.tests.utils.rotkehlchen import setup_balances
-from rotkehlchen.types import ChainID, ChecksumEvmAddress, SupportedBlockchain
+from rotkehlchen.types import ChecksumEvmAddress, SupportedBlockchain
 from rotkehlchen.utils.misc import ts_now
 
 if TYPE_CHECKING:
@@ -36,7 +40,6 @@ ADDY = string_to_evm_address('0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045')
 
 
 @pytest.mark.parametrize('number_of_eth_accounts', [0])
-@pytest.mark.parametrize('avalanche_mock_data', [{'covalent_balances': 'test_balances/covalent_query_balances.json'}])  # noqa: E501
 def test_add_same_evm_account_for_multiple_chains(rotkehlchen_api_server):
     """Test adding an Avalanche blockchain account when the same account is input
     in Ethereum works fine
@@ -77,7 +80,7 @@ def test_add_same_evm_account_for_multiple_chains(rotkehlchen_api_server):
             rotkehlchen_api_server,
             'blockchainbalancesresource',
         ))
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
 
     for chain, native_token in ((SupportedBlockchain.ETHEREUM, A_ETH), (SupportedBlockchain.AVALANCHE, A_AVAX)):  # noqa: E501
         # Check per account
@@ -94,6 +97,7 @@ def test_add_same_evm_account_for_multiple_chains(rotkehlchen_api_server):
         assert FVal(total_token['usd_value']) >= ZERO
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('have_decoders', [True])
 @pytest.mark.parametrize('ethereum_accounts', [['0x9531C059098e3d194fF87FebB587aB07B30B1306']])
 def test_deleting_ens_account_works(rotkehlchen_api_server):
@@ -149,12 +153,10 @@ def test_adding_non_checksummed_eth_account_works(rotkehlchen_api_server):
     assert_proper_response(response)
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('number_of_eth_accounts', [0])
 def test_adding_editing_ens_account_works(rotkehlchen_api_server):
-    """Test that adding an ENS eth account can be handled properly
-
-    This test mocks all etherscan queries apart from the ENS ones
-    """
+    """Test that adding an ENS eth account can be handled properly"""
     resolved_account = '0x9531C059098e3d194fF87FebB587aB07B30B1306'
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
     # Add an account and see it resolves
@@ -165,7 +167,7 @@ def test_adding_editing_ens_account_works(rotkehlchen_api_server):
         blockchain='ETH',
     ), json=request_data)
 
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == [resolved_account]
     assert rotki.chains_aggregator.accounts.eth[-1] == resolved_account
 
@@ -190,7 +192,7 @@ def test_adding_editing_ens_account_works(rotkehlchen_api_server):
         'blockchainsaccountsresource',
         blockchain='ETH',
     ), json=request_data)
-    result = assert_proper_response_with_result(response)[0]
+    result = assert_proper_sync_response_with_result(response)[0]
     assert result['address'] == '0x9531C059098e3d194fF87FebB587aB07B30B1306'
     assert result['label'] == label
 
@@ -210,15 +212,18 @@ def test_adding_editing_ens_account_works(rotkehlchen_api_server):
 
 
 @pytest.mark.parametrize('number_of_eth_accounts', [0])
-@pytest.mark.parametrize('avalanche_mock_data', [{'covalent_balances': 'test_avalanche/covalent_query_transactions.json'}])  # noqa: E501
-def test_add_multievm_accounts(rotkehlchen_api_server):
+@pytest.mark.parametrize('gnosis_accounts', [['0x7277F7849966426d345D8F6B9AFD1d3d89183083']])
+def test_add_multievm_accounts(rotkehlchen_api_server: 'APIServer'):
     """Test that adding accounts to multiple evm chains works fine
 
     TODO: Needs mocking with the data at the time of test writing
     """
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
-    common_account = '0x9531C059098e3d194fF87FebB587aB07B30B1306'
-    contract_account = '0x9008D19f58AAbD9eD0D60971565AA8510560ab41'
+    common_account = string_to_evm_address('0x9531C059098e3d194fF87FebB587aB07B30B1306')
+    contract_account = string_to_evm_address('0x9008D19f58AAbD9eD0D60971565AA8510560ab41')
+    failing_account = string_to_evm_address('0xc37b40ABdB939635068d3c5f13E7faF686F03B65')
+    no_activity_account = string_to_evm_address('0x106B62Fdd27B748CF2Da3BacAB91a2CaBaeE6dCa')
+    already_added_to_all_chains = string_to_evm_address('0x7277F7849966426d345D8F6B9AFD1d3d89183083')  # noqa: E501
 
     # Add a tag
     tag1 = {
@@ -235,6 +240,23 @@ def test_add_multievm_accounts(rotkehlchen_api_server):
     )
     assert_proper_response(response)
 
+    # patch modify_blockchain_accounts to check that we handle failures correctly when
+    # adding new accounts
+    original_modify_blockchain_accounts = rotki.chains_aggregator.modify_blockchain_accounts
+
+    def new_modify_blockchain_accounts(blockchain, accounts, append_or_remove) -> Callable:  # pylint: disable=unused-argument
+        """Make the logic fail when adding new accounts if failing_account is given as argument"""
+        if failing_account in accounts:
+            raise RemoteError('Mocking a failure when adding addresses')
+
+        return original_modify_blockchain_accounts
+
+    patched_modify_blockchain_accounts = patch.object(
+        target=rotki.chains_aggregator,
+        attribute='modify_blockchain_accounts',
+        new=new_modify_blockchain_accounts,
+    )
+
     with ExitStack() as stack:
         setup_evm_addresses_activity_mock(
             stack=stack,
@@ -243,36 +265,66 @@ def test_add_multievm_accounts(rotkehlchen_api_server):
             ethereum_addresses=[contract_account, common_account],
             avalanche_addresses=[common_account],
             optimism_addresses=[common_account],
-            polygon_pos_addresses=[common_account],
-            arbitrum_one_addresses=[common_account],
-            base_addresses=[common_account],
-            gnosis_addresses=[common_account],
+            polygon_pos_addresses=[common_account, failing_account],
+            arbitrum_one_addresses=[common_account, failing_account],
+            base_addresses=[common_account, failing_account],
+            gnosis_addresses=[common_account, failing_account, already_added_to_all_chains],
+            scroll_addresses=[common_account, failing_account],
+            zksync_lite_addresses=[common_account],
         )
+        stack.enter_context(patched_modify_blockchain_accounts)
 
         # add two addresses for all evm chains, one with tag
         label = 'rotki account'
         request_data = {
-            'accounts': [{
-                'address': common_account,
-                'label': label,
-                'tags': ['metamask'],
-            }, {
-                'address': contract_account,
-            }]}
+            'accounts': [
+                {
+                    'address': common_account,
+                    'label': label,
+                    'tags': ['metamask'],
+                },
+                {'address': contract_account},
+                {'address': failing_account},
+                {'address': no_activity_account},
+                {'address': already_added_to_all_chains},
+            ],
+        }
         response = requests.put(api_url_for(
             rotkehlchen_api_server,
             'evmaccountsresource',
         ), json=request_data)
 
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
+
     assert result == {
-        'eth': [common_account, contract_account],
-        'avax': [common_account],
-        'optimism': [common_account],
-        'polygon_pos': [common_account],
-        'arbitrum_one': [common_account],
-        'base': [common_account],
-        'gnosis': [common_account],
+        'added': {
+            '0x9531C059098e3d194fF87FebB587aB07B30B1306': ['all'],
+            '0x9008D19f58AAbD9eD0D60971565AA8510560ab41': ['eth'],
+        },
+        'failed': {
+            '0xc37b40ABdB939635068d3c5f13E7faF686F03B65': [
+                'polygon_pos',
+                'arbitrum_one',
+                'base',
+                'gnosis',
+                'scroll',
+            ],
+        },
+        'existed': {'0x7277F7849966426d345D8F6B9AFD1d3d89183083': ['gnosis']},
+        'no_activity': {
+            '0x106B62Fdd27B748CF2Da3BacAB91a2CaBaeE6dCa': ['all'],
+            '0x7277F7849966426d345D8F6B9AFD1d3d89183083': [
+                'eth',
+                'optimism',
+                'avax',
+                'polygon_pos',
+                'arbitrum_one',
+                'base',
+                'scroll',
+                'zksync_lite',
+            ],
+        },
+        'eth_contracts': ['0x9008D19f58AAbD9eD0D60971565AA8510560ab41'],
     }
 
     # Now get accounts to make sure they are all input correctly
@@ -287,7 +339,7 @@ def test_add_multievm_accounts(rotkehlchen_api_server):
         'blockchainsaccountsresource',
         blockchain='ETH',
     ))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == [
         {'address': contract_account, 'label': None, 'tags': None},
         {'address': common_account, 'label': label, 'tags': ['metamask']},
@@ -297,7 +349,7 @@ def test_add_multievm_accounts(rotkehlchen_api_server):
         'blockchainsaccountsresource',
         blockchain='AVAX',
     ))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == [
         {'address': common_account, 'label': label, 'tags': ['metamask']},
     ]
@@ -306,15 +358,18 @@ def test_add_multievm_accounts(rotkehlchen_api_server):
         'blockchainsaccountsresource',
         blockchain='OPTIMISM',
     ))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == [
         {'address': common_account, 'label': label, 'tags': ['metamask']},
     ]
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'], allow_playback_repeats=True)
 @pytest.mark.parametrize('network_mocking', [False])
 @pytest.mark.parametrize('ethereum_accounts', [['0xc37b40ABdB939635068d3c5f13E7faF686F03B65']])
 @pytest.mark.parametrize('legacy_messages_via_websockets', [True])
+@pytest.mark.parametrize('scroll_manager_connect_at_start', [(SCROLL_ETHERSCAN_NODE,)])
+@pytest.mark.parametrize('gnosis_manager_connect_at_start', [(GNOSIS_ETHERSCAN_NODE,)])
 def test_detect_evm_accounts(
         rotkehlchen_api_server: 'APIServer',
         ethereum_accounts: list[ChecksumEvmAddress],
@@ -323,6 +378,8 @@ def test_detect_evm_accounts(
     """
     Test that the endpoint to detect new evm addresses works properly
     and sends the ws messages
+
+    The given account is everywhere, except for scroll.
     """
     response = requests.post(api_url_for(
         rotkehlchen_api_server,
@@ -332,14 +389,16 @@ def test_detect_evm_accounts(
     websocket_connection.wait_until_messages_num(num=1, timeout=10)
     assert websocket_connection.messages_num() == 1
     msg = websocket_connection.pop_message()
-    assert msg['type'] == 'evm_accounts_detection'
-    assert sorted(msg['data'], key=operator.itemgetter('evm_chain', 'address')) == sorted([
-        {'evm_chain': ChainID.POLYGON_POS.to_name(), 'address': ethereum_accounts[0]},
-        {'evm_chain': ChainID.OPTIMISM.to_name(), 'address': ethereum_accounts[0]},
-        {'evm_chain': ChainID.ARBITRUM_ONE.to_name(), 'address': ethereum_accounts[0]},
-        {'evm_chain': ChainID.BASE.to_name(), 'address': ethereum_accounts[0]},
-        {'evm_chain': ChainID.GNOSIS.to_name(), 'address': ethereum_accounts[0]},
-    ], key=operator.itemgetter('evm_chain', 'address'))
+    assert msg['type'] == 'evmlike_accounts_detection'
+    assert sorted(msg['data'], key=operator.itemgetter('chain', 'address')) == sorted([
+        {'chain': SupportedBlockchain.POLYGON_POS.serialize(), 'address': ethereum_accounts[0]},
+        {'chain': SupportedBlockchain.OPTIMISM.serialize(), 'address': ethereum_accounts[0]},
+        {'chain': SupportedBlockchain.ARBITRUM_ONE.serialize(), 'address': ethereum_accounts[0]},
+        {'chain': SupportedBlockchain.BASE.serialize(), 'address': ethereum_accounts[0]},
+        {'chain': SupportedBlockchain.GNOSIS.serialize(), 'address': ethereum_accounts[0]},
+        {'chain': SupportedBlockchain.SCROLL.serialize(), 'address': ethereum_accounts[0]},
+        {'chain': SupportedBlockchain.ZKSYNC_LITE.serialize(), 'address': ethereum_accounts[0]},
+    ], key=operator.itemgetter('chain', 'address'))
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
     db = rotki.data.db
     with db.conn.read_ctx() as cursor:
@@ -350,6 +409,7 @@ def test_detect_evm_accounts(
     assert ethereum_accounts[0] in blockchain_accounts.arbitrum_one
     assert ethereum_accounts[0] in blockchain_accounts.base
     assert ethereum_accounts[0] in blockchain_accounts.gnosis
+    assert ethereum_accounts[0] in blockchain_accounts.zksync_lite
 
 
 @pytest.mark.parametrize('have_decoders', [True])
@@ -370,7 +430,7 @@ def test_evm_account_deletion_does_not_wait_for_pending_txn_queries(
     now = ts_now()
     task_manager.potential_tasks = [task_manager._maybe_query_evm_transactions]
     for address in ethereum_accounts[:-1]:  # leave last address to run via task manager
-        task_manager.last_evm_tx_query_ts[(address, SupportedBlockchain.ETHEREUM)] = now
+        task_manager.last_evm_tx_query_ts[address, SupportedBlockchain.ETHEREUM] = now
     task_manager_addy = ethereum_accounts[-1]
     api_addies = ethereum_accounts[:2].copy()
 
@@ -395,8 +455,6 @@ def test_evm_account_deletion_does_not_wait_for_pending_txn_queries(
                     'evmtransactionsresource',
                 ), json={
                     'async_query': True,
-                    'only_cache': False,
-                    'limit': 1000,
                     'accounts': [{'address': address, 'evm_chain': 'ethereum'}],
                     'evm_chain': 'ethereum',
                 },
@@ -415,7 +473,6 @@ def test_evm_account_deletion_does_not_wait_for_pending_txn_queries(
                     'blockchainsaccountsresource',
                     blockchain='eth',
                 ), json={
-                    'async_query': False,
                     'accounts': [address],
                 },
             )
@@ -434,6 +491,7 @@ def test_evm_account_deletion_does_not_wait_for_pending_txn_queries(
         assert set(accounts.eth) == {api_addies[1]}
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('number_of_eth_accounts', [0])
 def test_evm_address_async(rotkehlchen_api_server: 'APIServer') -> None:
     """Test that doing async validation for the evm addresses endpoints works"""
@@ -453,6 +511,8 @@ def test_evm_address_async(rotkehlchen_api_server: 'APIServer') -> None:
             arbitrum_one_addresses=[common_account],
             base_addresses=[common_account],
             gnosis_addresses=[common_account],
+            scroll_addresses=[common_account],
+            zksync_lite_addresses=[common_account],
         )
 
         # add an address with an invalid ens name
@@ -491,4 +551,4 @@ def test_evm_address_async(rotkehlchen_api_server: 'APIServer') -> None:
 
         task_id = assert_ok_async_response(response)
         outcome = wait_for_async_task(rotkehlchen_api_server, task_id)
-        assert outcome['result']['eth'] == [common_account]
+        assert outcome['result']['added'][common_account] == ['all']

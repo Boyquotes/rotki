@@ -2,7 +2,261 @@
 Changelog
 =========
 
+* :feature:`8428` Rotki will now properly decode cowswap fees and order types after 2024-03-19 by querying the cowswap API for offchain data.
+* :feature:`7817` Users will be able to add CEX mapping for unknown assets from exchange notifications.
+* :feature:`8528` Rotki will now limit the number of validators queried for balances for non-premium users.
+* :feature:`-` Gnosis Pay cashback events will now be properly recognized in the history view.
+* :feature:`-` Added support for the migration of MKR to SKY and DAI to USDS.
+* :feature:`8492` Eigenlayer PEPE upgrade changes will now be properly understood by rotki. That means AVS rewards claiming, ability to restake beacon chain staked ETH and new batched withdrawals directly to the eigenpod. For more read here: https://docs.eigenlayer.xyz/eigenlayer/restaking-guides/restaking-developer-guide#pepe-release
+* :bug:`-` The Manage Assets / Assets page will now show the correct assets on every page.
+* :feature:`7536` Added the ability to customize the CSV delimiter in the frontend settings. Users can now choose their preferred delimiter for CSV exports.
+* :feature:`8013` Added support in Optimism and Base for Extra Finance.
+* :feature:`2217` Users will now be able to use Uniswap V2 and V3 as historical price oracles.
+* :bug:`-` Fixed the “Show More Events” button to properly render additional events when there are more than 6, allowing it to load more as expected.
+* :bug:`-` Improve the filtering UI when there are no suggestions for a filter.
+* :feature:`8117` Rotki will now create calendar reminders for the end of the lock period of CRV in vote escrow.
+* :feature:`8339` Users will be able to import addresses from browser wallets other than MetaMask, such as Rabby Wallet, Phantom, Rainbow, etc. Currently, only MetaMask supports the addition of multiple addresses, while the others only import the active address.
+* :feature:`7349` Rotki's CSV importers will now report the number of successfully imported and total entries, and each error message will include the line number of the problematic entry.
+* :feature:`8147` Users can now import data from Blockpit into rotki.
+* :feature:`-` Rotki will now decode interest earned from aave v3 as independent events.
+* :feature:`-` Rotki will now decode Optimism DAI bridging
+* :feature:`8225` Rotki will now decode LlamaZip swaps on Optimism and Arbitrum One
+* :feature:`-` The eigenlayer airdrop claim event for season 2 should now be properly decoded in the history events view.
+* :feature:`8116` Rotki will now decode Gnosis chain omnibridge token bridging
+* :feature:`-` Rotki will now decode payments for cowswap vCOW claims
+* :feature:`8378` Rotki will now decode zksync lite withdrawals
+* :bug:`` Change the flow for importing addresses from MetaMask. Instead of automatically proceeding with the imported addresses, they will only be displayed in the text input, for better clarity.
+* :feature:`7629` Rotki will now decode all the swap events done via Odos v1 and v2.
+* :feature:`4457` Rotki will show links to CoinGecko and CryptoCompare on the asset detail page if they exist.
+* :feature:`8101` Failed transactions will now be displayed as failed and not just show "burned gas" event only.
+* :feature:`-` Transactions claiming SAFE tokens from vesting will now be properly decoded.
+* :feature:`-` Transactions locking, unlocking and withdrawing SAFE tokens will now be properly decoded. Also any locked SAFE tokens will be automatically detected and their balance counted.
+* :bug:`8535` Users won't see their total net worth duplicated when tracking NFTs as tokens.
+* :bug:`-` rotki will now decode the events of all the velodrome pools which were getting skipped before.
+* :bug:`8477` rotki will now properly decode very old Arbitrum bridge withdrawals.
+* :bug:`-` rotki will now decode the swaps done on velodrome v2 in the right order.
+* :bug:`-` ZKSync Era tokens will now have prices queried properly by defillama.
+* :bug:`-` rotki will now query TheGraph delegations only for the addresses that interacted with the protocol.
+* :bug:`-` rotki will now process all the kraken events during PnL report.
+* :bug:`-` Fixes a bug that was causing rotki to always query curve for new pools.
+* :bug:`8043` Informational events won't trigger price queries.
+* :bug:`8452` Fix Monerium integration after the v2 contracts upgrade.
+
+* :release:`1.34.3 <2024-08-20>`
+* :feature:`-` Generic events can now be created or imported with location being bitcoin, bitcoin cash, polkadot and kusama.
+* :bug:`-` Importing events with generic import will no longer create a fee event if the fee is zero. Before it was not creating one only if fee was omitted.
+* :bug:`-` Fix an error introduced in 1.34.2 that was creating snapshots more frequently than expected.
+* :bug:`8350` Users will no longer be able to add duplicate names for an address for all evm chains to the address book.
+* :bug:`-` Eigenlayer native restaking exited balances residing in eigenpod will no longer be double counted.
+* :bug:`8397` Active/exited validators will now be propely displayed and filtered for validators that are tracked but the withdrawal address is not. This applies to protocols such as eigenlayer.
+* :bug:`8414` Detected tokens will no longer randomly disappear from a tracked address if new events are processed.
+* :bug:`-` It will now be possible to refresh counterparty data if loading initially fails.
+
+* :release:`1.34.2 <2024-08-09>`
+* :bug:`-` Users will be able to filter by event subtype in the history events view.
+* :feature:`-` New event type/subtype combinations added. Receive/payment to receive a payment for something, Spend/payment to pay for something, Receive/Grant to receive a grant. Accounting wise they are treated like normal spend/receive and receive donation respectively but it helps with filtering and categorization during history searching.
+* :bug:`-` Fix issue where ETH from staking doesn't appear under the ETH breakdown on the dashboard.
+* :bug:`8334` Importing addresses from MetaMask should work when multiple browser wallets are installed.
+* :bug:`-` rotki will now properly run background tasks when logging out and logging in again.
+* :bug:`-` The task to read new curve pools from the chain will be faster now.
+* :bug:`-` rotki will now detect new tokens right after finishing decoding new events.
+* :bug:`-` The detection of account activity in new evm chains has been improved to avoid false positives when the account has been only sent spam tokens.
+* :bug:`8169` Prevent a recursion error when querying the price of a token.
+
+* :release:`1.34.1 <2024-07-24>`
+* :bug:`-` Eigenlayer LST pending withdrawals that have been completed should no longer count as user balance.
+* :bug:`-` Assets section will now show correct number of assets on any page when excluding ignored assets.
+* :bug:`-` Windows backend restart will no longer hang when users update their assets.
+* :bug:`8262` Prices of HOP LP tokens will now properly show up for all pools.
+* :bug:`8261` Windows users will no longer be greeted with an unhandled exception dialog when closing the application.
+* :bug:`8263` Fixes manual pagination not working.
+* :bug:`-` Replaced the dependency that was causing issues to start the app to users with CPUs not supporting AVX.
+
+* :release:`1.34.0 <2024-07-12>`
+* :bug:`-` Adding xpubs with derivation paths that include hardened nodes will not give an error anymore.
+* :bug:`-` Xpub keys without any addresses will now show properly in the accounts bitcoin accounts table.
+* :bug:`-` Adding a manual price of a newly added asset will now get saved, and will not disappear after restart.
+* :bug:`-` Coinbase staking reward events should now be shown.
+* :bug:`-` Governance abstain votes will now be properly decoded.
+* :bug:`-` Claimed and unclaimed airdrops of the same asset will now show properly.
+* :bug:`-` Editing the passphrase for OKX exchange will now work properly.
+* :feature:`8193` Coinbasepro support is removed since the exchanges no longer exist.
+* :feature:`8071` Airdrops can now be filtered by a new status: missed. Meaning airdrops for which the user was eligible, the cutoff time has expired and no claim event is seen.
+* :bug:`-` Deposit events in Aave will now show in the correct order.
+* :feature:`3971` Show the total collateral ratio in the Liquity Trove section.
+* :feature:`2323` Add support for Huobi exchange.
+* :feature:`-` Curve vote escrow locking and withdrawal events will now be properly decoded on ethereum mainnet.
+* :feature:`-` Curve fee distributor claim events will now be properly decoded on ethereum mainnet.
+* :feature:`7431` Curve events and balances are now decoded and detected on all supported evm chains.
+* :bug:`8088` Fix bug where the day names could be wrong on the calendar page.
+* :bug:`-` Some votium bribe claims which were not properly decoded before will be now.
+* :bug:`-` Some 1inchv4 swaps that were not decoded fine will now be properly decoded.
+* :feature:`-` Defisaver automation subscription activation and deactivation events will now be properly decoded.
+* :feature:`7722` Users can now export history events in their selected currency.
+* :bug:`-` ENS transaction events involving new owner for a name/subname and address changing should now be decoded properly.
+* :feature:`7544` Gearbox protocol events and balances are now decoded and detected on all supported evm chains.
+* :feature:`-` HOP governance events will now be properly decoded.
+* :feature:`7974` Users will now be able to filter manual balances by asset, label and location.
+* :feature:`5103` rotki will now automatically detect tokens along with their balances if the setting has been turned on. Set to true by default.
+* :feature:`7675` Users will now be able to export & import accounting rules.
+* :feature:`8003` 1inch v6 events should now be properly decoded for all supported EVM chains.
+* :feature:`7981` Circle's CCTP bridge transfers are decoded properly for all supported EVM chains.
+* :feature:`7202` Hop protocol related events and balances of staked tokens should be now decoded and detected properly.
+* :feature:`-` rotki decodes transactions and detects balances related to Blur staking.
+* :feature:`8030` Cowswap in arbitrum is now supported.
+* :feature:`1633` rotki now supports AAVE staking.
+* :feature:`7568` Eigenlayer native restaking events are now properly decoded and balances in native restaking eigenpods or the delayed withdrawal system are automatically detected.
+* :feature:`6115` Now free users can filter history events too.
+* :feature:`7570` Users can choose whether to automatically force-push when a time discrepancy warning occurs during automatic database sync.
+* :feature:`-` Degen airdrop 2 season 3 claim event should now be properly decoded in the history events view.
+* :feature:`-` The eigenlayer airdrop claim event should now be properly decoded in the history events view.
+* :feature:`8007` All votes in Arbitrum DAO will be decoded properly now.
+* :bug:`-` Users will be able to proceed with conflict resolution in the rare case that a duplicate asset appears in conflicts.
+* :bug:`8022` When there are NFTs valued in different assets sorting them by fiat price will show the correct price.
+* :bug:`-` Fix the issue where the popup notification breaks the experience when the notification sidebar is already open.
+* :bug:`-` Stakedao bribe claims older than January 2023 will now also be properly decoded.
+* :bug:`-` Compound finance COMP claim cases that were not decoded correctly should now appear fine.
+* :bug:`-` Fix an issue where some tokens weren't properly detected in scroll.
+* :bug:`-` Balances will get updated properly when removing a validator.
+* :feature:`-` Paladin bribe claiming events should now be properly decoded.
+* :bug:`8137` Uniswap V3 NFTs for positions that have been exited won't appear in the NFTs balances.
+* :bug:`8095` PnL will be correctly calculated for validators exiting with a balance above 32 ETH.
+* :bug:`-` Scroll decoders will now work as expected.
+* :bug:`-` Events claiming veCRV bribes from Gauge Bribe v2 will now be properly decoded.
+* :bug:`-` Complicated cowswap trades that were detected as part of another DEX should now be properly decoded.
+* :bug:`-` Some old gitcoin bulkcheckout and claim matching funds events that were not decoded properly, will now appear correctly.
+* :bug:`-` ETH withdrawals and mint events will now be properly decoded in Aave.
+* :bug:`-` rotki will be able to connect with RPC nodes that provide their chain number using hex values.
+* :feature:`-` Properly decode all drips v1 transactions in ethereum mainnet and Polygon.
+
+* :release:`1.33.1 <2024-05-29>`
+* :bug:`-` Fix the issue where airdrops aren't properly filtered by status.
+* :bug:`7791` Killing the rotki processes in Windows should now work fine and no zombie processes should remain. In turn this should also make the auto upgrade work for Windows.
+* :bug:`7905` rotki will now properly show the decoding progress of zksync-lite transactions.
+* :feature:`7358` Added support for detection of staked GRT tokens on Arbitrum.
+* :bug:`-` Fix the issue where the MATIC amount always shows as zero in the Polygon balance table.
+* :bug:`7915` Show OKX balances locked in active trades.
+* :bug:`-` Periodic detection of spam tokens won't consider spam those tokens that have been whitelisted.
+* :feature:`-` rotki now optionally can use the decentralized TheGraph service. You can get a free api key at https://thegraph.com/studio/apikeys/
+* :feature:`7816` rotki should now support the new coinbase api key format from the coinbase develop portal.
+* :bug:`-` Compound v2 transactions containing also flash loans of same asset type will now be properly decoded.
+
+* :release:`1.33.0 <2024-05-08>`
+* :feature:`7798` rotki now accurately decodes transactions on the Kyber swap aggregator across all supported chains.
+* :feature:`-` Users will now be able to delete transactions and the associated events in history events.
+* :feature:`7074` rotki provides a calendar view where users can add and track events related to their activities. Users can also set reminders to perform actions associated with these events.
+* :feature:`-` Claiming the harvest finance hack compensation grain airdrop will be properly shown as airdrop claim in the history events.
+* :feature:`-` Claiming the pickle finance hack compensation cornichon airdrop will be properly shown as airdrop claim in the history events.
+* :feature:`-` Omni airdrop claims are properly decoded and omni airdrop eligibility is shown in rotki's airdrop list.
+* :feature:`7084` Compound v3 events will now get decoded and its assets and liabilities will be shown on the dashboard properly.
+* :feature:`-` Users will now be able to navigate the page (go back or forward) using the keyboard shortcuts "Cmd + Left Arrow" or "Cmd + Right Arrow".
+* :feature:`3617` ZKSync lite is now supported as a chain. Balances are detected and history of the activity of all your tracked addresses for zksync lite will now be visible in the history events section.
+* :feature:`-` fluence dev rewards airdrop claim events will now be properly decoded in the history events.
+* :feature:`-` rotki will now properly decode the transactions for bridging to and from Scroll.
+* :feature:`7708` rotki now properly decodes all native to/from wrapped token transactions (e.g. ETH<->WETH, Matic<->WMatic) on all supported EVM chains
+* :feature:`6636` Aave v3 positions and liabilities will now be properly shown in the dashboard.
+* :feature:`7423` Users will be able to sort address book entries by displayed name and address.
+* :feature:`7086` Added support for GMX v1 in Arbitrum.
+* :feature:`7281` rotki will now properly decode the transactions done on Aave v2 and v3 on all the supported chains.
+* :feature:`2698` Users can now manually link assets on their exchanges to assets recognized by Rotki, without having to wait for a new release.
+* :feature:`-` rotki will now properly decode the Uniswap V3 events on other supported chains.
+* :feature:`5978` rotki will now properly decode the swaps done via the 0x protocol.
+* :feature:`-` The claim event of the Degen airdrop 2 will be correctly decoded.
+* :bug:`-` Binance balances will now include funding wallet's balances.
+* :feature:`-` rotki now supports Coinbase transactions using Advanced Trading.
+* :bug:`-` Velodrome and Aerodrome LP pools will now refresh properly.
+* :bug:`-` Fix a bug where the custom price is not applied in the balance view under the account table.
+* :bug:`-` Deleting an EVM RPC node will no longer fail sometimes with a "Can't delete etherscan node" error. Additionally non-mainnet etherscan nodes are no longer deletable.
+* :bug:`-` Nigerian Naira should be correctly detected in binance.
+* :bug:`-` Kraken balances in new yield-bearing products and automatic staking for new kraken users should now appear properly.
+
+* :release:`1.32.2 <2024-03-15>`
+* :bug:`7531` rotki will now prioritize manual prices above other price oracles and calculations.
+* :bug:`-` rotki will display NFT prices correctly across all asset types.
+* :bug:`7572` Fix issue where coinbase data query could result in an error popup.
+* :bug:`7611` USDT balances and trades in bitcoin.de should now work properly.
+* :bug:`-` Sending money to SEPA or bridging with the BurnFrom monerium signature will now be properly decoded by rotki.
+* :bug:`-` Fix issue where long label in manual balances breaks the alignment of chain names.
+* :bug:`-` If saving a setting fails, error messages will no longer disappear automatically.
+* :bug:`7532` Curve LP token price calculation should now be correct.
+* :bug:`-` All the curve pools in ethereum should be queried again.
+
+* :release:`1.32.1 <2024-02-23>`
+* :bug:`-` rotki will now automatically update the local airdrops' CSVs when needed, without manually deleting them.
+* :bug:`-` Fix the issue where an incorrect amount of ETH is displayed in the Loopring account table.
+* :bug:`-` Binance lending positions and rewards will get properly decoded and displayed again.
+* :bug:`7488` Show tags in multi-lines when multiple to avoid horizontal scroll.
+* :bug:`7497` In ETH staking view execution rewards should now be counted properly. MEV reward and block reward should not both be counted if recipient is not tracked.
+* :bug:`7522` Invalid ENS names shouldn't stop the decoding process anymore.
+* :bug:`-` Removing an address from one of the EVM chains won't affect the decoded events in other chains anymore.
+* :bug:`-` ETH withdrawal events should now be taxable again if the setting for their treatment after withdrawals enabled is on (which is by default).
+* :bug:`-` Invalid data in airdrops' CSVs or JSONs will now get ignored to show the rest of the valid data.
+
+* :release:`1.32.0 <2024-02-16>`
+* :feature:`7383` rotki will now update airdrops' data remotely without needing to update the app.
+* :bug:`7435` Fix the issue where, in rare cases, users receive a JavaScript error popup when minimizing the window.
+* :feature:`7357` rotki will now properly detect and decode Shutter token airdrop and delegation.
+* :feature:`-` Transactions contributing to Juicebox campaigns, such as the Free Alexey and Roman from Tornado, are now properly decoded.
+* :feature:`-` Octant epoch reward claiming transactions are now properly decoded.
+* :feature:`6460` rotki will now properly import the trades from the CSVs that are exported from Kucoin.
+* :feature:`7018` rotki will now save the labels for a blockchain account in the address book. If a name is already present in the address book for that blockchain account, Name Priority setting in 'Frontend-only Settings' section is used to determine which one to keep. Addressbook is prioritized by default.
+* :feature:`-` rotki is now available in French.
+* :feature:`-` Tokens deposited in EigenLayer will now be tracked.
+* :feature:`-` Aerodrome transactions in BASE will now be properly supported.
+* :feature:`-` Notes for governance votes will include the reasoning if it was provided in the transaction when voting on-chain.
+* :feature:`7214` Swaps done through Paraswap Augustus on Ethereum, Arbitrum, Optimism, Polygon, and Base chains, will now get properly decoded in the history view and will be taken into account during accounting.
+* :feature:`7027` Monerium transactions are now decoded as mints and burns. If the user provides monerium credentials then a periodic task pulls data from the monerium API and the transactions are enriched with actual banking data and/or with bridging data from chain to chain.
+* :feature:`7176` The exported CSV for PnL Report now contains a label of the address in notes, if available.
+* :feature:`7146` The exported CSV for PnL Report now contains an Asset column with symbols.
+* :feature:`6254` Users can now stop the execution of long-running queries.
+* :feature:`7092` Users of metamask swaps will now see them properly decoded in the history view and have them taken into account during accounting.
+* :feature:`-`  Bridging transactions across all EVM chains done via socket will now be decoded properly.
+* :feature:`7051` Users will be able to add a custom price directly from the asset overview page.
+* :feature:`-` Arbitrum's governance votes should now be decoded properly.
 * :feature:`4841` The rotki data directory is now more organized.
+* :feature:`-` Transactions that have interacted with the WXDAI contract are now properly decoded.
+* :feature:`1574` Interactions with the ygov.finance contract are now decoded.
+* :bug:`7276` Fix the issue where Uniswap v3 positions are counted twice for the net worth.
+* :bug:`7147` rotki should no longer query price multiple times for the same asset across different chains.
+* :bug:`-`  Whether an airdrop has been claimed or not will be properly detected again for the supported airdrops.
+* :feature:`7399` Transactions involving the Savings xDAI contract at gnosis will now be properly decoded.
+* :bug:`-` Incorrectly processed kraken events should no longer occur.
+* :bug:`-` It should no longer be possible to merge the same asset to itself, thus botching the asset in your database.
+* :feature:`-` Transactions burning vested vCOW to claim COW tokens will now be properly decoded for both gnosis chain and ethereum mainnet.
+* :bug:`-` Fix an issue where kraken instant swaps could have an invalid type for fee events.
+* :bug:`-` Querying coinbase data should no longer show 404 error if the user has too many accounts and tries to query trades or deposits/withdrawals.
+
+* :release:`1.31.3 <2024-01-31>`
+* :bug:`-` The history events section will have correct pagination for free users, with all the events showing correct sub-events.
+* :bug:`7359` NFTs should be queried and displayed properly again.
+* :bug:`7362` Filtering by customized events in the free version should work fine again.
+* :bug:`-` Premium sync failure will now appear in the toolbar indicator instead of showing a notification.
+* :bug:`-` Importing sell trades via rotki generic trades CSV import will now work properly again.
+* :bug:`-` All Gnosis bridge dai events from ethereum to gnosis chain should now be decoded properly.
+* :bug:`7526` Liquity trove LUSD borrowing fee and stability pool LQTY frontend fee will now be properly shown and processed by rotki.
+* :bug:`-` USDT will be processed correctly when importing events from nexo.
+* :bug:`-` Failure to resolve etherscan api or hitting maximum backoff after too many retries will now no longer raise an exception.
+* :bug:`-` Some coinbase trades imported via the API should no longer show negative amounts. If you see negative amounts, purge and repull coinbase data.
+* :bug:`-` The defillama oracle should now work correctly with tokens in arbitrum and binance.
+* :bug:`-` Removing exchanges will also remove them from the setting of non syncing exchanges.
+
+* :release:`1.31.2 <2023-12-22>`
+* :bug:`-` Importing timestamp in CSV in scientific format should now work without errors.
+* :bug:`7123` Adding an EVM EOA address that has only withdrawals/blocks activity will no longer fail.
+* :bug:`7082` Now disabling sync for an exchange instance won't prevent other instances in the same exchange from querying new trades.
+* :bug:`7071` Fix the issue where users on mobile devices need to scroll to login.
+* :bug:`7120` Fix the issue where after removing an exchange key, an error notification is shown.
+* :bug:`7115` Fix the issue with decimal point for amount input.
+* :bug:`7119` Removed bittrex as an exchanged added via api key since it has shut down. But users can now import bittrex CSVs in order to get their history into rotki.
+* :bug:`-` Bitmex history queries should now work properly again after Bitmex changed their API without versioning.
+* :bug:`1863` Bitstamp deposit/withdrawals should now also show the address and transaction id.
+* :bug:`7075` Coinbase api should now be usable again. Additionally history retrieval speed has improved by orders of magnitude.
+* :bug:`-` Fix the issue where user profiles on the login screen are empty after logging out.
+* :bug:`-` Now users will be able to see the most recent assets without restarting the app when filtering by owned assets in the assets view.
+* :bug:`-` Withdrawal events for ethereum staking will now respect accounting rules.
+* :bug:`7059` Fix the issue where adding an account via MetaMask is not working.
+* :bug:`7057` Fix the issue where the app restarts when the file upload button is clicked.
+* :bug:`-` rotki should no longer try mainnet uniswap onchain price queries for other evm tokens and errors should be handled better
 
 * :release:`1.31.1 <2023-12-06>`
 * :bug:`-` Fix the bug that causes the error screen to appear strangely in dark mode.
@@ -743,7 +997,7 @@ Changelog
 * :bug:`2835` Eth2 users with a very big number of validators should no longer get a 429 error.
 * :bug:`2846` Premium users who create a new account with premium api credentials that have no saved DB in the server to sync with will have these credentials properly saved in the DB right after creation. At re-login the premium subscription should be properly recognized and the credentials should not need to be input again.
 * :bug:`2821` Users will now be able to properly scroll through the asset when conflicts appear during the asset database upgrade.
-* :bug:`2837` Binance US users will now be able to see the correct location for their trades and deposits/withdrawals. It should no longer be Binance. To reflect those changes Binance US data should be purged and then re-queried. To see how to purge data for an exchange look here: https://rotki.readthedocs.io/en/latest/usage_guide.html#purging-data
+* :bug:`2837` Binance US users will now be able to see the correct location for their trades and deposits/withdrawals. It should no longer be Binance. To reflect those changes Binance US data should be purged and then re-queried. To see how to purge data for an exchange look here: https://docs.rotki.com/usage-guides/customization.html#purging-data
 * :bug:`2819` Users using macOS will no longer be stuck at "connecting to backend".
 * :bug:`865` Users will now be given an option to retry or terminate the application when communication with the backend fails.
 * :bug:`2791` Updating assets database which adds customs assets already owned as officially supported should no longer get the DB in an inconsistent state.

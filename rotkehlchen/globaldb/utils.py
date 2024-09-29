@@ -1,13 +1,17 @@
 from typing import TYPE_CHECKING
 
+from rotkehlchen.assets.resolver import AssetResolver
+from rotkehlchen.types import SPAM_PROTOCOL
+
 if TYPE_CHECKING:
+    from rotkehlchen.assets.asset import EvmToken
     from rotkehlchen.db.drivers.gevent import DBCursor
 
 
 # Whenever you upgrade the global DB make sure to:
 # 1. Go to assets repo and tweak the min/max schema of the updates
 # 2. Tweak ASSETS_FILE_IMPORT_ACCEPTED_GLOBALDB_VERSIONS
-GLOBAL_DB_VERSION = 6
+GLOBAL_DB_VERSION = 9
 ASSETS_FILE_IMPORT_ACCEPTED_GLOBALDB_VERSIONS = (3, GLOBAL_DB_VERSION)
 MIN_SUPPORTED_GLOBAL_DB_VERSION = 2
 
@@ -30,3 +34,20 @@ def globaldb_get_setting_value(cursor: 'DBCursor', name: str, default_value: int
         return default_value
 
     return int(result[0][0])
+
+
+def set_token_spam_protocol(
+        write_cursor: 'DBCursor',
+        token: 'EvmToken',
+        is_spam: bool,
+) -> None:
+    """
+    Set the protocol field of the provided token as `SPAM` depending on the `is_spam`
+    argument and clean the resolver cache. It overwrites the protocol field of the provided token
+    """
+    write_cursor.execute(
+        'UPDATE evm_tokens SET protocol=? WHERE identifier=?',
+        (SPAM_PROTOCOL if is_spam is True else None, token.identifier),
+    )
+    object.__setattr__(token, 'protocol', None)
+    AssetResolver.clean_memory_cache(identifier=token.identifier)

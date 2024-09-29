@@ -1,29 +1,31 @@
 <script setup lang="ts">
-import { Blockchain } from '@rotki/common/lib/blockchain';
+import { Blockchain } from '@rotki/common';
 import { Module } from '@/types/modules';
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 const props = withDefaults(
   defineProps<{
-    modelValue?: Blockchain | null;
     disabled?: boolean;
     dense?: boolean;
     evmOnly?: boolean;
+    excludeEthStaking?: boolean;
+    items?: string[];
   }>(),
   {
-    modelValue: null,
     disabled: false,
     dense: false,
-    evmOnly: false
-  }
+    evmOnly: false,
+    excludeEthStaking: false,
+    items: () => [],
+  },
 );
 
-const emit = defineEmits<{
-  (e: 'update:model-value', blockchain: Blockchain | null): void;
-}>();
+const model = defineModel<string | undefined>({ required: true });
 
-const rootAttrs = useAttrs();
-
-const { evmOnly, modelValue } = toRefs(props);
+const { evmOnly, excludeEthStaking, items } = toRefs(props);
 
 const { isModuleEnabled } = useModules();
 
@@ -31,79 +33,58 @@ const { isEvm, supportedChains } = useSupportedChains();
 
 const { t } = useI18n();
 
-const search = ref<string | null>(null);
-
-const items = computed(() => {
+const filteredItems = computed(() => {
   const isEth2Enabled = get(isModuleEnabled(Module.ETH2));
 
   let data: string[] = get(supportedChains).map(({ id }) => id);
 
-  if (!isEth2Enabled) {
-    data = data.filter(symbol => symbol !== Blockchain.ETH2);
-  }
+  const only = get(items);
+  if (only.length > 0)
+    data = data.filter(chain => only.includes(chain));
 
-  if (get(evmOnly)) {
+  if (!isEth2Enabled || get(excludeEthStaking))
+    data = data.filter(symbol => symbol !== Blockchain.ETH2);
+
+  if (get(evmOnly))
     data = data.filter(symbol => get(isEvm(symbol as Blockchain)));
-  }
 
   return data;
 });
 
-const clearSearch = () => {
-  set(search, '');
-};
-
-const updateBlockchain = (blockchain: Blockchain) => {
-  clearSearch();
-  emit('update:model-value', blockchain);
-};
-
-const filter = (chain: Blockchain, queryText: string) => {
-  const item = get(supportedChains).find(blockchain => blockchain.id === chain);
-  if (!item) {
-    return false;
-  }
-
-  const nameIncludes = item.name
-    .toLocaleLowerCase()
-    .includes(queryText.toLocaleLowerCase());
-
-  const idIncludes = item.id
-    .toLocaleLowerCase()
-    .includes(queryText.toLocaleLowerCase());
-
-  return nameIncludes || idIncludes;
-};
+const mappedOptions = computed(() => {
+  const filtered = get(filteredItems);
+  return get(supportedChains).filter(item => filtered.includes(item.id));
+});
 </script>
 
 <template>
-  <VAutocomplete
+  <RuiAutoComplete
+    v-model="model"
     :dense="dense"
     :disabled="disabled"
-    :filter="filter"
-    :items="items"
+    :options="mappedOptions"
     :label="t('account_form.labels.blockchain')"
-    :search-input.sync="search"
-    :value="modelValue"
-    clearable
     data-cy="account-blockchain-field"
-    outlined
+    variant="outlined"
     auto-select-first
-    single-line
-    v-bind="rootAttrs"
-    @change="updateBlockchain($event)"
-    @blur="clearSearch()"
+    key-attr="id"
+    text-attr="name"
+    :item-height="dense ? 48 : 56"
+    v-bind="$attrs"
   >
     <template #selection="{ item }">
       <ChainDisplay
-        v-if="!search"
-        :chain="item"
+        :class="{ '-my-1': dense }"
         :dense="dense"
-        :full-width="false"
+        :chain="item.id"
       />
     </template>
     <template #item="{ item }">
-      <ChainDisplay :chain="item" />
+      <ChainDisplay
+        :class="{ 'my-1': dense }"
+        :dense="dense"
+        :chain="item.id"
+      />
     </template>
-  </VAutocomplete>
+  </RuiAutoComplete>
 </template>

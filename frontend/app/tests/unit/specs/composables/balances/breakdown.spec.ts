@@ -1,6 +1,8 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 vi.mock('@/composables/assets/retrieval', () => ({
   useAssetInfoRetrieval: vi.fn().mockReturnValue({
-    assetInfo: vi.fn().mockImplementation(identifier => {
+    assetInfo: vi.fn().mockImplementation((identifier) => {
       const collectionId = identifier.endsWith('USDC') ? 'USDC' : undefined;
       return {
         identifier,
@@ -8,54 +10,50 @@ vi.mock('@/composables/assets/retrieval', () => ({
         symbol: identifier,
         isCustomAsset: false,
         name: `Name ${identifier}`,
-        collectionId
+        collectionId,
       };
-    })
-  })
+    }),
+  }),
 }));
 
 vi.mock('@/store/balances/manual', () => ({
   useManualBalancesStore: vi.fn().mockReturnValue({
     manualBalanceByLocation: ref([]),
-    getBreakdown: vi.fn().mockReturnValue(
+    assetBreakdown: vi.fn().mockReturnValue(
       computed(() => [
         {
           location: 'external',
-          balance: {
-            amount: bigNumberify(1000),
-            usdValue: bigNumberify(1000)
-          },
+          amount: bigNumberify(1000),
+          usdValue: bigNumberify(1000),
           address: '',
-          tags: null
+          tags: null,
         },
         {
           location: 'kraken',
-          balance: {
-            amount: bigNumberify(1000),
-            usdValue: bigNumberify(1000)
-          },
+          amount: bigNumberify(1000),
+          usdValue: bigNumberify(1000),
           address: '',
-          tags: null
-        }
-      ])
+          tags: null,
+        },
+      ]),
     ),
     getLocationBreakdown: vi.fn().mockReturnValue(
       computed(() => ({
         ETH: {
           amount: bigNumberify(1000),
-          usdValue: bigNumberify(1000)
+          usdValue: bigNumberify(1000),
         },
         aUSDC: {
           amount: bigNumberify(2000),
-          usdValue: bigNumberify(2000)
+          usdValue: bigNumberify(2000),
         },
         bUSDC: {
           amount: bigNumberify(1000),
-          usdValue: bigNumberify(1000)
-        }
-      }))
-    )
-  })
+          usdValue: bigNumberify(1000),
+        },
+      })),
+    ),
+  }),
 }));
 
 vi.mock('@/store/balances/exchanges', () => ({
@@ -64,66 +62,59 @@ vi.mock('@/store/balances/exchanges', () => ({
       computed(() => [
         {
           location: 'kraken',
-          balance: {
-            amount: bigNumberify(1000),
-            usdValue: bigNumberify(1000)
-          },
+          amount: bigNumberify(1000),
+          usdValue: bigNumberify(1000),
           address: '',
-          tags: null
-        }
-      ])
+          tags: null,
+        },
+      ]),
     ),
     getLocationBreakdown: vi.fn().mockReturnValue(
       computed(() => ({
         ETH: {
           amount: bigNumberify(1000),
-          usdValue: bigNumberify(1000)
+          usdValue: bigNumberify(1000),
         },
         aUSDC: {
           amount: bigNumberify(2000),
-          usdValue: bigNumberify(2000)
+          usdValue: bigNumberify(2000),
         },
         cUSDC: {
           amount: bigNumberify(1000),
-          usdValue: bigNumberify(1000)
-        }
-      }))
+          usdValue: bigNumberify(1000),
+        },
+      })),
     ),
-    getByLocationBalances: vi.fn()
-  })
+    getByLocationBalances: vi.fn(),
+  }),
 }));
 
-vi.mock('@/composables/blockchain/account-balances/index', () => ({
-  useAccountBalances: vi.fn().mockReturnValue({
-    getBreakdown: vi.fn().mockReturnValue(
+vi.mock('@/store/blockchain/index', () => ({
+  useBlockchainStore: vi.fn().mockReturnValue({
+    assetBreakdown: vi.fn().mockReturnValue(
       computed(() => [
         {
           location: 'ethereum',
           address: '0xaddress1',
-          balance: {
-            amount: bigNumberify(1000),
-            usdValue: bigNumberify(1000)
-          },
-          tags: null
+          amount: bigNumberify(1000),
+          usdValue: bigNumberify(1000),
+          tags: null,
         },
         {
           location: 'ethereum',
           address: '0xaddress2',
-          balance: {
-            amount: bigNumberify(2000),
-            usdValue: bigNumberify(2000)
-          },
-          tags: null
-        }
-      ])
-    )
-  })
+          amount: bigNumberify(2000),
+          usdValue: bigNumberify(2000),
+          tags: null,
+        },
+      ]),
+    ),
+  }),
 }));
 
 describe('composables::balances/breakdown', () => {
   setActivePinia(createPinia());
-  let balancesBreakdown: ReturnType<typeof useBalancesBreakdown> =
-    useBalancesBreakdown();
+  let balancesBreakdown: ReturnType<typeof useBalancesBreakdown> = useBalancesBreakdown();
 
   beforeEach(() => {
     balancesBreakdown = useBalancesBreakdown();
@@ -135,27 +126,31 @@ describe('composables::balances/breakdown', () => {
       {
         location: 'ethereum',
         address: '0xaddress2',
-        balance: { amount: bigNumberify(2000), usdValue: bigNumberify(2000) },
-        tags: null
+        amount: bigNumberify(2000),
+        usdValue: bigNumberify(2000),
+        tags: null,
       },
       {
         location: 'kraken',
-        balance: { amount: bigNumberify(2000), usdValue: bigNumberify(2000) },
+        amount: bigNumberify(2000),
+        usdValue: bigNumberify(2000),
         address: '',
-        tags: null
+        tags: null,
       },
       {
         location: 'ethereum',
         address: '0xaddress1',
-        balance: { amount: bigNumberify(1000), usdValue: bigNumberify(1000) },
-        tags: null
+        amount: bigNumberify(1000),
+        usdValue: bigNumberify(1000),
+        tags: null,
       },
       {
         location: 'external',
-        balance: { amount: bigNumberify(1000), usdValue: bigNumberify(1000) },
+        amount: bigNumberify(1000),
+        usdValue: bigNumberify(1000),
         address: '',
-        tags: null
-      }
+        tags: null,
+      },
     ];
 
     expect(get(assetBreakdown)).toMatchObject(expectedResult);
@@ -166,8 +161,8 @@ describe('composables::balances/breakdown', () => {
     set(fetchedAssetCollections, {
       USDC: {
         name: 'USDC',
-        symbol: 'USDC'
-      }
+        symbol: 'USDC',
+      },
     });
     const locationBreakdown = balancesBreakdown.locationBreakdown('kraken');
     const expectedResult = [
@@ -181,28 +176,28 @@ describe('composables::balances/breakdown', () => {
             asset: 'aUSDC',
             amount: bigNumberify(4000),
             usdValue: bigNumberify(4000),
-            usdPrice: bigNumberify(-1)
+            usdPrice: bigNumberify(-1),
           },
           {
             asset: 'bUSDC',
             amount: bigNumberify(1000),
             usdValue: bigNumberify(1000),
-            usdPrice: bigNumberify(-1)
+            usdPrice: bigNumberify(-1),
           },
           {
             asset: 'cUSDC',
             amount: bigNumberify(1000),
             usdValue: bigNumberify(1000),
-            usdPrice: bigNumberify(-1)
-          }
-        ]
+            usdPrice: bigNumberify(-1),
+          },
+        ],
       },
       {
         asset: 'ETH',
         amount: bigNumberify(2000),
         usdValue: bigNumberify(2000),
-        usdPrice: bigNumberify(-1)
-      }
+        usdPrice: bigNumberify(-1),
+      },
     ];
     expect(get(locationBreakdown)).toMatchObject(expectedResult);
   });

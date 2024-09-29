@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from web3.types import BlockIdentifier
 
+from rotkehlchen.api.websockets.typedefs import WSMessageType
 from rotkehlchen.assets.asset import EvmToken
 from rotkehlchen.chain.evm.contracts import EvmContract
 from rotkehlchen.constants import ZERO
@@ -13,11 +14,20 @@ from rotkehlchen.errors.misc import BlockchainQueryError, RemoteError
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.serialization.deserialize import deserialize_fval
-from rotkehlchen.types import UNISWAP_PROTOCOL, VELODROME_POOL_PROTOCOL, EvmTokenKind, Price
+from rotkehlchen.types import (
+    UNISWAP_PROTOCOL,
+    VELODROME_POOL_PROTOCOL,
+    ChainID,
+    EvmTokenKind,
+    Price,
+    Timestamp,
+)
+from rotkehlchen.utils.misc import ts_now
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
     from rotkehlchen.types import LP_TOKEN_AS_POOL_CONTRACT_ABIS
+    from rotkehlchen.user_messages import MessagesAggregator
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +61,9 @@ def lp_price_from_uniswaplike_pool_contract(
     - Pooled amount of token 1
     - Total supply of pool token
     """
+    if token.protocol is None:
+        return None
+
     try:
         abi_name = LP_TOKEN_AS_POOL_PROTOCOL_TO_ABI_NAME[token.protocol]  # the lp token's contract abi that will be used to query the info needed for lp token price calculation  # noqa: E501
     except KeyError:
@@ -137,12 +150,12 @@ def lp_price_from_uniswaplike_pool_contract(
 
     try:
         token0_supply = deserialize_fval(
-            value=decoded[3][0] * 10**-token0.decimals,
+            value=decoded[3][0] * 10**-token0.get_decimals(),
             name=FVAL_ERROR_NAME,
             location=FVAL_ERROR_LOCATION,
         )
         token1_supply = deserialize_fval(
-            value=decoded[3][1] * 10**-token1.decimals,
+            value=decoded[3][1] * 10**-token1.get_decimals(),
             name=FVAL_ERROR_NAME,
             location=FVAL_ERROR_LOCATION,
         )
@@ -168,3 +181,47 @@ def lp_price_from_uniswaplike_pool_contract(
     numerator = token0_supply * token0_price + token1_supply * token1_price
     share_value = numerator / total_supply
     return Price(share_value)
+
+
+def maybe_notify_cache_query_status(
+        msg_aggregator: 'MessagesAggregator',
+        last_notified_ts: Timestamp,
+        protocol: str,
+        chain: ChainID,
+        processed: int,
+        total: int,
+) -> Timestamp:
+    """Helper function to notify the cache query status if it's been more than 5 seconds since the
+    last notification, and returns the last notified timestamp."""
+    if (current_time := ts_now()) - last_notified_ts > 5:
+        msg_aggregator.add_message(
+            message_type=WSMessageType.PROTOCOL_CACHE_UPDATES,
+            data={
+                'protocol': protocol,
+                'chain': chain,
+                'processed': processed,
+                'total': total,
+            },
+        )
+        return current_time
+
+    return last_notified_ts
+
+
+def maybe_notify_new_pools_status(
+        msg_aggregator: 'MessagesAggregator',
+        last_notified_ts: Timestamp,
+        protocol: str,
+        chain: ChainID,
+        get_new_pools_count: Callable[[], int],
+) -> Timestamp:
+    """Helper function to notify the new pools status if it's been more than 5 seconds since the
+    last notification, and returns the last notified timestamp."""
+    return maybe_notify_cache_query_status(
+        msg_aggregator=msg_aggregator,
+        last_notified_ts=last_notified_ts,
+        protocol=protocol,
+        chain=chain,
+        processed=0,  # 0 because here we only query pools to find their total number. It will be incremented while processing the pools later  # noqa: E501
+        total=get_new_pools_count(),  # notifying the increase in pool count every 5 seconds as we query them  # noqa: E501
+    )

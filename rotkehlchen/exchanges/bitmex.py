@@ -113,10 +113,10 @@ class Bitmex(ExchangeInterface):
             api_key=api_key,
             secret=secret,
             database=database,
+            msg_aggregator=msg_aggregator,
         )
         self.uri = 'https://bitmex.com'
         self.session.headers.update({'api-key': api_key})
-        self.msg_aggregator = msg_aggregator
         self.btc = A_BTC.resolve_to_crypto_asset()
 
     def edit_exchange_credentials(self, credentials: ExchangeAuthCredentials) -> bool:
@@ -204,10 +204,8 @@ class Bitmex(ExchangeInterface):
 
         if response.status_code not in {200, 401}:
             raise RemoteError(
-                'Bitmex api request for {} failed with HTTP status code {}'.format(
-                    response.url,
-                    response.status_code,
-                ),
+                f'Bitmex api request for {response.url} failed with HTTP '
+                f'status code {response.status_code}',
             )
 
         try:
@@ -247,7 +245,7 @@ class Bitmex(ExchangeInterface):
         try:
             resp = self._api_query_dict('get', 'user/wallet', {'currency': 'XBt'})
             # Bitmex shows only BTC balance
-            usd_price = Inquirer().find_usd_price(self.btc)
+            usd_price = Inquirer.find_usd_price(self.btc)
         except RemoteError as e:
             msg = f'Bitmex API request failed due to: {e!s}'
             log.error(msg)
@@ -282,7 +280,7 @@ class Bitmex(ExchangeInterface):
     ) -> list[MarginPosition]:
 
         # We know user/walletHistory returns a list
-        resp = self._api_query_list('get', 'user/walletHistory')
+        resp = self._api_query_list('get', 'user/walletHistory', {'currency': 'all'})
         log.debug('Bitmex trade history query', results_num=len(resp))
 
         margin_trades = []
@@ -306,10 +304,9 @@ class Bitmex(ExchangeInterface):
             start_ts: Timestamp,
             end_ts: Timestamp,
     ) -> list:
-        resp = self._api_query_list('get', 'user/walletHistory')
+        resp = self._api_query_list('get', 'user/walletHistory', {'currency': 'all'})
 
         log.debug('Bitmex deposit/withdrawals query', results_num=len(resp))
-
         movements = []
         for movement in resp:
             try:
@@ -329,7 +326,7 @@ class Bitmex(ExchangeInterface):
 
                 asset = bitmex_to_world(movement['currency'])
                 amount = deserialize_asset_amount_force_positive(movement['amount'])
-                fee = deserialize_fee(movement['fee'])
+                fee = deserialize_fee(movement.get('fee', 0))  # deposit has no fees
 
                 if asset == A_BTC:
                     # bitmex stores amounts in satoshis
@@ -349,9 +346,9 @@ class Bitmex(ExchangeInterface):
                     link=str(movement['transactID']),
                 ))
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found bitmex deposit/withdrawal with unknown asset '
-                    f'{e.identifier}. Ignoring it.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='deposit/withdrawal',
                 )
                 continue
             except (DeserializationError, KeyError) as e:

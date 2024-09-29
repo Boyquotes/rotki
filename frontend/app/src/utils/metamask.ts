@@ -1,34 +1,52 @@
-export function isMetaMaskSupported(): boolean {
-  return (
-    (!!window.interop || (window.ethereum && window.ethereum.isMetaMask)) ??
-    false
-  );
+import type { EIP1193Provider, EIP6963AnnounceProviderEvent, EIP6963ProviderDetail } from '@/types';
+
+export function getAllBrowserWalletProviders(): Promise<EIP6963ProviderDetail[]> {
+  return new Promise((resolve) => {
+    const providers: EIP6963ProviderDetail[] = [];
+
+    function handleProviderAnnouncement(event: EIP6963AnnounceProviderEvent): void {
+      providers.push(event.detail);
+    }
+
+    function cleanup(): void {
+      window.removeEventListener('eip6963:announceProvider', handleProviderAnnouncement);
+    }
+
+    window.addEventListener('eip6963:announceProvider', handleProviderAnnouncement);
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+
+    setTimeout(() => {
+      cleanup();
+      resolve(uniqueObjects(providers, item => item.info.uuid));
+    }, 1000);
+  });
 }
 
-export async function getMetamaskAddresses(): Promise<string[]> {
-  assert(window.ethereum);
-  assert(window.ethereum.isMetaMask);
-
-  const permissions = await window.ethereum.request({
+export async function getAddressesFromWallet(provider: EIP1193Provider): Promise<string[]> {
+  const permissions = await provider.request({
     method: 'wallet_requestPermissions',
     params: [
       {
-        eth_accounts: {}
-      }
-    ]
+        eth_accounts: {},
+      },
+    ],
   });
 
   const accountPermission = permissions.find(
-    permission => permission.parentCapability === 'eth_accounts'
+    permission => typeof permission !== 'string' && permission.parentCapability === 'eth_accounts',
   );
 
   assert(accountPermission);
 
+  const requestedAddresses = await provider.request({
+    method: 'eth_requestAccounts',
+    params: [],
+  });
+
   const addresses: string[] = [];
-  accountPermission.caveats.forEach(permission => {
-    if (permission.value) {
-      addresses.push(...permission.value);
-    }
+  requestedAddresses.forEach((item) => {
+    if (typeof item === 'string')
+      addresses.push(item);
   });
 
   assert(addresses);

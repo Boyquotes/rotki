@@ -1,83 +1,48 @@
 <script setup lang="ts">
-import { type EvmTransactionQueryData } from '@/types/websocket-messages';
+import { TaskType } from '@/types/task-type';
+import type { EvmTransactionQueryData } from '@/types/websocket-messages';
 
-defineProps<{ item: EvmTransactionQueryData }>();
+const props = defineProps<{ item: EvmTransactionQueryData }>();
 
 const { t } = useI18n();
+const { getStatusData } = useTransactionQueryStatus();
+const { isTaskRunning } = useTaskStore();
+const { isSmAndDown } = useBreakpoint();
 
-const steps = computed(() => [
-  toSentenceCase(t('transactions.query_status.statuses.querying_transactions')),
-  toSentenceCase(
-    t('transactions.query_status.statuses.querying_internal_transactions')
-  ),
-  toSentenceCase(
-    t('transactions.query_status.statuses.querying_evm_tokens_transactions')
-  )
+const { item } = toRefs(props);
+
+const transactionsLoading = isTaskRunning(TaskType.TX);
+
+const stepList = computed(() => [
+  t('transactions.query_status.statuses.querying_transactions'),
+  t('transactions.query_status.statuses.querying_internal_transactions'),
+  t('transactions.query_status.statuses.querying_evm_tokens_transactions'),
 ]);
 
-const { getStatusData } = useTransactionQueryStatus();
+const steps = computed(() =>
+  get(stepList).map((step, index) => ({
+    title: toSentenceCase(step),
+    loading: isStepInProgress(index),
+  })),
+);
 
-const isStepCompleted = (item: EvmTransactionQueryData, stepIndex: number) =>
-  getStatusData(item).index > stepIndex + 1;
+const hasProgress = computed(() => get(steps).some(step => step.loading));
 
-const isStepInProgress = (item: EvmTransactionQueryData, stepIndex: number) =>
-  getStatusData(item).index === stepIndex + 1;
+function isStepInProgress(stepIndex: number): boolean {
+  if (getStatusData(get(item)).index === 4 && stepIndex === get(stepList).length - 1 && get(transactionsLoading))
+    return true;
 
-const css = useCssModule();
+  return getStatusData(get(item)).index === stepIndex + 1;
+}
 </script>
 
 <template>
-  <VStepper vertical flat :value="-1" :class="css.stepper">
-    <VStepperHeader :class="css['stepper__header']">
-      <template v-for="(step, index) in steps">
-        <VStepperStep
-          :key="step"
-          :class="css['stepper__item']"
-          :step="index + 1"
-          color="green"
-          :complete="isStepCompleted(item, index)"
-        >
-          <div :class="isStepCompleted(item, index) ? 'text-rui-success' : ''">
-            {{ step }}
-          </div>
-          <VProgressCircular
-            v-if="isStepInProgress(item, index)"
-            :class="css['stepper__progress']"
-            size="32"
-            indeterminate
-            width="2"
-            color="primary"
-          />
-        </VStepperStep>
-      </template>
-    </VStepperHeader>
-  </VStepper>
+  <RuiStepper
+    v-if="hasProgress"
+    class="[&_hr]:!hidden [&>div]:!py-0"
+    :class="[isSmAndDown ? 'ml-8' : 'ml-2']"
+    :steps="steps"
+    :step="getStatusData(item).index"
+    :orientation="isSmAndDown ? 'vertical' : 'horizontal'"
+  />
 </template>
-
-<style module lang="scss">
-.stepper {
-  padding-bottom: 0;
-
-  &__header {
-    box-shadow: none;
-    justify-content: flex-start;
-    height: auto;
-    padding-left: 0.5rem;
-
-    @media (max-width: 900px) {
-      flex-direction: column;
-    }
-  }
-
-  &__item {
-    padding: 0.5rem 1.5rem 0.5rem 0 !important;
-  }
-
-  &__progress {
-    position: absolute;
-    left: -4px;
-    top: 50%;
-    transform: translateY(-50%);
-  }
-}
-</style>

@@ -1,39 +1,41 @@
 <script setup lang="ts">
-import Fragment from '@/components/helper/Fragment';
-
 const { autolog } = useAutoLogin();
-const { isPackaged } = useInterop();
-const { connectionFailure, connected, dockerRiskAccepted } = storeToRefs(
-  useMainStore()
-);
+const { restarting } = useRestartingStatus();
+
+const { connectionFailure, connected, dockerRiskAccepted } = storeToRefs(useMainStore());
 
 const isDocker = import.meta.env.VITE_DOCKER;
-const hasAcceptedDockerRisk = logicAnd(dockerRiskAccepted, isDocker);
-const loginIfConnected = logicOr(
-  isPackaged,
-  hasAcceptedDockerRisk,
-  logicNot(isDocker)
-);
-const displayRouter = logicAnd(connected, loginIfConnected);
-
-const css = useCssModule();
+const showDockerWarning = logicAnd(isDocker, logicNot(dockerRiskAccepted));
+const displayRouter = logicAnd(connected, logicNot(showDockerWarning), logicNot(restarting));
 </script>
 
 <template>
-  <Fragment>
-    <ConnectionLoading
-      v-if="!connectionFailure"
-      :connected="connected && !autolog"
+  <ConnectionLoading
+    v-if="!connectionFailure"
+    :connected="connected && !autolog"
+  />
+  <ConnectionFailureMessage v-else />
+
+  <div
+    v-if="displayRouter"
+    data-cy="account-management-forms"
+    :class="$style.router"
+  >
+    <slot />
+  </div>
+
+  <DockerWarning v-else-if="showDockerWarning" />
+  <div
+    v-else-if="connected"
+    class="w-full h-full flex items-center justify-center"
+  >
+    <RuiProgress
+      thickness="2"
+      color="primary"
+      variant="indeterminate"
+      circular
     />
-    <ConnectionFailureMessage v-else />
-    <div
-      v-if="displayRouter"
-      data-cy="account-management-forms"
-      :class="css.router"
-    >
-      <slot />
-    </div>
-  </Fragment>
+  </div>
 </template>
 
 <style lang="scss" module>

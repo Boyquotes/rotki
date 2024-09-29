@@ -1,12 +1,72 @@
-<script lang="ts" setup>
-const props = defineProps<{
-  url: string;
-}>();
+<script setup lang="ts">
+defineOptions({
+  inheritAttrs: false,
+});
 
-const { url } = toRefs(props);
+const props = withDefaults(
+  defineProps<{
+    url?: string;
+    truncate?: boolean;
+    text?: string;
+    custom?: boolean;
+    premium?: boolean;
+  }>(),
+  {
+    url: undefined,
+    truncate: false,
+    text: '',
+    custom: false,
+    premium: false,
+  },
+);
+
+const { url, truncate, text } = toRefs(props);
+const { isPackaged } = useInterop();
+
 const { href, linkTarget, onLinkClick } = useLinks(url);
+
+const displayText = computed(() => (get(truncate) ? truncateAddress(get(text)) : get(text)));
 </script>
 
 <template>
-  <a :href="href" :target="linkTarget" @click="onLinkClick()"><slot /></a>
+  <RuiButton
+    v-if="(url || premium) && !custom"
+    :tag="isPackaged ? 'button' : 'a'"
+    :href="href"
+    :target="linkTarget"
+    v-bind="$attrs"
+    variant="text"
+    :class="$style.button"
+    @click="onLinkClick()"
+  >
+    <slot>{{ displayText }}</slot>
+  </RuiButton>
+  <a
+    v-else-if="url || premium"
+    :href="href"
+    :target="linkTarget"
+    class="whitespace-nowrap"
+    v-bind="$attrs"
+    @click="onLinkClick()"
+  >
+    <slot>{{ displayText }}</slot>
+  </a>
+  <div
+    v-else
+    v-bind="$attrs"
+  >
+    <slot />
+  </div>
 </template>
+
+<style lang="scss" module>
+.button {
+  @apply inline text-[1em] p-0 px-0.5 -mx-0.5 #{!important};
+
+  font-weight: inherit !important;
+
+  span {
+    @apply underline;
+  }
+}
+</style>

@@ -15,7 +15,7 @@ from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_proper_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
 )
 from rotkehlchen.tests.utils.balances import get_asset_balance_total
 from rotkehlchen.tests.utils.constants import A_RDN
@@ -59,7 +59,7 @@ def test_query_statistics_netvalue(
         ),
     )
 
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result) == 2
     assert len(result['times']) == 1
     assert len(result['data']) == 1
@@ -102,7 +102,7 @@ def test_query_statistics_asset_balance(
         json={'asset': 'ETH'},
     )
     if start_with_valid_premium:
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert len(result) == 1
         entry = result[0]
         assert len(entry) == 4
@@ -114,7 +114,7 @@ def test_query_statistics_asset_balance(
         assert_error_response(
             response=response,
             contained_in_msg='logged in user testuser does not have a premium subscription',
-            status_code=HTTPStatus.CONFLICT,
+            status_code=HTTPStatus.FORBIDDEN,
         )
 
     # and now test that statistics work fine for BTC, with given time range
@@ -125,7 +125,7 @@ def test_query_statistics_asset_balance(
         ), json={'from_timestamp': 0, 'to_timestamp': start_time + 60000, 'asset': 'BTC'},
     )
     if start_with_valid_premium:
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert len(result) == 1
         entry = result[0]
         assert len(entry) == 4
@@ -137,7 +137,7 @@ def test_query_statistics_asset_balance(
         assert_error_response(
             response=response,
             contained_in_msg='logged in user testuser does not have a premium subscription',
-            status_code=HTTPStatus.CONFLICT,
+            status_code=HTTPStatus.FORBIDDEN,
         )
 
     # finally test that if the time range is not including the saved balances we get nothing back
@@ -148,13 +148,13 @@ def test_query_statistics_asset_balance(
         ), json={'from_timestamp': 0, 'to_timestamp': start_time - 1, 'asset': 'BTC'},
     )
     if start_with_valid_premium:
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert len(result) == 0
     else:
         assert_error_response(
             response=response,
             contained_in_msg='logged in user testuser does not have a premium subscription',
-            status_code=HTTPStatus.CONFLICT,
+            status_code=HTTPStatus.FORBIDDEN,
         )
 
 
@@ -210,7 +210,7 @@ def test_query_statistics_asset_balance_errors(rotkehlchen_api_server: APIServer
     )
     assert_error_response(
         response=response,
-        contained_in_msg='"Failed to deserialize a timestamp entry. Unexpected type',
+        contained_in_msg='"Failed to deserialize a timestamp entry from string 53434.32',
         status_code=HTTPStatus.BAD_REQUEST,
     )
 
@@ -239,7 +239,7 @@ def test_query_statistics_value_distribution(
         btc_accounts=btc_accounts,
         token_balances=token_balances,
         manually_tracked_balances=[ManuallyTrackedBalance(
-            id=-1,
+            identifier=-1,
             asset=A_EUR,
             label='My EUR bank',
             amount=FVal('1550'),
@@ -247,7 +247,7 @@ def test_query_statistics_value_distribution(
             tags=None,
             balance_type=BalanceType.ASSET,
         ), ManuallyTrackedBalance(
-            id=2,
+            identifier=2,
             asset=A_ETH2,
             label='John Doe',
             amount=FVal('2.6'),
@@ -271,7 +271,7 @@ def test_query_statistics_value_distribution(
     def assert_okay_by_location(response):
         """Helper function to run next query and its assertion twice"""
         if start_with_valid_premium:
-            result = assert_proper_response_with_result(response)
+            result = assert_proper_sync_response_with_result(response)
             assert len(result) == 6
             locations = {'poloniex', 'binance', 'banks', 'blockchain', 'total', 'kraken'}
             for entry in result:
@@ -285,7 +285,7 @@ def test_query_statistics_value_distribution(
             assert_error_response(
                 response=response,
                 contained_in_msg='logged in user testuser does not have a premium subscription',
-                status_code=HTTPStatus.CONFLICT,
+                status_code=HTTPStatus.FORBIDDEN,
             )
 
     # and now test that statistics work fine for distribution by location for json body
@@ -313,7 +313,7 @@ def test_query_statistics_value_distribution(
         ), json={'distribution_by': 'asset'},
     )
     if start_with_valid_premium:
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         if db_settings['treat_eth2_as_eth'] is True:
             assert len(result) == 4
             totals = {
@@ -355,7 +355,7 @@ def test_query_statistics_value_distribution(
         assert_error_response(
             response=response,
             contained_in_msg='logged in user testuser does not have a premium subscription',
-            status_code=HTTPStatus.CONFLICT,
+            status_code=HTTPStatus.FORBIDDEN,
         )
 
 
@@ -415,11 +415,11 @@ def test_query_statistics_renderer(rotkehlchen_api_server, start_with_valid_prem
             ),
         )
     if start_with_valid_premium:
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert result == 'codegoeshere'
     else:
         assert_error_response(
             response=response,
             contained_in_msg='logged in user testuser does not have a premium subscription',
-            status_code=HTTPStatus.CONFLICT,
+            status_code=HTTPStatus.FORBIDDEN,
         )

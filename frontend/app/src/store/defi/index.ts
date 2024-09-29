@@ -1,24 +1,16 @@
-import { type DefiAccount } from '@rotki/common/lib/account';
-import { Blockchain, DefiProtocol } from '@rotki/common/lib/blockchain';
-import { type ComputedRef } from 'vue';
+import { Blockchain } from '@rotki/common';
 import { AllDefiProtocols } from '@/types/defi/overview';
-import { Module } from '@/types/modules';
+import { DECENTRALIZED_EXCHANGES, DefiProtocol, Module } from '@/types/modules';
 import { Section, Status } from '@/types/status';
-import { type TaskMeta } from '@/types/task';
 import { TaskType } from '@/types/task-type';
-import { ProtocolVersion } from '@/types/defi';
-import {
-  ALL_DECENTRALIZED_EXCHANGES,
-  ALL_MODULES
-} from '@/types/session/purge';
+import { type DefiAccount, ProtocolVersion } from '@/types/defi';
+import { Purgeable } from '@/types/session/purge';
+import type { TaskMeta } from '@/types/task';
 
-type ResetStateParams =
-  | Module
-  | typeof ALL_MODULES
-  | typeof ALL_DECENTRALIZED_EXCHANGES;
+type ResetStateParams = Module | typeof Purgeable.DEFI_MODULES | typeof Purgeable.DECENTRALIZED_EXCHANGES;
 
 export const useDefiStore = defineStore('defi', () => {
-  const allProtocols: Ref<AllDefiProtocols> = ref({});
+  const allProtocols = ref<AllDefiProtocols>({});
 
   const { awaitTask } = useTaskStore();
   const { notify } = useNotificationsStore();
@@ -36,8 +28,7 @@ export const useDefiStore = defineStore('defi', () => {
 
   const { fetchAllDefi: fetchAllDefiCaller } = useDefiApi();
 
-  const { addressesV1: yearnV1Addresses, addressesV2: yearnV2Addresses } =
-    storeToRefs(yearnStore);
+  const { addressesV1: yearnV1Addresses, addressesV2: yearnV2Addresses } = storeToRefs(yearnStore);
   const { addresses: aaveAddresses } = storeToRefs(aaveStore);
   const { addresses: compoundAddresses } = storeToRefs(compoundStore);
   const { addresses: makerDaoAddresses } = storeToRefs(makerDaoStore);
@@ -47,111 +38,96 @@ export const useDefiStore = defineStore('defi', () => {
     DefiProtocol.MAKERDAO_VAULTS | DefiProtocol.UNISWAP | DefiProtocol.LIQUITY
   >;
 
-  const defiAccounts = (
-    protocols: DefiProtocol[]
-  ): ComputedRef<DefiAccount[]> =>
-    computed(() => {
-      const addresses: {
-        [key in DefiProtocols]: string[];
-      } = {
-        [DefiProtocol.MAKERDAO_DSR]: [],
-        [DefiProtocol.AAVE]: [],
-        [DefiProtocol.COMPOUND]: [],
-        [DefiProtocol.YEARN_VAULTS]: [],
-        [DefiProtocol.YEARN_VAULTS_V2]: []
-      };
+  const defiAccounts = (protocols: DefiProtocol[]): ComputedRef<DefiAccount[]> => computed<DefiAccount[]>(() => {
+    const addresses: {
+      [key in DefiProtocols]: string[];
+    } = {
+      [DefiProtocol.MAKERDAO_DSR]: [],
+      [DefiProtocol.AAVE]: [],
+      [DefiProtocol.COMPOUND]: [],
+      [DefiProtocol.YEARN_VAULTS]: [],
+      [DefiProtocol.YEARN_VAULTS_V2]: [],
+    };
 
-      const noProtocolsSelected = protocols.length === 0;
+    const noProtocolsSelected = protocols.length === 0;
 
-      if (
-        noProtocolsSelected ||
-        protocols.includes(DefiProtocol.MAKERDAO_DSR)
-      ) {
-        addresses[DefiProtocol.MAKERDAO_DSR] = get(makerDaoAddresses);
-      }
+    if (noProtocolsSelected || protocols.includes(DefiProtocol.MAKERDAO_DSR))
+      addresses[DefiProtocol.MAKERDAO_DSR] = get(makerDaoAddresses);
 
-      if (noProtocolsSelected || protocols.includes(DefiProtocol.AAVE)) {
-        addresses[DefiProtocol.AAVE] = get(aaveAddresses);
-      }
+    if (noProtocolsSelected || protocols.includes(DefiProtocol.AAVE))
+      addresses[DefiProtocol.AAVE] = get(aaveAddresses);
 
-      if (noProtocolsSelected || protocols.includes(DefiProtocol.COMPOUND)) {
-        addresses[DefiProtocol.COMPOUND] = get(compoundAddresses);
-      }
+    if (noProtocolsSelected || protocols.includes(DefiProtocol.COMPOUND))
+      addresses[DefiProtocol.COMPOUND] = get(compoundAddresses);
 
-      if (
-        noProtocolsSelected ||
-        protocols.includes(DefiProtocol.YEARN_VAULTS)
-      ) {
-        addresses[DefiProtocol.YEARN_VAULTS] = get(yearnV1Addresses);
-      }
+    if (noProtocolsSelected || protocols.includes(DefiProtocol.YEARN_VAULTS))
+      addresses[DefiProtocol.YEARN_VAULTS] = get(yearnV1Addresses);
 
-      if (
-        noProtocolsSelected ||
-        protocols.includes(DefiProtocol.YEARN_VAULTS_V2)
-      ) {
-        addresses[DefiProtocol.YEARN_VAULTS_V2] = get(yearnV2Addresses);
-      }
+    if (noProtocolsSelected || protocols.includes(DefiProtocol.YEARN_VAULTS_V2))
+      addresses[DefiProtocol.YEARN_VAULTS_V2] = get(yearnV2Addresses);
 
-      const accounts: Record<string, DefiAccount> = {};
-      for (const protocol in addresses) {
-        const selectedProtocol = protocol as DefiProtocols;
-        const perProtocolAddresses = addresses[selectedProtocol];
-        for (const address of perProtocolAddresses) {
-          if (accounts[address]) {
-            accounts[address].protocols.push(selectedProtocol);
-          } else {
-            accounts[address] = {
+    const accounts: Record<string, DefiAccount> = {};
+    for (const protocol in addresses) {
+      const selectedProtocol = protocol as DefiProtocols;
+      const perProtocolAddresses = addresses[selectedProtocol];
+      for (const address of perProtocolAddresses) {
+        if (accounts[address]) {
+          accounts[address].protocols.push(selectedProtocol);
+        }
+        else {
+          accounts[address] = {
+            data: {
+              type: 'address',
               address,
-              chain: Blockchain.ETH,
-              protocols: [selectedProtocol]
-            };
-          }
+            },
+            chain: Blockchain.ETH,
+            protocols: [selectedProtocol],
+            nativeAsset: Blockchain.ETH.toUpperCase(),
+          };
         }
       }
+    }
 
-      return Object.values(accounts);
-    });
+    return Object.values(accounts);
+  });
 
   const { setStatus, fetchDisabled } = useStatusUpdater(Section.DEFI_BALANCES);
 
-  const fetchDefiBalances = async (refresh: boolean) => {
-    if (fetchDisabled(refresh)) {
+  const fetchDefiBalances = async (refresh: boolean): Promise<void> => {
+    if (fetchDisabled(refresh))
       return;
-    }
 
     setStatus(Status.LOADING);
     try {
       const taskType = TaskType.DEFI_BALANCES;
       const { taskId } = await fetchAllDefiCaller();
-      const { result } = await awaitTask<AllDefiProtocols, TaskMeta>(
-        taskId,
-        taskType,
-        {
-          title: t('actions.defi.balances.task.title')
-        }
-      );
+      const { result } = await awaitTask<AllDefiProtocols, TaskMeta>(taskId, taskType, {
+        title: t('actions.defi.balances.task.title'),
+      });
 
       set(allProtocols, AllDefiProtocols.parse(result));
-    } catch (e: any) {
-      const title = t('actions.defi.balances.error.title');
-      const message = t('actions.defi.balances.error.description', {
-        error: e.message
-      });
-      notify({
-        title,
-        message,
-        display: true
-      });
+    }
+    catch (error: any) {
+      if (!isTaskCancelled(error)) {
+        const title = t('actions.defi.balances.error.title');
+        const message = t('actions.defi.balances.error.description', {
+          error: error.message,
+        });
+        notify({
+          title,
+          message,
+          display: true,
+        });
+      }
     }
     setStatus(Status.LOADED);
   };
 
-  async function fetchAllDefi(refresh = false) {
-    const section = Section.DEFI_OVERVIEW;
+  async function fetchAllDefi(refresh = false): Promise<void> {
+    const section = { section: Section.DEFI_OVERVIEW };
 
-    if (fetchDisabled(refresh, section)) {
+    if (fetchDisabled(refresh, section))
       return;
-    }
 
     const newStatus = refresh ? Status.REFRESHING : Status.LOADING;
     setStatus(newStatus, section);
@@ -165,13 +141,13 @@ export const useDefiStore = defineStore('defi', () => {
       compoundStore.fetchBalances(refresh),
       yearnStore.fetchBalances({
         refresh,
-        version: ProtocolVersion.V1
+        version: ProtocolVersion.V1,
       }),
       yearnStore.fetchBalances({
         refresh,
-        version: ProtocolVersion.V2
+        version: ProtocolVersion.V2,
       }),
-      liquityStore.fetchBalances(refresh)
+      liquityStore.fetchBalances(refresh),
     ]);
 
     setStatus(Status.LOADED, section);
@@ -187,38 +163,33 @@ export const useDefiStore = defineStore('defi', () => {
     [Module.UNISWAP]: () => uniswapStore.reset(),
     [Module.SUSHISWAP]: () => sushiswapStore.reset(),
     [Module.BALANCER]: () => balancerStore.reset(),
-    [Module.LIQUITY]: () => liquityStore.reset()
+    [Module.LIQUITY]: () => liquityStore.reset(),
   };
 
-  const resetState = (module: ResetStateParams) => {
-    if (module === ALL_DECENTRALIZED_EXCHANGES) {
-      [Module.UNISWAP, Module.SUSHISWAP, Module.BALANCER].map(mod =>
-        modules[mod]()
-      );
-    } else if (module === ALL_MODULES) {
-      for (const mod in modules) {
-        modules[mod as Module]();
-      }
-    } else {
+  const resetState = (module: ResetStateParams): void => {
+    if (module === Purgeable.DECENTRALIZED_EXCHANGES) {
+      DECENTRALIZED_EXCHANGES.map(mod => modules[mod]());
+    }
+    else if (module === Purgeable.DEFI_MODULES) {
+      for (const mod in modules) modules[mod as Module]();
+    }
+    else {
       const reset = modules[module];
 
-      if (!reset) {
+      if (!reset)
         logger.warn(`Missing reset function for ${module}`);
-      } else {
-        reset();
-      }
+      else reset();
     }
   };
 
-  const reset = () => {
+  const reset = (): void => {
     set(allProtocols, {});
-    resetState(ALL_MODULES);
+    resetState(Purgeable.DEFI_MODULES);
   };
 
-  watch(premium, premium => {
-    if (!premium) {
+  watch(premium, (premium) => {
+    if (!premium)
       reset();
-    }
   });
 
   return {
@@ -227,10 +198,9 @@ export const useDefiStore = defineStore('defi', () => {
     fetchDefiBalances,
     fetchAllDefi,
     resetState,
-    reset
+    reset,
   };
 });
 
-if (import.meta.hot) {
+if (import.meta.hot)
   import.meta.hot.accept(acceptHMRUpdate(useDefiStore, import.meta.hot));
-}

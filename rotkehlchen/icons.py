@@ -1,5 +1,4 @@
 import hashlib
-import itertools
 import logging
 import shutil
 import urllib.parse
@@ -7,12 +6,11 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import gevent
 import requests
 from flask import Response, make_response
 
 from rotkehlchen.assets.asset import Asset, AssetWithNameAndType
-from rotkehlchen.assets.types import AssetType
+from rotkehlchen.constants.assets import A_WETH
 from rotkehlchen.constants.misc import (
     ALLASSETIMAGESDIR_NAME,
     ASSETIMAGESDIR_NAME,
@@ -76,9 +74,7 @@ def create_image_response(image_path: Path) -> Response:
     May raise:
     - OSError if the file doesn't exists
     """
-    with open(image_path, 'rb') as f:
-        image_data = f.read()
-
+    image_data = image_path.read_bytes()
     response = make_response(
         (
             image_data,
@@ -189,9 +185,7 @@ class IconManager:
         if response.status_code != HTTPStatus.OK:
             return False
 
-        with open(self.iconfile_path(asset), 'wb') as f:
-            f.write(response.content)
-
+        self.iconfile_path(asset).write_bytes(response.content)
         return True
 
     def get_icon(
@@ -213,7 +207,20 @@ class IconManager:
             return None, False
 
         # check if the asset is in a collection
-        collection_main_asset_id = GlobalDBHandler().get_collection_main_asset(asset.identifier)
+        collection_main_asset_id: str | None
+        if asset.identifier in (
+            'eip155:1/erc20:0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+            'eip155:10/erc20:0x4200000000000000000000000000000000000006',
+            'eip155:100/erc20:0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1',
+            'eip155:8453/erc20:0x4200000000000000000000000000000000000006',
+            'eip155:534352/erc20:0x5300000000000000000000000000000000000004',
+            'eip155:137/erc20:0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619',
+            'eip155:42161/erc20:0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+        ):
+            # handle weth as special case since it is in the ethereum group
+            collection_main_asset_id = A_WETH.identifier
+        else:
+            collection_main_asset_id = GlobalDBHandler.get_collection_main_asset(asset.identifier)
         asset_to_query_icon = asset
 
         if collection_main_asset_id is not None:
@@ -241,59 +248,6 @@ class IconManager:
             coingecko_id=coingecko_id,
         )
         return None, True
-
-    def _assets_with_coingecko_id(self) -> dict[str, str]:
-        """Create a mapping of all the assets identifiers to their coingecko id if it is set"""
-        querystr = """
-        SELECT A.identifier, B.coingecko from assets as A JOIN common_asset_details as B
-        ON B.identifier = A.identifier WHERE A.type != ? AND B.coingecko IS NOT NULL AND B.coingecko != ""
-        """  # noqa: E501
-        assets_mappings: dict[str, str] = {}
-        with GlobalDBHandler().conn.read_ctx() as cursor:
-            fiat_type = AssetType.FIAT.serialize_for_db()
-            cursor.execute(querystr, [fiat_type])
-            for entry in cursor:
-                assets_mappings[entry[0]] = entry[1]
-        return assets_mappings
-
-    def query_uncached_icons_batch(self, batch_size: int) -> bool:
-        """Queries a batch of uncached icons for assets
-
-        Returns true if there is more icons left to cache after this batch.
-        """
-        coingecko_integrated_asset = self._assets_with_coingecko_id()
-        coingecko_integrated_asset_ids = set(coingecko_integrated_asset.keys())
-        cached_asset_ids = [
-            str(x.name)[:-10] for x in self.icons_dir.glob('*_small.png') if x.is_file()
-        ]
-        uncached_asset_ids = (
-            coingecko_integrated_asset_ids - set(cached_asset_ids) - self.failed_asset_ids.get_values()  # noqa: E501
-        )
-        log.info(
-            f'Periodic task to query coingecko for {batch_size} uncached asset icons. '
-            f'Uncached assets: {len(uncached_asset_ids)}. Cached assets: {len(cached_asset_ids)}',
-        )
-        assets_to_query = [(asset_id, coingecko_id) for asset_id, coingecko_id in coingecko_integrated_asset.items() if asset_id in uncached_asset_ids]  # noqa: E501
-        for asset_id, coingecko_id in itertools.islice(assets_to_query, batch_size):
-            self.query_coingecko_for_icon(asset=AssetWithNameAndType(asset_id), coingecko_id=coingecko_id)  # noqa: E501
-
-        return len(uncached_asset_ids) > batch_size
-
-    def periodically_query_icons_until_all_cached(
-            self,
-            batch_size: int,
-            sleep_time_secs: float,
-    ) -> None:
-        """Periodically query all uncached icons until we have icons cached for all
-        of the known assets that have coingecko integration"""
-        if batch_size == 0:
-            return
-
-        while True:
-            carry_on = self.query_uncached_icons_batch(batch_size=batch_size)
-            if not carry_on:
-                break
-            gevent.sleep(sleep_time_secs)
 
     def add_icon(self, asset: Asset, icon_path: Path) -> None:
         """Adds the icon in the custom icons directory for the asset

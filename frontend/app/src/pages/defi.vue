@@ -1,0 +1,36 @@
+<script setup lang="ts">
+import { NoteLocation } from '@/types/notes';
+
+definePage({
+  meta: {
+    noteLocation: NoteLocation.DEFI,
+  },
+  redirect: '/defi/overview',
+});
+const { defiSetupDone } = storeToRefs(useFrontendSettingsStore());
+
+const defi = useDefiStore();
+const yearn = useYearnStore();
+const aave = useAaveStore();
+const compound = useCompoundStore();
+const maker = useMakerDaoStore();
+
+const { resetDefiStatus } = useStatusStore();
+
+onUnmounted(() => {
+  defi.$reset();
+  yearn.$reset();
+  aave.$reset();
+  compound.$reset();
+  maker.$reset();
+  resetDefiStatus();
+});
+</script>
+
+<template>
+  <RouterView v-if="defiSetupDone" />
+  <DefiWizard
+    v-else
+    class="mt-8"
+  />
+</template>

@@ -7,103 +7,113 @@ const { logout } = useSessionStore();
 const { username } = storeToRefs(useSessionAuthStore());
 const { isPackaged, clearPassword } = useInterop();
 const { privacyModeIcon, togglePrivacyMode } = usePrivacyMode();
-const { xs } = useDisplay();
-const { navigateToUserLogin } = useAppNavigation();
+const { isXs } = useBreakpoint();
 
 const savedRememberPassword = useLocalStorage(KEY_REMEMBER_PASSWORD, null);
 
 const { show } = useConfirmStore();
 
-const showConfirmation = () =>
-  show(
+function showConfirmation() {
+  return show(
     {
       title: t('user_dropdown.confirmation.title'),
       message: t('user_dropdown.confirmation.message'),
-      type: 'info'
+      type: 'info',
     },
     async () => {
-      if (isPackaged && get(savedRememberPassword)) {
+      if (isPackaged && get(savedRememberPassword))
         await clearPassword();
-      }
 
-      await Promise.all([logout(), navigateToUserLogin()]);
-    }
+      await logout();
+    },
   );
+}
 
 const { darkModeEnabled } = useDarkMode();
 </script>
 
 <template>
   <div>
-    <VMenu
+    <RuiMenu
       id="user-dropdown"
-      content-class="user-dropdown__menu"
-      transition="slide-y-transition"
-      max-width="300px"
-      min-width="180px"
-      offset-y
+      menu-class="user-dropdown__menu min-w-[10rem] max-w-[22rem]"
+      close-on-content-click
     >
-      <template #activator="{ on }">
+      <template #activator="{ attrs }">
         <MenuTooltipButton
           tooltip="Account"
-          class-name="user-dropdown secondary--text text--lighten-4"
-          :on-menu="on"
+          class-name="user-dropdown"
+          v-bind="attrs"
         >
           <RuiIcon name="account-circle-line" />
         </MenuTooltipButton>
       </template>
-      <VList data-cy="user-dropdown">
-        <VListItem key="username" class="user-username">
-          <VListItemTitle class="font-bold text-center">
-            {{ username }}
-          </VListItemTitle>
-        </VListItem>
-        <VDivider />
-        <VListItem
-          key="settings"
-          class="user-dropdown__settings px-6 py-1"
-          to="/settings/general"
+      <div
+        data-cy="user-dropdown"
+        class="py-2"
+      >
+        <div
+          key="username"
+          class="py-3 user-username font-bold text-center"
         >
-          <VListItemAvatar size="24">
-            <RuiIcon color="primary" name="settings-4-line" />
-          </VListItemAvatar>
-          <VListItemTitle>
+          {{ username }}
+        </div>
+        <RuiDivider />
+        <RouterLink :to="{ path: '/settings' }">
+          <RuiButton
+            key="settings"
+            variant="list"
+            class="user-dropdown__settings"
+          >
+            <template #prepend>
+              <RuiIcon
+                color="primary"
+                name="settings-4-line"
+              />
+            </template>
             {{ t('user_dropdown.settings') }}
-          </VListItemTitle>
-        </VListItem>
+          </RuiButton>
+        </RouterLink>
 
-        <VListItem
-          v-if="xs"
+        <RuiButton
+          v-if="isXs"
           key="privacy-mode"
-          class="px-6 py-1"
+          variant="list"
           @click="togglePrivacyMode()"
         >
-          <VListItemAvatar size="24">
-            <RuiIcon color="primary" :name="privacyModeIcon" />
-          </VListItemAvatar>
-          <VListItemTitle>
-            {{ t('user_dropdown.change_privacy_mode.label') }}
-          </VListItemTitle>
-        </VListItem>
+          <template #prepend>
+            <RuiIcon
+              color="primary"
+              :name="privacyModeIcon"
+            />
+          </template>
+          {{ t('user_dropdown.change_privacy_mode.label') }}
+        </RuiButton>
 
-        <ThemeControl v-if="xs" :dark-mode-enabled="darkModeEnabled" menu>
+        <ThemeControl
+          v-if="isXs"
+          :dark-mode-enabled="darkModeEnabled"
+          menu
+        >
           {{ t('user_dropdown.switch_theme') }}
         </ThemeControl>
 
         <RuiDivider />
-        <VListItem
+        <RuiButton
           key="logout"
-          class="user-dropdown__logout px-6 py-1"
+          variant="list"
+          class="user-dropdown__logout"
           @click="showConfirmation()"
         >
-          <VListItemAvatar size="24">
-            <RuiIcon color="primary" name="logout-box-r-line" />
-          </VListItemAvatar>
-          <VListItemTitle>
-            {{ t('user_dropdown.logout') }}
-          </VListItemTitle>
-        </VListItem>
-      </VList>
-    </VMenu>
+          <template #prepend>
+            <RuiIcon
+              color="primary"
+              name="logout-box-r-line"
+            />
+          </template>
+          {{ t('user_dropdown.logout') }}
+        </RuiButton>
+      </div>
+    </RuiMenu>
   </div>
 </template>

@@ -1,36 +1,35 @@
 <script setup lang="ts">
-import { useListeners } from 'vue';
-
 defineProps<{
   copied: boolean;
   tooltip?: string | null;
+  disabled?: boolean;
 }>();
 const { t } = useI18n();
-
-const listeners = useListeners();
 </script>
 
 <template>
   <RuiTooltip
     :popper="{ placement: 'top' }"
     :open-delay="200"
-    class="text-no-wrap cursor-pointer"
-    v-on="listeners"
+    class="text-no-wrap"
+    :class="{ 'cursor-pointer': !disabled }"
+    :disabled="disabled"
   >
     <template #activator>
       <slot />
     </template>
 
-    <div class="text-center" data-cy="display-full-value">
+    <div
+      class="text-center"
+      data-cy="display-full-value"
+    >
       <template v-if="tooltip">
         {{ tooltip }}
       </template>
-      <div
-        class="text-uppercase font-bold text-caption overflow-hidden h-5 transition-all duration-200"
-      >
+      <div class="uppercase font-bold text-caption overflow-hidden h-5 transition-all duration-200">
         <div
           :class="{
-            '-mt-5': copied
+            '-mt-5': copied,
           }"
         >
           {{ t('amount_display.click_to_copy') }}

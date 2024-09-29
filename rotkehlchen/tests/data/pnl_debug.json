@@ -178,16 +178,15 @@
     "last_write_ts": 1656344880,
     "premium_should_sync": false,
     "include_crypto2crypto": true,
-    "last_data_upload_ts": 0,
     "ui_floating_precision": 2,
     "taxfree_after_period": 31536000,
     "balance_save_frequency": 24,
+    "beacon_rpc_endpoint": "",
     "include_gas_costs": true,
     "ksm_rpc_endpoint": "http://localhost:9933",
     "dot_rpc_endpoint": "",
     "main_currency": "USD",
     "date_display_format": "%d/%m/%Y %H:%M:%S %Z",
-    "last_balance_save": 0,
     "submit_usage_analytics": true,
     "active_modules": [
       "liquity",
@@ -238,7 +237,14 @@
     "infer_zero_timed_balances": false,
     "query_retry_limit": 5,
     "connect_timeout": 30,
-    "read_timeout": 30
+    "read_timeout": 30,
+    "oracle_penalty_threshold_count": 5,
+    "oracle_penalty_duration": 1800,
+    "auto_delete_calendar_entries": true,
+    "auto_create_calendar_reminders": true,
+    "ask_user_upon_size_discrepancy": true,
+    "auto_detect_tokens": true,
+    "csv_export_delimiter": ","
   },
   "ignored_events_ids": {
     "history_event": ["100x0xca0a482213c17ccb0471b02ffab40b92279ae7f25da53e426fda5e73e915509f"],

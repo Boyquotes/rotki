@@ -26,6 +26,7 @@ using ImageMagick:
 """
 
 import argparse
+
 # Improvements:
 # - Draw the composite graphs with matplotlib instead of using convert and make
 #   sure to aling all the points
@@ -33,7 +34,8 @@ import argparse
 #   zooming
 import collections
 import datetime
-import pickle
+import operator
+import pickle  # noqa: S403
 from contextlib import suppress
 from itertools import chain
 from typing import Any
@@ -50,7 +52,7 @@ MEMORY = 1
 
 def ts_to_dt(string_ts):
     """converts a string timestamp to a datatime object"""
-    return datetime.datetime.fromtimestamp(int(float(string_ts)), tz=datetime.timezone.utc)
+    return datetime.datetime.fromtimestamp(int(float(string_ts)), tz=datetime.UTC)
 
 
 def plot_date_axis(axes):
@@ -236,7 +238,7 @@ def memory_subplot(output, data_list):
 def latency_scatter(output, data_list):
     fig, axes = plt.subplots()
 
-    data_list = sorted(data_list, key=lambda list_: list_[0])
+    data_list = sorted(data_list, key=operator.itemgetter(0))
 
     timestamp, latency = [], []
     for timestamps in data_list:

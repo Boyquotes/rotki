@@ -79,9 +79,9 @@ class Woo(ExchangeInterface):
             api_key=api_key,
             secret=secret,
             database=database,
+            msg_aggregator=msg_aggregator,
         )
         self.base_uri = 'https://api.woo.org'
-        self.msg_aggregator = msg_aggregator
         # NB: x-api-signature & x-api-timestamp change per request
         # x-api-key is constant
         self.session.headers.update({
@@ -120,7 +120,7 @@ class Woo(ExchangeInterface):
                 if (amount := deserialize_asset_amount(entry['holding'] + entry['staked'])) == ZERO:  # noqa: E501
                     continue
                 asset = asset_from_woo(entry['token'])
-                usd_price = Inquirer().find_usd_price(asset=asset)
+                usd_price = Inquirer.find_usd_price(asset=asset)
             except (DeserializationError, KeyError) as e:
                 log.error('Error processing a Woo balance.', entry=entry, error=str(e))
                 self.msg_aggregator.add_error(
@@ -129,8 +129,9 @@ class Woo(ExchangeInterface):
                 )
                 continue
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found unknown Woo asset {e.identifier}. Ignoring it in the balance query.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='balance query',
                 )
                 continue
             except RemoteError as e:
@@ -237,7 +238,7 @@ class Woo(ExchangeInterface):
         May Raise:
         - RemoteError
         """
-        call_options = options if options else {}
+        call_options = options or {}
         request_url = f'{self.base_uri}/{endpoint}'
         timestamp = str(ts_now_in_ms())
         parameters = urllib.parse.urlencode(call_options)
@@ -334,10 +335,16 @@ class Woo(ExchangeInterface):
             for entry in entries:
                 try:
                     result = deserialization_method(entry)
-                except (DeserializationError, UnknownAsset, KeyError) as e:
+                except (DeserializationError, KeyError) as e:
                     msg = f'Missing key {e}' if isinstance(e, KeyError) else str(e)
                     log.error(f'Woo {endpoint} {msg}: {entry}')
                     self.msg_aggregator.add_error(msg)
+                    continue
+                except UnknownAsset as e:
+                    self.send_unknown_asset_message(
+                        asset_identifier=e.identifier,
+                        details=f'{endpoint} query',
+                    )
                     continue
                 results.append(result)
 

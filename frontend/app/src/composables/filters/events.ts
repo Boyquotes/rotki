@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { HistoryEventEntryType } from '@rotki/common/lib/history/events';
-import { type MaybeRef } from '@vueuse/core';
+import { HistoryEventEntryType } from '@rotki/common';
+import { isEqual } from 'lodash-es';
 import {
   type MatchedKeywordWithBehaviour,
   type SearchMatcher,
@@ -8,8 +8,10 @@ import {
   assetSuggestions,
   dateDeserializer,
   dateSerializer,
-  dateValidator
+  dateValidator,
 } from '@/types/filtering';
+import type { MaybeRef } from '@vueuse/core';
+import type { FilterSchema } from '@/composables/filter-paginate';
 
 enum HistoryEventFilterKeys {
   START = 'start',
@@ -24,7 +26,6 @@ enum HistoryEventFilterKeys {
   TX_HASHES = 'tx_hash',
   VALIDATOR_INDICES = 'validator_index',
   ADDRESSES = 'address',
-  CUSTOMIZED_EVENTS = 'customized_only'
 }
 
 enum HistoryEventFilterValueKeys {
@@ -40,17 +41,13 @@ enum HistoryEventFilterValueKeys {
   TX_HASHES = 'txHashes',
   VALIDATOR_INDICES = 'validatorIndices',
   ADDRESSES = 'addresses',
-  CUSTOMIZED_EVENTS = 'customizedEventsOnly'
 }
 
-export type Matcher = SearchMatcher<
-  HistoryEventFilterKeys,
-  HistoryEventFilterValueKeys
->;
+export type Matcher = SearchMatcher<HistoryEventFilterKeys, HistoryEventFilterValueKeys>;
 
 export type Filters = MatchedKeywordWithBehaviour<HistoryEventFilterValueKeys>;
 
-export const useHistoryEventFilter = (
+export function useHistoryEventFilter(
   disabled: {
     protocols?: boolean;
     products?: boolean;
@@ -60,23 +57,22 @@ export const useHistoryEventFilter = (
     eventTypes?: boolean;
     eventSubtypes?: boolean;
   },
-  entryTypes?: MaybeRef<HistoryEventEntryType[]>
-) => {
-  const filters: Ref<Filters> = ref({});
+  entryTypes?: MaybeRef<HistoryEventEntryType[] | undefined>,
+): FilterSchema<Filters, Matcher> {
+  const filters = ref<Filters>({});
 
   const { dateInputFormat } = storeToRefs(useFrontendSettingsStore());
-  const {
-    counterparties,
-    historyEventTypes,
-    historyEventTypeGlobalMapping,
-    historyEventProducts
-  } = useHistoryEventMappings();
-  const { assetSearch } = useAssetInfoApi();
-  const { assetInfo } = useAssetInfoRetrieval();
+  const { historyEventTypes, historyEventTypeGlobalMapping } = useHistoryEventMappings();
+  const { historyEventProducts } = useHistoryEventProductMappings();
+  const { counterparties } = useHistoryEventCounterpartyMappings();
+  const { assetSearch, assetInfo } = useAssetInfoRetrieval();
   const { associatedLocations } = storeToRefs(useHistoryStore());
   const { t } = useI18n();
 
-  const matchers: ComputedRef<Matcher[]> = computed(() => {
+  const matchers = computed<Matcher[]>(() => {
+    let selectedLocation = get(filters)?.location;
+    if (Array.isArray(selectedLocation))
+      selectedLocation = selectedLocation[0] || undefined;
     const data: Matcher[] = [
       ...(disabled?.period
         ? []
@@ -87,12 +83,12 @@ export const useHistoryEventFilter = (
               description: t('transactions.filter.start_date'),
               string: true,
               hint: t('transactions.filter.date_hint', {
-                format: getDateInputISOFormat(get(dateInputFormat))
+                format: getDateInputISOFormat(get(dateInputFormat)),
               }),
               suggestions: () => [],
               validate: dateValidator(dateInputFormat),
               serializer: dateSerializer(dateInputFormat),
-              deserializer: dateDeserializer(dateInputFormat)
+              deserializer: dateDeserializer(dateInputFormat),
             },
             {
               key: HistoryEventFilterKeys.END,
@@ -100,44 +96,35 @@ export const useHistoryEventFilter = (
               description: t('transactions.filter.end_date'),
               string: true,
               hint: t('transactions.filter.date_hint', {
-                format: getDateInputISOFormat(get(dateInputFormat))
+                format: getDateInputISOFormat(get(dateInputFormat)),
               }),
               suggestions: () => [],
               validate: dateValidator(dateInputFormat),
               serializer: dateSerializer(dateInputFormat),
-              deserializer: dateDeserializer(dateInputFormat)
-            }
+              deserializer: dateDeserializer(dateInputFormat),
+            },
           ] satisfies Matcher[])),
       {
         key: HistoryEventFilterKeys.ASSET,
         keyValue: HistoryEventFilterValueKeys.ASSET,
         description: t('transactions.filter.asset'),
         asset: true,
-        suggestions: assetSuggestions(assetSearch),
-        deserializer: assetDeserializer(assetInfo)
-      }
+        suggestions: assetSuggestions(assetSearch, selectedLocation?.toString()),
+        deserializer: assetDeserializer(assetInfo),
+      },
     ];
 
     const entryTypesVal = get(entryTypes);
-    const evmOrEthDepositEventsIncluded =
-      !entryTypesVal ||
-      entryTypesVal.some(
-        type => isEvmEventType(type) || isEthDepositEventType(type)
-      );
+    const evmOrEthDepositEventsIncluded
+      = !entryTypesVal || entryTypesVal.some(type => isEvmEventType(type) || isEthDepositEventType(type));
 
-    const evmOrOnlineEventsIncluded =
-      !entryTypesVal ||
-      entryTypesVal.some(
-        type => isEvmEventType(type) || isOnlineHistoryEventType(type)
-      );
+    const evmOrOnlineEventsIncluded
+      = !entryTypesVal || entryTypesVal.some(type => isEvmEventType(type) || isOnlineHistoryEventType(type));
 
-    const eventsWithValidatorIndexIncluded =
-      !entryTypesVal ||
-      entryTypesVal.some(
-        type =>
-          isWithdrawalEventType(type) ||
-          isEthBlockEventType(type) ||
-          isEthDepositEventType(type)
+    const eventsWithValidatorIndexIncluded
+      = !entryTypesVal
+      || entryTypesVal.some(
+        type => isWithdrawalEventType(type) || isEthBlockEventType(type) || isEthDepositEventType(type),
       );
 
     if (!disabled?.protocols && evmOrEthDepositEventsIncluded) {
@@ -149,7 +136,7 @@ export const useHistoryEventFilter = (
         multiple: true,
         string: true,
         suggestions: () => counterpartiesVal,
-        validate: (protocol: string) => !!protocol
+        validate: (protocol: string) => !!protocol,
       });
     }
 
@@ -160,7 +147,7 @@ export const useHistoryEventFilter = (
         description: t('transactions.filter.location'),
         string: true,
         suggestions: () => get(associatedLocations),
-        validate: location => !!location
+        validate: location => !!location,
       });
     }
 
@@ -172,7 +159,7 @@ export const useHistoryEventFilter = (
         description: t('transactions.filter.product'),
         string: true,
         suggestions: () => products,
-        validate: product => !!product
+        validate: product => !!product,
       });
     }
 
@@ -183,11 +170,10 @@ export const useHistoryEventFilter = (
         description: t('transactions.filter.entry_type'),
         string: true,
         multiple: true,
-        suggestions: () =>
-          entryTypesVal ?? Object.values(HistoryEventEntryType),
+        suggestions: () => entryTypesVal ?? Object.values(HistoryEventEntryType),
         validate: (type: string) => !!type,
         allowExclusion: true,
-        behaviourRequired: true
+        behaviourRequired: true,
       });
     }
 
@@ -200,24 +186,44 @@ export const useHistoryEventFilter = (
           string: true,
           multiple: true,
           suggestions: () => get(historyEventTypes),
-          validate: (type: string) => !!type
+          validate: (type: string) => !!type,
         });
       }
 
       let selectedEventTypes = get(filters)?.eventTypes || [];
-      if (!Array.isArray(selectedEventTypes)) {
+      if (!Array.isArray(selectedEventTypes))
         selectedEventTypes = [`${selectedEventTypes}`];
-      }
-      if (!disabled.eventSubtypes && selectedEventTypes.length > 0) {
+
+      if (!disabled.eventSubtypes) {
         const globalMapping = get(historyEventTypeGlobalMapping);
 
         const globalMappingKeys: string[] = [];
-        selectedEventTypes.forEach(selectedEventType => {
-          const globalMappingFound = globalMapping[selectedEventType];
-          if (globalMappingFound) {
-            globalMappingKeys.push(...Object.keys(globalMappingFound));
+        if (selectedEventTypes.length > 0) {
+          selectedEventTypes.forEach((selectedEventType) => {
+            const globalMappingFound = globalMapping[selectedEventType];
+            if (globalMappingFound)
+              globalMappingKeys.push(...Object.keys(globalMappingFound));
+          });
+        }
+        else {
+          for (const key in globalMapping)
+            globalMappingKeys.push(...Object.keys(globalMapping[key]));
+        }
+
+        let selectedEventSubtypes = get(filters)?.eventSubtypes || [];
+        if (!Array.isArray(selectedEventSubtypes))
+          selectedEventSubtypes = [`${selectedEventSubtypes}`];
+
+        if (selectedEventSubtypes.length > 0) {
+          const filteredEventSubtypes = selectedEventSubtypes.filter(item => globalMappingKeys.includes(item));
+
+          if (!isEqual(filteredEventSubtypes, selectedEventSubtypes)) {
+            set(filters, {
+              ...get(filters),
+              eventSubtypes: filteredEventSubtypes.length > 0 ? filteredEventSubtypes : undefined,
+            });
           }
-        });
+        }
 
         data.push({
           key: HistoryEventFilterKeys.EVENT_SUBTYPE,
@@ -225,8 +231,8 @@ export const useHistoryEventFilter = (
           description: t('transactions.filter.event_subtype'),
           string: true,
           multiple: true,
-          suggestions: () => get(globalMappingKeys),
-          validate: (type: string) => get(globalMappingKeys).includes(type)
+          suggestions: () => globalMappingKeys.filter(uniqueStrings),
+          validate: (type: string) => globalMappingKeys.includes(type),
         });
       }
     }
@@ -240,7 +246,7 @@ export const useHistoryEventFilter = (
           string: true,
           multiple: true,
           suggestions: () => [],
-          validate: (txHash: string) => isValidTxHash(txHash)
+          validate: (txHash: string) => isValidTxHash(txHash),
         },
         {
           key: HistoryEventFilterKeys.ADDRESSES,
@@ -249,8 +255,8 @@ export const useHistoryEventFilter = (
           string: true,
           multiple: true,
           suggestions: () => [],
-          validate: (address: string) => isValidEthAddress(address)
-        }
+          validate: (address: string) => isValidEthAddress(address),
+        },
       );
     }
 
@@ -262,36 +268,18 @@ export const useHistoryEventFilter = (
         string: true,
         multiple: true,
         suggestions: () => [],
-        validate: (validatorIndex: string) => !!validatorIndex
+        validate: (validatorIndex: string) => !!validatorIndex,
       });
     }
 
-    data.push({
-      key: HistoryEventFilterKeys.CUSTOMIZED_EVENTS,
-      keyValue: HistoryEventFilterValueKeys.CUSTOMIZED_EVENTS,
-      description: t('transactions.filter.customized_only'),
-      boolean: true
-    });
-
     return data;
   });
-
-  const updateFilter = (newFilters: Filters) => {
-    set(filters, {
-      ...newFilters
-    });
-  };
 
   const OptionalString = z.string().optional();
   const OptionalMultipleString = z
     .array(z.string())
     .or(z.string())
-    .transform(val => (Array.isArray(val) ? val : [val]))
-    .optional();
-
-  const OptionalBoolean = z
-    .string()
-    .transform(val => !!val)
+    .transform(arrayify)
     .optional();
 
   const RouteFilterSchema = z.object({
@@ -307,13 +295,11 @@ export const useHistoryEventFilter = (
     [HistoryEventFilterValueKeys.TX_HASHES]: OptionalMultipleString,
     [HistoryEventFilterValueKeys.ADDRESSES]: OptionalMultipleString,
     [HistoryEventFilterValueKeys.VALIDATOR_INDICES]: OptionalMultipleString,
-    [HistoryEventFilterValueKeys.CUSTOMIZED_EVENTS]: OptionalBoolean
   });
 
   return {
     matchers,
     filters,
-    updateFilter,
-    RouteFilterSchema
+    RouteFilterSchema,
   };
-};
+}

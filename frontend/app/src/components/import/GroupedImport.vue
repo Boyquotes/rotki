@@ -1,149 +1,161 @@
 <script setup lang="ts">
+import type { RuiIcons } from '@rotki/ui-library';
+import type { ImportSource } from '@/types/upload-types';
+
 const { t } = useI18n();
-const sources = [
+
+const sources = computed<ImportSource[]>(() => [
   {
-    identifier: 'cointracking.info',
-    name: t('import_data.cointracking.name'),
+    key: 'cointracking.info',
+    label: t('import_data.cointracking.name'),
     logo: './assets/images/protocols/cointracking.svg',
-    form: defineAsyncComponent(
-      () => import('@/components/import/CointrackingImport.vue')
-    )
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/CointrackingImport.vue'))),
   },
   {
-    identifier: 'cryptocom',
-    name: t('import_data.cryptocom.name'),
+    key: 'cryptocom',
+    label: t('import_data.cryptocom.name'),
     logo: './assets/images/protocols/crypto_com.svg',
-    form: defineAsyncComponent(
-      () => import('@/components/import/CryptoComImport.vue')
-    )
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/CryptoComImport.vue'))),
   },
   {
-    identifier: 'blockfi',
-    name: t('import_data.blockfi.name'),
+    key: 'blockfi',
+    label: t('import_data.blockfi.name'),
     logo: './assets/images/protocols/blockfi.svg',
-    form: defineAsyncComponent(
-      () => import('@/components/import/BlockFiImport.vue')
-    )
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/BlockFiImport.vue'))),
   },
   {
-    identifier: 'nexo',
-    name: t('import_data.nexo.name'),
+    key: 'nexo',
+    label: t('import_data.nexo.name'),
     logo: './assets/images/protocols/nexo.svg',
-    form: defineAsyncComponent(
-      () => import('@/components/import/NexoImport.vue')
-    )
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/NexoImport.vue'))),
   },
   {
-    identifier: 'shapeshift-trades',
-    name: t('import_data.shapeshift.name'),
+    key: 'shapeshift-trades',
+    label: t('import_data.shapeshift.name'),
     logo: './assets/images/protocols/shapeshift.svg',
-    form: defineAsyncComponent(
-      () => import('@/components/import/ShapeshiftImport.vue')
-    )
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/ShapeshiftImport.vue'))),
   },
   {
-    identifier: 'uphold',
-    name: t('import_data.uphold.name'),
+    key: 'uphold',
+    label: t('import_data.uphold.name'),
     logo: './assets/images/protocols/uphold.svg',
-    form: defineAsyncComponent(
-      () => import('@/components/import/UpholdImport.vue')
-    )
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/UpholdImport.vue'))),
   },
   {
-    identifier: 'bitmex',
-    name: t('import_data.bitmex.name'),
+    key: 'bitmex',
+    label: t('import_data.bitmex.name'),
     logo: './assets/images/protocols/bitmex.svg',
-    form: defineAsyncComponent(
-      () => import('@/components/import/BitMEXImport.vue')
-    )
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/BitMexImport.vue'))),
   },
   {
-    identifier: 'bisq',
-    name: t('import_data.bisq.name'),
+    key: 'bittrex',
+    label: t('import_data.bittrex.name'),
+    logo: './assets/images/protocols/bittrex.svg',
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/BittrexImport.vue'))),
+  },
+  {
+    key: 'bisq',
+    label: t('import_data.bisq.name'),
     logo: './assets/images/protocols/bisq.svg',
-    form: defineAsyncComponent(
-      () => import('@/components/import/BisqImport.vue')
-    )
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/BisqImport.vue'))),
   },
   {
-    identifier: 'binance',
-    name: t('import_data.binance.name'),
+    key: 'binance',
+    label: t('import_data.binance.name'),
     logo: './assets/images/protocols/binance.svg',
-    form: defineAsyncComponent(
-      () => import('@/components/import/BinanceImport.vue')
-    )
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/BinanceImport.vue'))),
   },
   {
-    identifier: 'bitcoin_tax',
-    name: t('import_data.bitcoin_tax.name'),
+    key: 'bitcoin_tax',
+    label: t('import_data.bitcoin_tax.name'),
     logo: './assets/images/protocols/bitcointax.png',
-    form: defineAsyncComponent(
-      () => import('@/components/import/BitcoinImport.vue')
-    )
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/BitcoinImport.vue'))),
   },
   {
-    identifier: 'bitstamp',
-    name: t('import_data.bitstamp.name'),
+    key: 'bitstamp',
+    label: t('import_data.bitstamp.name'),
     logo: './assets/images/protocols/bitstamp.svg',
-    form: defineAsyncComponent(
-      () => import('@/components/import/BitstampImport.vue')
-    )
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/BitstampImport.vue'))),
   },
   {
-    identifier: 'custom',
-    name: t('import_data.custom.name'),
+    key: 'kucoin',
+    label: t('import_data.kucoin.name'),
+    logo: './assets/images/protocols/kucoin.svg',
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/KucoinImport.vue'))),
+  },
+  {
+    key: 'blockpit',
+    label: t('import_data.blockpit.name'),
+    logo: './assets/images/protocols/blockpit.png',
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/BlockpitImport.vue'))),
+  },
+  {
+    key: 'custom',
+    label: t('import_data.custom.name'),
     icon: 'file-text-line',
-    form: defineAsyncComponent(
-      () => import('@/components/import/CustomImport.vue')
-    )
-  }
-];
+    form: markRaw(defineAsyncComponent(() => import('@/components/import/CustomImport.vue'))),
+  },
+]);
 
-const selectedSource = ref<string>('');
+const selectedSource = ref<ImportSource>();
 
-const form = computed(
-  () => sources.find(source => source.identifier === get(selectedSource))?.form
-);
+const [DefineDisplay, ReuseDisplay] = createReusableTemplate<{
+  logo?: string;
+  icon?: RuiIcons;
+  label: string;
+}>();
 </script>
 
 <template>
   <RuiCard>
     <div class="p-1 pt-2">
-      <VSelect
+      <DefineDisplay #default="{ logo, icon, label }">
+        <div class="flex items-center gap-3">
+          <AdaptiveWrapper
+            padding="0"
+            width="1.5rem"
+            height="1.5rem"
+          >
+            <AppImage
+              v-if="logo"
+              :src="logo"
+              size="1.5rem"
+              contain
+            />
+            <RuiIcon
+              v-else-if="icon"
+              size="24"
+              class="text-rui-light-text-secondary"
+              :name="icon"
+            />
+          </AdaptiveWrapper>
+          {{ label }}
+        </div>
+      </DefineDisplay>
+      <RuiAutoComplete
         v-model="selectedSource"
         :label="t('import_data.select_source.title')"
-        outlined
-        :items="sources"
-        item-value="identifier"
-        item-text="name"
-        :hide-details="true"
+        :append-width="1.75"
+        :options="sources"
+        text-attr="label"
+        hide-details
+        return-object
+        auto-select-first
+        variant="outlined"
+        key-attr="key"
       >
-        <template v-for="slotName in ['item', 'selection']" #[slotName]="data">
-          <div v-if="data.item" :key="slotName" class="flex items-center gap-3">
-            <AdaptiveWrapper>
-              <VImg
-                v-if="data.item.logo"
-                :src="data.item.logo"
-                :width="30"
-                :height="30"
-                max-height="30px"
-                max-width="30px"
-                contain
-              />
-              <RuiIcon
-                v-else-if="data.item.icon"
-                size="30"
-                class="text-rui-light-text-secondary"
-                :name="data.item.icon"
-              />
-            </AdaptiveWrapper>
-            {{ data.item.name }}
-          </div>
+        <template #selection="{ item }">
+          <ReuseDisplay v-bind="item" />
         </template>
-      </VSelect>
-
-      <div v-if="form" class="mt-8">
-        <Component :is="form" />
+        <template #item="{ item }">
+          <ReuseDisplay v-bind="item" />
+        </template>
+      </RuiAutoComplete>
+      <div
+        v-if="selectedSource"
+        class="mt-8"
+      >
+        <Component :is="selectedSource.form" />
       </div>
     </div>
   </RuiCard>

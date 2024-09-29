@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
@@ -15,7 +16,7 @@ from rotkehlchen.constants.resolver import strethaddress_to_identifier
 from rotkehlchen.errors.asset import UnknownAsset, WrongAssetType
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.externalapis.beaconchain.service import BeaconChain
-from rotkehlchen.externalapis.etherscan import Etherscan, EtherscanHasChainActivity
+from rotkehlchen.externalapis.etherscan import Etherscan, HasChainActivity
 from rotkehlchen.fval import FVal
 from rotkehlchen.rotkehlchen import Rotkehlchen
 from rotkehlchen.serialization.deserialize import deserialize_evm_address
@@ -23,7 +24,7 @@ from rotkehlchen.tests.utils.eth_tokens import CONTRACT_ADDRESS_TO_TOKEN
 from rotkehlchen.tests.utils.mock import MockResponse
 from rotkehlchen.types import (
     EVM_CHAINS_WITH_TRANSACTIONS,
-    SUPPORTED_EVM_CHAINS,
+    SUPPORTED_EVM_CHAINS_TYPE,
     BTCAddress,
     ChecksumEvmAddress,
     SupportedBlockchain,
@@ -291,11 +292,11 @@ def mock_etherscan_query(
                 )
                 input_types = get_abi_input_types(fn_abi)
                 output_types = get_abi_output_types(fn_abi)
-                decoded_input = web3.codec.decode_abi(input_types, bytes.fromhex(data[10:]))
+                decoded_input = web3.codec.decode(input_types, bytes.fromhex(data[10:]))
                 # TODO: This here always returns empty response. If/when we want to
                 # mock it for etherscan, this is where we do it
                 args = []
-                result = '0x' + web3.codec.encode_abi(output_types, [args]).hex()
+                result = '0x' + web3.codec.encode(output_types, [args]).hex()
                 response = f'{{"jsonrpc":"2.0","id":1,"result":"{result}"}}'
             elif 'data=0x85c6a7930' in url:  # getProtocolBalances
                 data = url.split('data=')[1]
@@ -308,11 +309,11 @@ def mock_etherscan_query(
                 )
                 input_types = get_abi_input_types(fn_abi)
                 output_types = get_abi_output_types(fn_abi)
-                decoded_input = web3.codec.decode_abi(input_types, bytes.fromhex(data[10:]))
+                decoded_input = web3.codec.decode(input_types, bytes.fromhex(data[10:]))
                 # TODO: This here always returns empty response. If/when we want to
                 # mock it for etherscan, this is where we do it
                 args = []
-                result = '0x' + web3.codec.encode_abi(output_types, [args]).hex()
+                result = '0x' + web3.codec.encode(output_types, [args]).hex()
                 response = f'{{"jsonrpc":"2.0","id":1,"result":"{result}"}}'
             elif 'data=0x3b692f52' in url:  # getProtocolNames
                 data = url.split('data=')[1]
@@ -324,11 +325,11 @@ def mock_etherscan_query(
                 )
                 input_types = get_abi_input_types(fn_abi)
                 output_types = get_abi_output_types(fn_abi)
-                decoded_input = web3.codec.decode_abi(input_types, bytes.fromhex(data[10:]))
+                decoded_input = web3.codec.decode(input_types, bytes.fromhex(data[10:]))
                 # TODO: This here always returns empty response. If/when we want to
                 # mock it for etherscan, this is where we do it
                 args = []
-                result = '0x' + web3.codec.encode_abi(output_types, [args]).hex()
+                result = '0x' + web3.codec.encode(output_types, [args]).hex()
                 response = f'{{"jsonrpc":"2.0","id":1,"result":"{result}"}}'
             else:
                 raise AssertionError(f'Unexpected etherscan call during tests: {url}')
@@ -361,7 +362,7 @@ def mock_etherscan_query(
                 assert fn_abi['name'] == 'aggregate', 'Abi position of multicall aggregate changed'
                 input_types = get_abi_input_types(fn_abi)
                 output_types = get_abi_output_types(fn_abi)
-                decoded_input = web3.codec.decode_abi(input_types, bytes.fromhex(data[10:]))
+                decoded_input = web3.codec.decode(input_types, bytes.fromhex(data[10:]))
 
                 if multicall_purpose == 'multibalance_query':
                     contract = eth_scan
@@ -380,7 +381,7 @@ def mock_etherscan_query(
                         call_contract_address = deserialize_evm_address(call_entry[0])
                         assert call_contract_address == contract.address, 'balances multicall should only contain calls to scan contract'  # noqa: E501
                         call_data = call_entry[1]
-                        scan_decoded_input = web3.codec.decode_abi(scan_input_types, call_data[4:])
+                        scan_decoded_input = web3.codec.decode(scan_input_types, call_data[4:])
                         account_address = deserialize_evm_address(scan_decoded_input[0])
                         token_values = []
                         for token_addy_str in scan_decoded_input[1]:
@@ -394,20 +395,20 @@ def mock_etherscan_query(
                                     value = 0  # if token is missing from mapping return 0 value
                             token_values.append(value)
 
-                        result_bytes.append(web3.codec.encode_abi(scan_output_types, [token_values]))  # noqa: E501
+                        result_bytes.append(web3.codec.encode(scan_output_types, [token_values]))
 
-                    result = '0x' + web3.codec.encode_abi(output_types, [len(result_bytes), result_bytes]).hex()  # noqa: E501
+                    result = '0x' + web3.codec.encode(output_types, [len(result_bytes), result_bytes]).hex()  # noqa: E501
                     response = f'{{"jsonrpc":"2.0","id":1,"result":"{result}"}}'
                 else:
                     # else has to be the 32 bytes for multicall balance
                     # of both veCRV and others. Return empty response
                     # all pylint ignores below due to https://github.com/PyCQA/pylint/issues/4114
                     args = [1, [b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00' for x in decoded_input[0]]]  # noqa: E501
-                    result = '0x' + web3.codec.encode_abi(output_types, args).hex()
+                    result = '0x' + web3.codec.encode(output_types, args).hex()
                     response = f'{{"jsonrpc":"2.0","id":1,"result":"{result}"}}'
 
             else:
-                raise AssertionError('Unexpected etherscan multicall during tests: {url}')
+                raise AssertionError(f'Unexpected etherscan multicall during tests: {url}')
 
         elif f'api.etherscan.io/api?module=proxy&action=eth_call&to={eth_scan.address}' in url:
             if 'ethscan' in original_queries:
@@ -427,12 +428,12 @@ def mock_etherscan_query(
                 )
                 input_types = get_abi_input_types(fn_abi)
                 output_types = get_abi_output_types(fn_abi)
-                decoded_input = web3.codec.decode_abi(input_types, bytes.fromhex(data[10:]))
+                decoded_input = web3.codec.decode(input_types, bytes.fromhex(data[10:]))
                 args = []
                 for raw_account_address in decoded_input[0]:
                     account_address = deserialize_evm_address(raw_account_address)
                     args.append(int(eth_map[account_address]['ETH']))
-                result = '0x' + web3.codec.encode_abi(output_types, [args]).hex()
+                result = '0x' + web3.codec.encode(output_types, [args]).hex()
                 response = f'{{"jsonrpc":"2.0","id":1,"result":"{result}"}}'
             elif 'data=0x06187b4f' in url:  # Multi token multiaddress balance query
                 data = url.split('data=')[1]
@@ -446,7 +447,7 @@ def mock_etherscan_query(
                 )
                 input_types = get_abi_input_types(fn_abi)
                 output_types = get_abi_output_types(fn_abi)
-                decoded_input = web3.codec.decode_abi(input_types, bytes.fromhex(data[10:]))
+                decoded_input = web3.codec.decode(input_types, bytes.fromhex(data[10:]))
                 args = []
                 for raw_account_address in decoded_input[0]:
                     account_address = deserialize_evm_address(raw_account_address)
@@ -466,7 +467,7 @@ def mock_etherscan_query(
                         x.append(value_to_add)
                     args.append(x)
 
-                result = '0x' + web3.codec.encode_abi(output_types, [args]).hex()
+                result = '0x' + web3.codec.encode(output_types, [args]).hex()
                 response = f'{{"jsonrpc":"2.0","id":1,"result":"{result}"}}'
 
             elif 'data=0xe5da1b68' in url:  # Multi token balance query
@@ -481,7 +482,7 @@ def mock_etherscan_query(
                 )
                 input_types = get_abi_input_types(fn_abi)
                 output_types = get_abi_output_types(fn_abi)
-                decoded_input = web3.codec.decode_abi(input_types, bytes.fromhex(data[10:]))
+                decoded_input = web3.codec.decode(input_types, bytes.fromhex(data[10:]))
                 args = []
                 account_address = deserialize_evm_address(decoded_input[0])
                 x = []
@@ -500,7 +501,7 @@ def mock_etherscan_query(
                         break
                     args.append(value_to_add)
 
-                result = '0x' + web3.codec.encode_abi(output_types, [args]).hex()
+                result = '0x' + web3.codec.encode(output_types, [args]).hex()
                 response = f'{{"jsonrpc":"2.0","id":1,"result":"{result}"}}'
             elif 'https://api.etherscan.io/api?module=proxy&action=eth_call&to=0x7d2768dE32b0b80b7a3454c06BdAc94A69DDc7A9&data=0x35ea6a75000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7' in url:  # noqa: E501
                 # This is querying ethscan for the aave balances
@@ -622,6 +623,8 @@ def setup_evm_addresses_activity_mock(
         arbitrum_one_addresses: list[ChecksumEvmAddress] | None = None,  # pylint: disable=unused-argument  # used by the saved locals  # noqa: E501, RUF100
         base_addresses: list[ChecksumEvmAddress] | None = None,  # pylint: disable=unused-argument  # used by the saved locals  # noqa: E501, RUF100
         gnosis_addresses: list[ChecksumEvmAddress] | None = None,  # pylint: disable=unused-argument  # used by the saved locals  # noqa: E501, RUF100
+        scroll_addresses: list[ChecksumEvmAddress] | None = None,  # pylint: disable=unused-argument  # used by the saved locals  # noqa: E501, RUF100
+        zksync_lite_addresses: list[ChecksumEvmAddress] | None = None,  # pylint: disable=unused-argument  # used by the saved locals  # noqa: E501, RUF100
 ) -> 'ExitStack':
     saved_locals = locals()  # bit hacky, but save locals here so they can be accessed by mock_chain_has_activity  # noqa: E501
 
@@ -640,9 +643,17 @@ def setup_evm_addresses_activity_mock(
             return FVal(1)
         return ZERO
 
-    def mock_chain_has_activity(account: ChecksumEvmAddress, chain: SUPPORTED_EVM_CHAINS):
+    def mock_zksync_lite_query_api(url, options):  # pylint: disable=unused-argument
+        re_match = re.search(r'accounts\/(0x[a-fA-F0-9]{40})\/transactions', url)
+        assert re_match, f'Unexpeced zksync lite url: {url}'
+        address = re_match.group(1)
+        if zksync_lite_addresses and address in zksync_lite_addresses:
+            return {'list': [1, 2]}  # a list with non zero length -- exists
+        return {}  # does not exist
+
+    def mock_chain_has_activity(account: ChecksumEvmAddress, chain: SUPPORTED_EVM_CHAINS_TYPE):
         addresses = saved_locals[f'{chain.to_chain_id().to_name()}_addresses']
-        return EtherscanHasChainActivity.TRANSACTIONS if addresses is not None and account in addresses else EtherscanHasChainActivity.NONE  # noqa: E501
+        return HasChainActivity.TRANSACTIONS if addresses is not None and account in addresses else HasChainActivity.NONE  # noqa: E501
 
     stack.enter_context(patch.object(
         chains_aggregator.ethereum.node_inquirer,
@@ -659,13 +670,25 @@ def setup_evm_addresses_activity_mock(
         'get_avax_balance',
         side_effect=mock_avax_balance,
     ))
+    stack.enter_context(patch.object(
+        chains_aggregator.zksync_lite,
+        '_query_api',
+        side_effect=mock_zksync_lite_query_api,
+    ))
 
     for chain in EVM_CHAINS_WITH_TRANSACTIONS:
+        manager = chains_aggregator.get_evm_manager(chain.to_chain_id())  # type: ignore  # chain id is of the expected type here
         stack.enter_context(patch.object(
-            chains_aggregator.get_evm_manager(chain.to_chain_id()).node_inquirer.etherscan,  # type: ignore  # chain id is of the expected type here
+            manager.node_inquirer.etherscan,
             'has_activity',
             side_effect=lambda account, i_chain=chain: mock_chain_has_activity(account, i_chain),  # use i_chain to avoid the problem with the lambda late binding  # noqa: E501
         ))
+        if manager.node_inquirer.blockscout is not None:
+            stack.enter_context(patch.object(
+                manager.node_inquirer.blockscout,
+                'has_activity',
+                side_effect=lambda account, i_chain=chain: mock_chain_has_activity(account, i_chain),  # noqa: E501
+            ))
 
     return stack
 

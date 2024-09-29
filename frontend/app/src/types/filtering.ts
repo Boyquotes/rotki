@@ -1,17 +1,18 @@
-import { type AssetInfo } from '@rotki/common/lib/data';
 import { z } from 'zod';
 import { AssetInfoWithId, type AssetsWithId } from '@/types/asset';
-import { type DateFormat } from '@/types/date-format';
+import type { AssetInfo } from '@rotki/common';
+import type { DateFormat } from '@/types/date-format';
+import type { AssetSearchParams } from '@/composables/api/assets/info';
 
 export enum FilterBehaviour {
   INCLUDE = 'include',
-  EXCLUDE = 'exclude'
+  EXCLUDE = 'exclude',
 }
 
-export type FilterObjectWithBehaviour<T> = {
+export interface FilterObjectWithBehaviour<T> {
   behaviour?: FilterBehaviour;
   values: T;
-};
+}
 
 export type StringSuggestion = () => string[];
 
@@ -25,8 +26,7 @@ interface BaseMatcher<K, KV = void> {
   readonly multiple?: boolean;
 }
 
-export interface StringSuggestionMatcher<K, KV = void>
-  extends BaseMatcher<K, KV> {
+export interface StringSuggestionMatcher<K, KV = void> extends BaseMatcher<K, KV> {
   readonly string: true;
   readonly suggestions: StringSuggestion;
   readonly validate: (value: string) => boolean;
@@ -56,17 +56,13 @@ export type MatchedKeyword<T extends string> = {
 };
 
 export type MatchedKeywordWithBehaviour<T extends string> = {
-  [key in T]?:
-    | string
-    | string[]
-    | boolean
-    | FilterObjectWithBehaviour<string | string[] | boolean>;
+  [key in T]?: string | string[] | boolean | FilterObjectWithBehaviour<string | string[] | boolean>;
 };
 
 export const BaseSuggestion = z.object({
   key: z.string(),
   value: AssetInfoWithId.or(z.string()).or(z.boolean()),
-  exclude: z.boolean().optional()
+  exclude: z.boolean().optional(),
 });
 
 export type BaseSuggestion = z.infer<typeof BaseSuggestion>;
@@ -74,7 +70,7 @@ export type BaseSuggestion = z.infer<typeof BaseSuggestion>;
 export const Suggestion = BaseSuggestion.extend({
   index: z.number(),
   total: z.number(),
-  asset: z.boolean()
+  asset: z.boolean(),
 });
 
 export type Suggestion = z.infer<typeof Suggestion>;
@@ -82,36 +78,64 @@ export type Suggestion = z.infer<typeof Suggestion>;
 export enum SavedFilterLocation {
   HISTORY_TRADES = 'historyTrades',
   HISTORY_DEPOSITS_WITHDRAWALS = 'historyDepositsWithdrawals',
-  HISTORY_EVENTS = 'historyEvents'
+  HISTORY_EVENTS = 'historyEvents',
+  BLOCKCHAIN_ACCOUNTS = 'blockchainAccounts',
+  ETH_VALIDATORS = 'ethValidators',
 }
 
-export const assetSuggestions =
-  (assetSearch: (keyword: string, limit: number) => Promise<AssetsWithId>) =>
-  async (value: string) =>
-    await assetSearch(value, 5);
+export function assetSuggestions(assetSearch: (params: AssetSearchParams) => Promise<AssetsWithId>, evmChain?: string): (value: string) => Promise<AssetsWithId> {
+  let pending: AbortController | null = null;
 
-export const assetDeserializer =
-  (assetInfo: (identifier: string) => ComputedRef<AssetInfo | null>) =>
-  (identifier: string): AssetInfoWithId | null => {
-    const asset = get(assetInfo(identifier));
-    if (!asset) {
-      return null;
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
+  return useDebounceFn(async (value: string) => {
+    if (pending) {
+      pending.abort();
+      pending = null;
     }
+
+    pending = new AbortController();
+
+    let keyword = value;
+    let address;
+
+    if (isValidEthAddress(value)) {
+      keyword = '';
+      address = value;
+    }
+
+    const result = await assetSearch({
+      value: keyword,
+      address,
+      limit: 10,
+      evmChain,
+      signal: pending.signal,
+    });
+    pending = null;
+    return result;
+  }, 200);
+}
+
+export function assetDeserializer(assetInfo: (identifier: string) => ComputedRef<AssetInfo | null>): (identifier: string) => AssetInfoWithId | null {
+  return (identifier: string): AssetInfoWithId | null => {
+    const asset = get(assetInfo(identifier));
+    if (!asset)
+      return null;
 
     return {
       ...asset,
-      identifier
+      identifier,
     };
   };
+}
 
-export const dateValidator =
-  (dateInputFormat: Ref<DateFormat>) => (value: string) =>
-    value.length > 0 && !isNaN(convertToTimestamp(value, get(dateInputFormat)));
+export function dateValidator(dateInputFormat: Ref<DateFormat>): (value: string) => boolean {
+  return (value: string) => value.length > 0 && !isNaN(convertToTimestamp(value, get(dateInputFormat)));
+}
 
-export const dateSerializer =
-  (dateInputFormat: Ref<DateFormat>) => (date: string) =>
-    convertToTimestamp(date, get(dateInputFormat)).toString();
+export function dateSerializer(dateInputFormat: Ref<DateFormat>): (date: string) => string {
+  return (date: string) => convertToTimestamp(date, get(dateInputFormat)).toString();
+}
 
-export const dateDeserializer =
-  (dateInputFormat: Ref<DateFormat>) => (timestamp: string) =>
-    convertFromTimestamp(parseInt(timestamp), get(dateInputFormat));
+export function dateDeserializer(dateInputFormat: Ref<DateFormat>): (timestamp: string) => string {
+  return (timestamp: string) => convertFromTimestamp(parseInt(timestamp), get(dateInputFormat));
+}

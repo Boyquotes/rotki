@@ -1,2 +1,9 @@
 .eslintcache
 app/cypress/
+.nyc_output
+dist
+.e2e
+.prettierrc
+app/tsconfig.tsbuildinfo
+
+app/public/address-import/js/*

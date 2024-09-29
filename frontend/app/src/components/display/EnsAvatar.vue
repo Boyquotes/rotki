@@ -1,9 +1,8 @@
 <script lang="ts" setup>
-import { Blockchain } from '@rotki/common/lib/blockchain';
-import { type ComputedRef } from 'vue';
+import { Blockchain } from '@rotki/common';
 
 defineOptions({
-  inheritAttrs: false
+  inheritAttrs: false,
 });
 
 const props = withDefaults(
@@ -16,19 +15,18 @@ const props = withDefaults(
   {
     blockchain: Blockchain.ETH,
     avatar: false,
-    size: '24px'
-  }
+    size: '24px',
+  },
 );
 
-const success: Ref<boolean> = ref(false);
-const failed: Ref<boolean> = ref(false);
+const success = ref<boolean>(false);
+const failed = ref<boolean>(false);
 
 const { getEnsAvatarUrl } = useAddressesNamesStore();
 
-const avatarUrl: ComputedRef<string | null> = computed(() => {
-  if (props.blockchain !== Blockchain.ETH) {
+const avatarUrl = computed<string | null>(() => {
+  if (props.blockchain !== Blockchain.ETH)
     return null;
-  }
 
   return get(getEnsAvatarUrl(props.address));
 });
@@ -37,7 +35,7 @@ const { getBlockie } = useBlockie();
 
 const style = computed(() => ({
   width: props.size,
-  height: props.size
+  height: props.size,
 }));
 </script>
 
@@ -51,16 +49,16 @@ const style = computed(() => ({
     :width="size"
     :style="style"
     :class="{
-      'rounded-full': avatar
+      'rounded-full': avatar,
     }"
   />
   <div
     v-else-if="avatarUrl"
     :style="style"
     :class="{
-      skeleton: !success,
+      'skeleton': !success,
       'rounded-full': avatar,
-      'rounded-xl': !avatar
+      'rounded-xl': !avatar,
     }"
   >
     <img
@@ -69,7 +67,7 @@ const style = computed(() => ({
       loading="lazy"
       :class="{
         'rounded-full': avatar,
-        'rounded-xl': !avatar
+        'rounded-xl': !avatar,
       }"
       :style="style"
       :height="size"

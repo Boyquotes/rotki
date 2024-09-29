@@ -1,38 +1,36 @@
 <script setup lang="ts">
-import { type ComputedRef } from 'vue';
-
 const router = useRouter();
 
 const route = useRoute();
-const canNavigateBack: ComputedRef<boolean> = computed(() => {
+const canNavigateBack = computed<boolean>(() => {
   const canNavigateBack = get(route).meta?.canNavigateBack ?? false;
   return canNavigateBack && window.history.length > 1;
 });
 
-const page: ComputedRef<number | null> = computed(() => {
+const page = computed<number | null>(() => {
   const page = get(route).query?.page;
   if (page && typeof page === 'string') {
     const pageInt = parseInt(page);
-    if (pageInt && pageInt > 1) {
+    if (pageInt && pageInt > 1)
       return pageInt;
-    }
   }
   return null;
 });
 
-const goBack = () => {
+function goBack() {
   const pageVal = get(page);
   if (get(canNavigateBack)) {
     router.go(-1);
-  } else if (pageVal) {
+  }
+  else if (pageVal) {
     router.push({
       query: {
         ...get(route).query,
-        page: `${pageVal - 1}`
-      }
+        page: `${pageVal - 1}`,
+      },
     });
   }
-};
+}
 
 const { t } = useI18n();
 </script>
@@ -41,7 +39,7 @@ const { t } = useI18n();
   <RuiTooltip
     v-if="canNavigateBack || page"
     :popper="{ placement: 'top' }"
-    open-delay="400"
+    :open-delay="400"
   >
     <template #activator>
       <RuiButton
@@ -55,7 +53,10 @@ const { t } = useI18n();
     </template>
     <span>{{ t('back_button.tooltip') }}</span>
   </RuiTooltip>
-  <div v-else class="back-button__placeholder" />
+  <div
+    v-else
+    class="back-button__placeholder"
+  />
 </template>
 
 <style scoped lang="scss">

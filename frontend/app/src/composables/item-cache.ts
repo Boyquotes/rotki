@@ -1,4 +1,4 @@
-import { type MaybeRef } from '@vueuse/core';
+import type { MaybeRef } from '@vueuse/core';
 
 const CACHE_EXPIRY = 1000 * 60 * 10;
 const CACHE_SIZE = 500;
@@ -8,36 +8,44 @@ export interface CacheEntry<T> {
   item: T;
 }
 
-type CacheFetch<T> = (
-  keys: string[]
-) => Promise<() => IterableIterator<CacheEntry<T>>>;
+type CacheFetch<T> = (keys: string[]) => Promise<() => IterableIterator<CacheEntry<T>>>;
 
 interface CacheOptions {
   expiry: number;
   size: number;
 }
 
-export const useItemCache = <T>(
+interface UseItemCacheReturn<T> {
+  cache: Ref<Record<string, T | null>>;
+  unknown: Map<string, number>;
+  isPending: (identifier: MaybeRef<string>) => ComputedRef<boolean>;
+  retrieve: (key: string) => ComputedRef<T | null>;
+  reset: () => void;
+  refresh: (key: string) => void;
+  deleteCacheKey: (key: string) => void;
+  queueIdentifier: (key: string) => void;
+}
+
+export function useItemCache<T>(
   fetch: CacheFetch<T>,
   options: CacheOptions = {
     size: CACHE_SIZE,
-    expiry: CACHE_EXPIRY
-  }
-) => {
+    expiry: CACHE_EXPIRY,
+  },
+): UseItemCacheReturn<T> {
   const recent: Map<string, number> = new Map();
   const unknown: Map<string, number> = new Map();
-  const cache: Ref<Record<string, T | null>> = ref({});
-  const pending: Ref<Record<string, boolean>> = ref({});
-  const batch: Ref<string[]> = ref([]);
+  const cache = ref<Record<string, T | null>>({});
+  const pending = ref<Record<string, boolean>>({});
+  const batch = ref<string[]>([]);
 
   const deleteCacheKey = (key: string): void => {
     const copy = { ...get(cache) };
     delete copy[key];
     set(cache, copy);
 
-    if (unknown.has(key)) {
+    if (unknown.has(key))
       unknown.delete(key);
-    }
   };
 
   const updateCacheKey = (key: string, value: T): void => {
@@ -48,9 +56,8 @@ export const useItemCache = <T>(
     set(pending, { ...get(pending), [key]: true });
 
     const currentBatch = get(batch);
-    if (!currentBatch.includes(key)) {
+    if (!currentBatch.includes(key))
       set(batch, [...currentBatch, key]);
-    }
   };
 
   const resetPending = (key: string): void => {
@@ -72,13 +79,13 @@ export const useItemCache = <T>(
     updateCacheKey(key, item);
   };
 
-  const fetchBatch = useDebounceFn(async () => {
+  const fetchBatch = useDebounceFn(() => {
     const currentBatch = get(batch);
-    if (currentBatch.length === 0) {
+    if (currentBatch.length === 0)
       return;
-    }
+
     set(batch, []);
-    await processBatch(currentBatch);
+    startPromise(processBatch(currentBatch));
   }, 800);
 
   async function processBatch(keys: string[]): Promise<void> {
@@ -87,35 +94,36 @@ export const useItemCache = <T>(
       for (const { item, key } of batch()) {
         if (item) {
           put(key, item);
-        } else {
-          if (import.meta.env.VITE_VERBOSE_CACHE) {
+        }
+        else {
+          if (import.meta.env.VITE_VERBOSE_CACHE)
             logger.debug(`unknown key: ${key}`);
-          }
+
+          recent.delete(key);
+          deleteCacheKey(key);
+
           unknown.set(key, Date.now() + options.expiry);
         }
       }
-    } catch (e) {
-      logger.error(e);
-    } finally {
-      for (const key of keys) {
-        resetPending(key);
-      }
+    }
+    catch (error) {
+      logger.error(error);
+    }
+    finally {
+      for (const key of keys) resetPending(key);
     }
   }
 
-  const batchPromise = async () => await fetchBatch();
-
   const queueIdentifier = (key: string): void => {
     const unknownExpiry = unknown.get(key);
-    if (unknownExpiry && unknownExpiry >= Date.now()) {
+    if (unknownExpiry && unknownExpiry >= Date.now())
       return;
-    }
 
-    if (unknown.has(key)) {
+    if (unknown.has(key))
       unknown.delete(key);
-    }
+
     setPending(key);
-    startPromise(batchPromise());
+    startPromise(fetchBatch());
   };
 
   const retrieve = (key: string): ComputedRef<T | null> => {
@@ -132,15 +140,24 @@ export const useItemCache = <T>(
       }
     }
 
-    if (!get(pending)[key] && !expired) {
+    if (!get(pending)[key] && !expired)
       queueIdentifier(key);
-    }
 
     return computed(() => get(cache)[key] ?? null);
   };
 
-  const isPending = (identifier: MaybeRef<string>): ComputedRef<boolean> =>
-    computed(() => get(pending)[get(identifier)] ?? false);
+  const refresh = (key: string): void => {
+    const now = Date.now();
+    recent.set(key, now + options.expiry);
+    if (unknown.has(key))
+      unknown.delete(key);
+
+    queueIdentifier(key);
+  };
+
+  const isPending = (
+    identifier: MaybeRef<string>,
+  ): ComputedRef<boolean> => computed<boolean>(() => get(pending)[get(identifier)] ?? false);
 
   const reset = (): void => {
     set(pending, {});
@@ -156,6 +173,8 @@ export const useItemCache = <T>(
     isPending,
     retrieve,
     reset,
-    deleteCacheKey
+    refresh,
+    deleteCacheKey,
+    queueIdentifier,
   };
-};
+}

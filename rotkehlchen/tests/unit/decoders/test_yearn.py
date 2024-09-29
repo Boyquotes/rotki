@@ -14,6 +14,7 @@ from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.fval import FVal
 from rotkehlchen.history.events.structures.evm_event import EvmEvent
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
+from rotkehlchen.tests.utils.decoders import patch_decoder_reload_data
 from rotkehlchen.tests.utils.ethereum import get_decoded_events_of_transaction
 from rotkehlchen.types import (
     ChainID,
@@ -54,13 +55,12 @@ def test_deposit_yearn_v2(database, ethereum_inquirer, eth_transactions):
         tx_hash=evmhash,
         contract_address=None,
         status=True,
-        type=0,
+        tx_type=0,
         logs=[
             EvmTxReceiptLog(
                 log_index=154,
                 data=hexstring_to_bytes('000000000000000000000000000000000000000000000000004ce82f9e9559fe'),
                 address=string_to_evm_address('0xdb25cA703181E7484a155DD612b06f57E12Be5F0'),
-                removed=False,
                 topics=[
                     hexstring_to_bytes('0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'),
                     hexstring_to_bytes('0x0000000000000000000000000000000000000000000000000000000000000000'),
@@ -70,7 +70,6 @@ def test_deposit_yearn_v2(database, ethereum_inquirer, eth_transactions):
                 log_index=120,
                 data=hexstring_to_bytes('0x000000000000000000000000000000000000000000000000004de0e34960d000'),
                 address=string_to_evm_address('0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e'),
-                removed=False,
                 topics=[
                     hexstring_to_bytes('0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'),
                     hexstring_to_bytes('0x000000000000000000000000b524c787669185e11d01c645d1910631e04fa5eb'),
@@ -80,7 +79,6 @@ def test_deposit_yearn_v2(database, ethereum_inquirer, eth_transactions):
                 log_index=156,
                 data=hexstring_to_bytes('0xffffffffffffffffffffffffffffffffffffffffffffffffffb21f1cb69f2fff'),
                 address=string_to_evm_address('0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d'),
-                removed=False,
                 topics=[
                     hexstring_to_bytes('0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925'),
                     hexstring_to_bytes('0x000000000000000000000000b524c787669185e11d01c645d1910631e04fa5eb'),
@@ -91,13 +89,14 @@ def test_deposit_yearn_v2(database, ethereum_inquirer, eth_transactions):
     )
 
     dbethtx = DBEvmTx(database)
-    with database.user_write() as cursor:
-        dbethtx.add_evm_transactions(cursor, [transaction], relevant_address=None)
     decoder = EthereumTransactionDecoder(
         database=database,
         ethereum_inquirer=ethereum_inquirer,
         transactions=eth_transactions,
     )
+    with database.user_write() as cursor, patch_decoder_reload_data():
+        dbethtx.add_evm_transactions(cursor, [transaction], relevant_address=None)
+        decoder.reload_data(cursor)
     events, _ = decoder._decode_transaction(transaction=transaction, tx_receipt=receipt)
 
     assert len(events) == 3
@@ -175,13 +174,12 @@ def test_withdraw_yearn_v2(database, ethereum_inquirer, eth_transactions):
         tx_hash=evmhash,
         contract_address=None,
         status=True,
-        type=0,
+        tx_type=0,
         logs=[
             EvmTxReceiptLog(
                 log_index=78,
                 data=hexstring_to_bytes('000000000000000000000000000000000000000000000004ace221a99fa8e6e8'),
                 address=string_to_evm_address('0xB8C3B7A2A618C552C23B1E4701109a9E756Bab67'),
-                removed=False,
                 topics=[
                     hexstring_to_bytes('0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'),
                     hexstring_to_bytes('0x0000000000000000000000007b33b34d45a395518a4143846ac40da78cbcaa91'),
@@ -191,7 +189,6 @@ def test_withdraw_yearn_v2(database, ethereum_inquirer, eth_transactions):
                 log_index=79,
                 data=hexstring_to_bytes('0x000000000000000000000000000000000000000000000005000a02dde43a18f8'),
                 address=string_to_evm_address('0x111111111117dC0aa78b770fA6A738034120C302'),
-                removed=False,
                 topics=[
                     hexstring_to_bytes('0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'),
                     hexstring_to_bytes('0x000000000000000000000000b8c3b7a2a618c552c23b1e4701109a9e756bab67'),
@@ -202,13 +199,14 @@ def test_withdraw_yearn_v2(database, ethereum_inquirer, eth_transactions):
     )
 
     dbethtx = DBEvmTx(database)
-    with database.user_write() as cursor:
-        dbethtx.add_evm_transactions(cursor, [transaction], relevant_address=None)
     decoder = EthereumTransactionDecoder(
         database=database,
         ethereum_inquirer=ethereum_inquirer,
         transactions=eth_transactions,
     )
+    with database.user_write() as cursor, patch_decoder_reload_data():
+        dbethtx.add_evm_transactions(cursor, [transaction], relevant_address=None)
+        decoder.reload_data(cursor)
     events, _ = decoder._decode_transaction(transaction=transaction, tx_receipt=receipt)
 
     assert len(events) == 3
@@ -286,13 +284,12 @@ def test_deposit_yearn_v1(database, ethereum_inquirer, eth_transactions):
         chain_id=ChainID.ETHEREUM,
         contract_address=None,
         status=True,
-        type=0,
+        tx_type=0,
         logs=[
             EvmTxReceiptLog(
                 log_index=289,
                 data=hexstring_to_bytes('0x0000000000000000000000000000000000000000000000000d9bb1b0ec3a2780'),
                 address=string_to_evm_address('0x49849C98ae39Fff122806C06791Fa73784FB3675'),
-                removed=False,
                 topics=[
                     hexstring_to_bytes('0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'),
                     hexstring_to_bytes('0x0000000000000000000000003380d0fa7355a6acb40089db837a740c4c1ddc85'),
@@ -302,7 +299,6 @@ def test_deposit_yearn_v1(database, ethereum_inquirer, eth_transactions):
                 log_index=290,
                 data=hexstring_to_bytes('0x0000000000000000000000000000000000000000000000000d8eec0cf565f2e5'),
                 address=string_to_evm_address('0x5334e150B938dd2b6bd040D9c4a03Cff0cED3765'),
-                removed=False,
                 topics=[
                     hexstring_to_bytes('0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'),
                     hexstring_to_bytes('0x0000000000000000000000000000000000000000000000000000000000000000'),
@@ -313,13 +309,14 @@ def test_deposit_yearn_v1(database, ethereum_inquirer, eth_transactions):
     )
 
     dbethtx = DBEvmTx(database)
-    with database.user_write() as cursor:
-        dbethtx.add_evm_transactions(cursor, [transaction], relevant_address=None)
     decoder = EthereumTransactionDecoder(
         database=database,
         ethereum_inquirer=ethereum_inquirer,
         transactions=eth_transactions,
     )
+    with database.user_write() as cursor, patch_decoder_reload_data():
+        dbethtx.add_evm_transactions(cursor, [transaction], relevant_address=None)
+        decoder.reload_data(cursor)
     events, _ = decoder._decode_transaction(transaction=transaction, tx_receipt=receipt)
 
     assert len(events) == 3
@@ -397,13 +394,12 @@ def test_withdraw_yearn_v1(database, ethereum_inquirer, eth_transactions):
         chain_id=ChainID.ETHEREUM,
         contract_address=None,
         status=True,
-        type=0,
+        tx_type=0,
         logs=[
             EvmTxReceiptLog(
                 log_index=78,
                 data=hexstring_to_bytes('0x00000000000000000000000000000000000000000000000001811d39c5a70000'),
                 address=string_to_evm_address('0x5334e150B938dd2b6bd040D9c4a03Cff0cED3765'),
-                removed=False,
                 topics=[
                     hexstring_to_bytes('0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'),
                     hexstring_to_bytes('0x000000000000000000000000af7b5d7f84b7dd6b960ac6adf2d763dd49686992'),
@@ -413,7 +409,6 @@ def test_withdraw_yearn_v1(database, ethereum_inquirer, eth_transactions):
                 log_index=79,
                 data=hexstring_to_bytes('0x0000000000000000000000000000000000000000000000000186a6aeafe845e8'),
                 address=string_to_evm_address('0x49849C98ae39Fff122806C06791Fa73784FB3675'),
-                removed=False,
                 topics=[
                     hexstring_to_bytes('0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'),
                     hexstring_to_bytes('0x0000000000000000000000005334e150b938dd2b6bd040d9c4a03cff0ced3765'),
@@ -424,13 +419,14 @@ def test_withdraw_yearn_v1(database, ethereum_inquirer, eth_transactions):
     )
 
     dbethtx = DBEvmTx(database)
-    with database.user_write() as cursor:
-        dbethtx.add_evm_transactions(cursor, [transaction], relevant_address=None)
     decoder = EthereumTransactionDecoder(
         database=database,
         ethereum_inquirer=ethereum_inquirer,
         transactions=eth_transactions,
     )
+    with database.user_write() as cursor, patch_decoder_reload_data():
+        dbethtx.add_evm_transactions(cursor, [transaction], relevant_address=None)
+        decoder.reload_data(cursor)
     events, _ = decoder._decode_transaction(transaction=transaction, tx_receipt=receipt)
 
     assert len(events) == 3
@@ -480,9 +476,9 @@ def test_withdraw_yearn_v1(database, ethereum_inquirer, eth_transactions):
     assert events == expected_events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [['0xfDb7EEc5eBF4c4aC7734748474123aC25C6eDCc8']])
-def test_deposit_yearn_full_amount(database, ethereum_inquirer, ethereum_accounts):
+def test_deposit_yearn_full_amount(ethereum_inquirer, ethereum_accounts):
     """
     In the case of deposits and withdrawals for yearn there are two different signatures for
     the functions used. If no amount is provided all the available amount is deposited/withdrawn.
@@ -490,11 +486,7 @@ def test_deposit_yearn_full_amount(database, ethereum_inquirer, ethereum_account
     tx_hex = deserialize_evm_tx_hash('0x02486ccc1fe49b3c7df60c51efad78ddca5af025834e30ba1a736ff352b33592')  # noqa: E501
     evmhash = deserialize_evm_tx_hash(tx_hex)
     user_address = ethereum_accounts[0]
-    events, _ = get_decoded_events_of_transaction(
-        evm_inquirer=ethereum_inquirer,
-        database=database,
-        tx_hash=tx_hex,
-    )
+    events, _ = get_decoded_events_of_transaction(evm_inquirer=ethereum_inquirer, tx_hash=tx_hex)
     assert events == [
         EvmEvent(
             tx_hash=evmhash,
@@ -545,9 +537,9 @@ def test_deposit_yearn_full_amount(database, ethereum_inquirer, ethereum_account
             event_type=HistoryEventType.INFORMATIONAL,
             event_subtype=HistoryEventSubType.APPROVE,
             asset=A_1INCH,
-            balance=Balance(amount=FVal('115792089237316195423570985000000000000000000000000000000000'), usd_value=ZERO),  # noqa: E501
+            balance=Balance(amount=FVal('115792089237316195423570985008687907853269984665640564038972.292276463862611574'), usd_value=ZERO),  # noqa: E501
             location_label=user_address,
-            notes='Set 1INCH spending approval of 0xfDb7EEc5eBF4c4aC7734748474123aC25C6eDCc8 by 0xB8C3B7A2A618C552C23B1E4701109a9E756Bab67 to 115792089237316195423570985000000000000000000000000000000000',  # noqa: E501
+            notes='Set 1INCH spending approval of 0xfDb7EEc5eBF4c4aC7734748474123aC25C6eDCc8 by 0xB8C3B7A2A618C552C23B1E4701109a9E756Bab67 to 115792089237316195423570985008687907853269984665640564038972.292276463862611574',  # noqa: E501
             counterparty=None,
             address=string_to_evm_address('0xB8C3B7A2A618C552C23B1E4701109a9E756Bab67'),
         ),

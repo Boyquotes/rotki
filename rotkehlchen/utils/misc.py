@@ -7,7 +7,7 @@ import re
 import sys
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from itertools import zip_longest
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
@@ -43,7 +43,7 @@ def ts_ms_to_sec(ts: TimestampMS) -> Timestamp:
 
 def create_timestamp(datestr: str, formatstr: str) -> Timestamp:
     """
-    Connvert datestr to unix timestamp (int) depending on the given formatstr.
+    Convert datestr to unix timestamp (int) depending on the given formatstr.
     Example format str: '%Y-%m-%d %H:%M:%S. More details here:
     https://docs.python.org/3/library/datetime.html#strftime-strptime-behavior
 
@@ -102,7 +102,7 @@ def timestamp_to_iso8601(ts: Timestamp, utc_as_z: bool = False) -> str:
 
     If `utc_as_z` is True then timezone will be shown with a Z instead of the standard
     +00:00. Z is useful for proper URL encoding."""
-    res = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()
+    res = datetime.datetime.fromtimestamp(ts, tz=datetime.UTC).isoformat()
     return res if utc_as_z is False else res.replace('+00:00', 'Z')
 
 
@@ -115,12 +115,17 @@ def timestamp_to_date(
         formatstr: str = '%d/%m/%Y %H:%M:%S',
         treat_as_local: bool = False,
 ) -> str:
-    """Transforms a timestamp to a datestring depending on given formatstr and UTC/local choice"""
+    """
+    Transforms a timestamp to a datestring depending on given formatstr and UTC/local choice
+    May raise:
+    - OSError: if the ts provided is outside the limits for the system. Happens providing
+    close to 0 ts in windows. https://github.com/python/cpython/issues/107078
+    """
     if treat_as_local is False:
-        date = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).strftime(formatstr)
+        date = datetime.datetime.fromtimestamp(ts, tz=datetime.UTC).strftime(formatstr)
     else:  # localtime
         date = datetime.datetime.fromtimestamp(
-            ts,  # ignore below is due to: https://github.com/pjknkda/flake8-datetimez/issues/11
+            ts,
             tz=datetime.datetime.fromtimestamp(ts).astimezone().tzinfo,
         ).strftime(formatstr)
 
@@ -128,7 +133,7 @@ def timestamp_to_date(
     return date.rstrip()
 
 
-def from_wei(wei_value: FVal) -> FVal:
+def from_wei(wei_value: FVal | int) -> FVal:
     return wei_value / FVal(10 ** 18)
 
 
@@ -140,7 +145,7 @@ K = TypeVar('K')
 V = TypeVar('V')
 
 
-@overload  # type: ignore [overload-overlap]
+@overload
 def combine_dicts(a: dict[K, V], b: dict[K, V], op: Callable = operator.add) -> dict[K, V]:
     ...
 
@@ -298,7 +303,17 @@ def address_to_bytes32(address: ChecksumEvmAddress) -> str:
 T = TypeVar('T')
 
 
+@overload
 def get_chunks(lst: list[T], n: int) -> Iterator[list[T]]:
+    ...
+
+
+@overload
+def get_chunks(lst: Sequence[T], n: int) -> Iterator[Sequence[T]]:
+    ...
+
+
+def get_chunks(lst: Sequence[T] | list[T], n: int) -> Iterator[Sequence[T]] | Iterator[list[T]]:
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):
         yield lst[i:i + n]
@@ -385,8 +400,4 @@ def is_production() -> bool:
     if getattr(sys, 'frozen', False) is False:
         return False
 
-    version = get_current_version().our_version
-    if 'dev' in version:
-        return False
-
-    return True
+    return get_current_version().our_version.dev is None

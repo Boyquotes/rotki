@@ -1,6 +1,7 @@
 import json
+import os
 import shutil
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,9 +9,15 @@ import pytest
 from pysqlcipher3 import dbapi2 as sqlcipher
 
 from rotkehlchen.chain.evm.accounting.structures import TxEventSettings
-from rotkehlchen.constants.misc import DEFAULT_SQL_VM_INSTRUCTIONS_CB
+from rotkehlchen.constants.misc import (
+    AIRDROPSDIR_NAME,
+    APPDIR_NAME,
+    DEFAULT_SQL_VM_INSTRUCTIONS_CB,
+    USERDB_NAME,
+)
 from rotkehlchen.data_handler import DataHandler
 from rotkehlchen.db.checks import sanity_check_impl
+from rotkehlchen.db.constants import HISTORY_MAPPING_KEY_STATE, HISTORY_MAPPING_STATE_CUSTOMIZED
 from rotkehlchen.db.dbhandler import DBHandler
 from rotkehlchen.db.drivers.gevent import DBConnection, DBConnectionType
 from rotkehlchen.db.schema import DB_SCRIPT_CREATE_TABLES
@@ -23,6 +30,7 @@ from rotkehlchen.db.upgrade_manager import (
 from rotkehlchen.db.upgrades.v37_v38 import DEFAULT_POLYGON_NODES_AT_V38
 from rotkehlchen.db.upgrades.v39_v40 import PREFIX
 from rotkehlchen.db.utils import table_exists
+from rotkehlchen.errors.api import RotkehlchenPermissionError
 from rotkehlchen.errors.misc import DBUpgradeError
 from rotkehlchen.oracles.structures import CurrentPriceOracle
 from rotkehlchen.tests.utils.database import (
@@ -31,7 +39,14 @@ from rotkehlchen.tests.utils.database import (
     mock_dbhandler_sync_globaldb_assets,
     mock_dbhandler_update_owned_assets,
 )
-from rotkehlchen.types import Location, deserialize_evm_tx_hash
+from rotkehlchen.types import (
+    ANY_BLOCKCHAIN_ADDRESSBOOK_VALUE,
+    ChainID,
+    Location,
+    SupportedBlockchain,
+    Timestamp,
+    deserialize_evm_tx_hash,
+)
 from rotkehlchen.user_messages import MessagesAggregator
 from rotkehlchen.utils.hexbytes import HexBytes
 from rotkehlchen.utils.misc import ts_now
@@ -171,6 +186,7 @@ def test_upgrade_db_26_to_27(user_data_dir):  # pylint: disable=unused-argument
     # Finally also make sure that we have updated to the target version
     with db.conn.read_ctx() as cursor:
         assert db.get_setting(cursor, 'version') == 27
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -223,6 +239,7 @@ def test_upgrade_db_27_to_28(user_data_dir):  # pylint: disable=unused-argument
     # Finally also make sure that we have updated to the target version
     with db.conn.read_ctx() as cursor:
         assert db.get_setting(cursor, 'version') == 28
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -338,6 +355,7 @@ def test_upgrade_db_28_to_29(user_data_dir):  # pylint: disable=unused-argument
     # Finally also make sure that we have updated to the target version
     with db.conn.read_ctx() as cursor:
         assert db.get_setting(cursor, 'version') == 29
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -361,6 +379,7 @@ def test_upgrade_db_29_to_30(user_data_dir):  # pylint: disable=unused-argument
     # Check that existing balances are not considered as liabilities after migration
     cursor.execute('SELECT category FROM manually_tracked_balances;')
     assert cursor.fetchone() == ('A',)
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -435,6 +454,7 @@ def test_upgrade_db_30_to_31(user_data_dir):  # pylint: disable=unused-argument
         ('eth2_deposits_0x45E6CA515E840A4e9E02A3062F99216951825eB2', 1602667372, 1637575118),
         ('kraken_asset_movements_kraken1', 0, 1634850532),
     ]
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -577,7 +597,7 @@ def test_upgrade_db_31_to_32(user_data_dir):  # pylint: disable=unused-argument
 
     manual_balance_ids = cursor.execute('SELECT id FROM manually_tracked_balances;').fetchall()
 
-    assert [1, 2, 3] == [x[0] for x in manual_balance_ids]
+    assert [x[0] for x in manual_balance_ids] == [1, 2, 3]
 
     # Check that trades with fee missing sets fee_currency to NULL and vice versa
     trades_expected = cursor.execute('SELECT * FROM trades WHERE id != ? AND id != ?', ('foo1', 'foo2')).fetchall()  # noqa: E501
@@ -625,6 +645,7 @@ def test_upgrade_db_31_to_32(user_data_dir):  # pylint: disable=unused-argument
     assert cursor.fetchone() == (1, expected_timestamp // 10)
     cursor.execute('SELECT COUNT(*), timestamp FROM history_events WHERE subtype="remove asset" AND type="staking"')  # noqa: E501
     assert cursor.fetchone() == (1, expected_timestamp // 10)
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -739,6 +760,7 @@ def test_upgrade_db_32_to_33(user_data_dir):  # pylint: disable=unused-argument
     # not all combined_trades_views have tx hash.
     assert_tx_hash_is_bytes(old=old_combined_trades_views[:1], new=new_combined_trades_views[:1], tx_hash_index=10)  # noqa: E501
     assert_tx_hash_is_bytes(old=old_history_events, new=new_history_events, tx_hash_index=1, is_history_event=True)  # noqa: E501
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -774,6 +796,7 @@ def test_upgrade_db_33_to_34(user_data_dir):  # pylint: disable=unused-argument
         result = cursor.fetchall()
         assert isinstance(result[-1][10], str)
         assert result[-1][10] == '0xb1fcf4aef6af87a061ca03e92c4eb8039efe600d501ba288a8bae90f78c91db5'  # noqa: E501
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -912,6 +935,7 @@ def test_upgrade_db_34_to_35(user_data_dir):  # pylint: disable=unused-argument
     # it should fail before the upgrade
     with db_v34.conn.write_ctx() as write_cursor, pytest.raises(sqlcipher.IntegrityError):  # pylint: disable=no-member
         try_insert_mapping(write_cursor)
+    db_v34.logout()
 
     # Migrate the database
     db_v35 = _init_db_with_target_version(
@@ -1021,6 +1045,7 @@ def test_upgrade_db_34_to_35(user_data_dir):  # pylint: disable=unused-argument
             (b"\x0c\x04\x82\x92Z\xf0\x97\xedM\x85\xec\x06\x8f\xed\xc3\xdaMev<\xc82WO'6\x92\xc5\xe88wV", 'ETH', 'customized'),  # noqa: E501
         ]
         assert cursor.execute('SELECT * from evm_tx_mappings').fetchall() == expected_evm_tx_mappings  # noqa: E501
+    db_v35.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -1320,6 +1345,7 @@ def test_upgrade_db_35_to_36(user_data_dir):  # pylint: disable=unused-argument
     res = cursor.execute('SELECT * FROM history_events WHERE identifier=?', (234,)).fetchone()
     assert res is not None
     assert res[9] == 'Edited event'  # event's notes
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -1421,7 +1447,7 @@ def test_upgrade_db_36_to_37(user_data_dir):  # pylint: disable=unused-argument
     ]
     assert cursor.execute(
         'SELECT value FROM settings WHERE name="non_syncing_exchanges"',
-    ).fetchone()[0] == '[{"name": "Kucoin 1", "location": "kucoin"}, {"name": "FTX 1", "location": "ftx"}]'  # noqa: E501
+    ).fetchone()[0] == '[{"name": "Kucoin 1", "location": "kucoin"}]'
     assert cursor.execute(
         'SELECT value FROM settings WHERE name="ssf_0graph_multiplier"',
     ).fetchone()[0] == '42'
@@ -1522,6 +1548,7 @@ def test_upgrade_db_36_to_37(user_data_dir):  # pylint: disable=unused-argument
     assert cursor.execute(
         'SELECT value FROM settings WHERE name="ssf_graph_multiplier"',
     ).fetchone()[0] == '42'
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -1592,8 +1619,8 @@ def test_upgrade_db_37_to_38(user_data_dir):  # pylint: disable=unused-argument
     ).fetchone()[0] == Location.POLYGON_POS.serialize_for_db()
     nodes_after = cursor.execute('SELECT * FROM rpc_nodes').fetchall()
     default_polygon_nodes_with_ids = [
-        (id, *node)
-        for id, node in enumerate(DEFAULT_POLYGON_NODES_AT_V38, start=max_initial_node_id + 1)
+        (identifier, *node)
+        for identifier, node in enumerate(DEFAULT_POLYGON_NODES_AT_V38, start=max_initial_node_id + 1)  # noqa: E501
     ]
     assert nodes_after == nodes_before + default_polygon_nodes_with_ids
     expected_internal_txs = [tuple(x[:3]) + tuple(x[5:]) for x in expected_internal_txs]
@@ -1608,6 +1635,7 @@ def test_upgrade_db_37_to_38(user_data_dir):  # pylint: disable=unused-argument
     assert cursor.execute('SELECT * from history_events WHERE entry_type=4;').fetchall() == expected_history_events  # noqa: E501
     expected_eth_staking_events_info = [expected_eth_staking_events_info[0]] + expected_eth_staking_events_info[2:6]  # noqa: E501
     assert cursor.execute('SELECT * from eth_staking_events_info').fetchall() == expected_eth_staking_events_info  # noqa: E501
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -1798,6 +1826,7 @@ def test_upgrade_db_38_to_39(user_data_dir):  # pylint: disable=unused-argument
     settings = db.get_settings(cursor=cursor)
     expected_oracles = [CurrentPriceOracle.deserialize(oracle) for oracle in oracles if oracle != 'saddle']  # noqa: E501
     assert settings.current_price_oracles == expected_oracles
+    db.logout()
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -1958,6 +1987,567 @@ def test_upgrade_db_39_to_40(user_data_dir):  # pylint: disable=unused-argument
         'SELECT base_asset FROM trades WHERE id=?',
         ('1a1ee5',),
     ).fetchall() == [(bnb_velo_asset_id,)]
+    db.logout()
+
+
+@pytest.mark.parametrize('use_clean_caching_directory', [True])
+@pytest.mark.parametrize('address_name_priority', [
+    (  # customized to prioritized blockchain_account, no values should be replaced
+        'blockchain_account',
+        'private_addressbook',
+        'global_addressbook',
+        'ethereum_tokens',
+        'hardcoded_mappings',
+        'ens_names',
+    ), (  # blockchain_account missing, result should have two values replaced
+        'private_addressbook',
+        'global_addressbook',
+        'ethereum_tokens',
+        'hardcoded_mappings',
+        'ens_names',
+    ),
+    None,  # no setting, result should have two values replaced
+])
+def test_upgrade_db_40_to_41(user_data_dir, address_name_priority, messages_aggregator):
+    """Test upgrading the DB from version 40 to version 41"""
+    _use_prepared_db(user_data_dir, 'v40_rotkehlchen.db')
+    db_v40 = _init_db_with_target_version(
+        target_version=40,
+        user_data_dir=user_data_dir,
+        msg_aggregator=messages_aggregator,
+        resume_from_backup=False,
+    )
+    # add some settings and used_query_ranges that should/shouldn't move in the upgrade
+    should_move_settings = {
+        'last_balance_save': '234',
+        'last_data_upload_ts': '345',
+        'last_data_updates_ts': '456',
+        'last_owned_assets_update': '567',
+        'last_evm_accounts_detect_ts': '678',
+        'last_spam_assets_detect_key': '789',
+        'last_augmented_spam_assets_detect_key': '890',
+    }
+    should_not_move_settings = {
+        'version': '40',
+        'last_write_ts': '890',
+        'spam_assets_version': '901',
+        'rpc_nodes_version': '12',
+        'contracts_version': '123',
+        'global_addressbook_version': '234',
+        'accounting_rules_version': '345',
+        'non_syncing_exchanges': '[{"name": "Kraken 1", "location": "kraken"}]',
+    }
+    if address_name_priority is not None:
+        should_not_move_settings['address_name_priority'] = json.dumps(address_name_priority)
+    should_move_used_query_ranges = {
+        'ethwithdrawalsts_0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12': '123',
+        'ethwithdrawalsts_0xc37b40ABdB939635068d3c5f13E7faF686F03B65': '123',
+        'ethwithdrawalsidx_0xc37b40ABdB939635068d3c5f13E7faF686F03B65': '234',
+        f'{Location.BITSTAMP}_bitstamp1_last_cryptotx_offset': '345',
+        f'{Location.COINBASE}_coinbase1_123_last_query_ts': '456',
+        f'{Location.COINBASE}_coinbase1_123_last_query_id': '567',
+        'last_produced_blocks_query_ts': '678',
+        'last_withdrawals_exit_query_ts': '789',
+        'last_events_processing_task_ts': '890',
+    }
+    should_not_move_used_query_ranges = {
+        'coinbase_trades_Coinbase 1': '123',
+        'coinbase_margins_Coinbase 1': '234',
+        'coinbase_asset_movements_Coinbase 1': '345',
+        'balancer_events_0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12': '456',
+        'balancer_events_0xc37b40ABdB939635068d3c5f13E7faF686F03B65': '456',
+        'binance_history_events_binance1': '567',
+        'binance_lending_history_binance1': '678',
+        'yearn_vaults_events_0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12': '789',
+        'yearn_vaults_v2_events_0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12': '890',
+        'gnosisbridge_0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12': '901',
+    }
+    with db_v40.conn.write_ctx() as cursor:
+        assert table_exists(cursor, 'key_value_cache') is False
+        cursor.execute('SELECT name FROM settings;')
+        for names in cursor:
+            assert names[0] in should_move_settings | should_not_move_settings
+        cursor.execute('SELECT name FROM used_query_ranges;')
+        for names in cursor:
+            if names[0].startswith('bittrex'):
+                continue  # those will be removed
+            assert names[0] in should_move_used_query_ranges | should_not_move_used_query_ranges
+        cursor.execute('SELECT COUNT(*) FROM location WHERE location=? AND seq=?', ('m', 45))
+        assert cursor.fetchone()[0] == 0
+        assert cursor.execute('SELECT * FROM blockchain_accounts;').fetchall() == [
+            ('eth', '0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12', 'eth1_blockchain_accounts'),
+            ('eth', '0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'eth2_blockchain_accounts'),
+            ('btc', '0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12', 'btc1_blockchain_accounts'),
+            ('btc', '0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'btc2_blockchain_accounts'),
+        ]
+        assert cursor.execute('SELECT * FROM address_book').fetchall() == [
+            ('0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12', 'eth', 'eth1_address_book'),
+            ('0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12', 'btc', 'btc1_address_book'),
+        ]  # eth1 and btc1 already exists in address_book
+        if address_name_priority is not None:
+            cursor.execute(
+                'INSERT INTO settings(name, value) VALUES(?, ?)',
+                ('address_name_priority', json.dumps(address_name_priority)),
+            )
+        # check that we have bittrex information that needs to be removed
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM user_credentials WHERE location=?',
+            ('D',),
+        ).fetchone()[0] == 1
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM used_query_ranges WHERE name LIKE ? ESCAPE ?;',
+            (f'{Location.BITTREX!s}\\_%', '\\'),
+        ).fetchone()[0] == 3
+
+    # test external credentials are there
+    with db_v40.conn.read_ctx() as cursor:
+        assert table_exists(
+            cursor=cursor,
+            name='external_service_credentials',
+            schema="""CREATE TABLE external_service_credentials (
+            name VARCHAR[30] NOT NULL PRIMARY KEY,
+            api_key TEXT
+            )""") is True
+        assert table_exists(
+            cursor=cursor,
+            name='blockchain_accounts',
+            schema="""CREATE TABLE IF NOT EXISTS blockchain_accounts (
+                blockchain VARCHAR[24] NOT NULL,
+                account TEXT NOT NULL,
+                label TEXT,
+                PRIMARY KEY (blockchain, account)
+            );""",
+        )
+        assert cursor.execute('SELECT * FROM external_service_credentials').fetchall() == [('etherscan', 'LOL'), ('blockscout', 'LOL2'), ('covalent', 'lollol')]  # noqa: E501
+        # verify that the history_events exists before upgrade
+        assert cursor.execute('SELECT COUNT(*) FROM history_events').fetchone()[0] == 10
+        assert cursor.execute('SELECT COUNT(*) FROM history_events WHERE location = "B"').fetchone()[0] == 2  # kraken events: one valid and one that needs to be removed # noqa: E501
+        assert cursor.execute('SELECT COUNT(*) FROM evm_events_info').fetchone()[0] == 8
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM history_events_mappings WHERE name=? AND value=?',
+            (HISTORY_MAPPING_KEY_STATE, HISTORY_MAPPING_STATE_CUSTOMIZED),
+        ).fetchone()[0] == 1  # one event is customized
+
+        # test eth2 validators and daily stats are there
+        assert table_exists(
+            cursor=cursor,
+            name='eth2_validators',
+            schema="""CREATE TABLE IF NOT EXISTS eth2_validators (
+                validator_index INTEGER NOT NULL PRIMARY KEY,
+                public_key TEXT NOT NULL UNIQUE,
+                ownership_proportion TEXT NOT NULL
+            );""",
+        )
+        validators_data = [
+            (42, '0xb0fee189ffa7ddb3326ef685c911f3416e15664ff1825f3b8e542ba237bd3900f960cd6316ef5f8a5adbaf4903944013', '1.0'),  # noqa: E501
+            (1232, '0xa15f29dd50327bc53b02d34d7db28f175ffc21d7ffbb2646c8b1b82bb6bca553333a19fd4b9890174937d434cc115ace', '0.35'),  # noqa: E501
+            (5232, '0xb052a2b421770b99c2348b652fbdc770b2a27a87bf56993dff212d839556d70e7b68f5d953133624e11774b8cb81129d', '1.0'),  # noqa: E501
+        ]
+        assert cursor.execute('SELECT * from eth2_validators').fetchall() == validators_data
+        daily_stats = [
+            (42, 1707001200, '0.001'), (1232, 1707001200, '0.0005'), (5232, 1707001200, '0.0009'),
+            (42, 1706914800, '0.0201'), (1232, 1706914800, '0.0008'), (5232, 1706914800, '0.001'),
+            (42, 1706828400, '0.00075'), (1232, 1706828400, '0.00052'), (5232, 1706828400, '0.00083'),  # noqa: E501
+        ]
+        assert cursor.execute('SELECT * from eth2_daily_staking_details').fetchall() == daily_stats
+
+    db_v40.logout()
+
+    # Execute upgrade
+    db = _init_db_with_target_version(
+        target_version=41,
+        user_data_dir=user_data_dir,
+        msg_aggregator=messages_aggregator,
+        resume_from_backup=False,
+    )
+    assert messages_aggregator.consume_errors() == []
+    assert messages_aggregator.consume_warnings() == []
+    # check if all the above values have been moved
+    with db.conn.read_ctx() as cursor:
+        assert table_exists(cursor, 'key_value_cache', """CREATE TABLE key_value_cache (
+        name TEXT NOT NULL PRIMARY KEY,
+        value TEXT
+    )""") is True
+        cache_values = cursor.execute('SELECT name, value FROM key_value_cache').fetchall()
+        assert len(cache_values) == len(should_move_settings) + len(should_move_used_query_ranges)
+        for name, value in cache_values:
+            assert name not in should_not_move_settings
+            assert name not in should_not_move_used_query_ranges
+            if name in should_move_settings:
+                assert value == should_move_settings[name]
+            elif name in should_move_used_query_ranges:
+                assert value == should_move_used_query_ranges[name]
+            else:
+                pytest.fail(f'{name} should not end up in key_value_cache table')
+        db_settings = cursor.execute('SELECT name FROM settings').fetchall()
+        assert len(db_settings) == len(should_not_move_settings)
+        for name in db_settings:
+            assert name[0] not in should_move_settings
+            assert name[0] in should_not_move_settings
+        db_used_query_ranges = cursor.execute('SELECT name FROM used_query_ranges').fetchall()
+        assert len(db_used_query_ranges) == len(should_not_move_used_query_ranges)
+        for name in db_used_query_ranges:
+            assert name[0] not in should_move_used_query_ranges
+            assert name[0] in should_not_move_used_query_ranges
+        cursor.execute('SELECT COUNT(*) FROM location WHERE location=? AND seq=?', ('m', 45))
+        assert cursor.fetchone()[0] == 1
+
+        # test external credentials have been upgraded
+        assert table_exists(
+            cursor=cursor,
+            name='external_service_credentials',
+            schema="""CREATE TABLE external_service_credentials (
+            name VARCHAR[30] NOT NULL PRIMARY KEY,
+            api_key TEXT NOT NULL,
+            api_secret TEXT
+            )""") is True
+        assert cursor.execute('SELECT * FROM external_service_credentials').fetchall() == [('etherscan', 'LOL', None), ('blockscout', 'LOL2', None)]  # noqa: E501
+
+        # test if blockchain_accounts labels have been moved to address_book
+        if address_name_priority is None or address_name_priority[0] == 'private_addressbook':
+            assert cursor.execute('SELECT * FROM address_book').fetchall() == [
+                ('0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12', 'eth', 'eth1_address_book'),
+                ('0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12', 'btc', 'btc1_address_book'),
+                ('0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'eth', 'eth2_blockchain_accounts'),
+                ('0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'btc', 'btc2_blockchain_accounts'),
+            ]
+        else:
+            assert cursor.execute('SELECT * FROM address_book').fetchall() == [
+                ('0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12', 'eth', 'eth1_blockchain_accounts'),
+                ('0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'eth', 'eth2_blockchain_accounts'),
+                ('0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12', 'btc', 'btc1_blockchain_accounts'),
+                ('0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'btc', 'btc2_blockchain_accounts'),
+            ]
+        assert table_exists(
+            cursor=cursor,
+            name='blockchain_accounts',
+            schema="""CREATE TABLE IF NOT EXISTS blockchain_accounts (
+                blockchain VARCHAR[24] NOT NULL,
+                account TEXT NOT NULL,
+                PRIMARY KEY (blockchain, account)
+            );""",
+        )
+        # verify that the history_events are removed, except the one that is customized
+        # and the kraken informational event
+        assert cursor.execute('SELECT COUNT(*) FROM history_events').fetchone()[0] == 2
+        assert cursor.execute('SELECT COUNT(*) FROM evm_events_info').fetchone()[0] == 1
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM user_credentials WHERE location=?',
+            ('D',),
+        ).fetchone()[0] == 0
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM used_query_ranges WHERE name LIKE ? ESCAPE ?;',
+            (f'{Location.BITTREX!s}\\_%', '\\'),
+        ).fetchone()[0] == 0
+        assert json.loads(cursor.execute(
+            'SELECT value FROM settings WHERE name=?',
+            ('non_syncing_exchanges',),
+        ).fetchone()[0]) == [{'name': 'Kraken 1', 'location': 'kraken'}]
+
+        # verify that the new eth2 validators table and data is there
+        assert table_exists(
+            cursor=cursor,
+            name='eth2_validators',
+            schema="""CREATE TABLE IF NOT EXISTS eth2_validators (
+                identifier INTEGER NOT NULL PRIMARY KEY,
+                validator_index INTEGER UNIQUE,
+                public_key TEXT NOT NULL UNIQUE,
+                ownership_proportion TEXT NOT NULL,
+                withdrawal_address TEXT,
+                activation_timestamp INTEGER,
+                withdrawable_timestamp INTEGER
+            );""",
+        )
+        assert cursor.execute('SELECT validator_index, public_key, ownership_proportion from eth2_validators').fetchall() == validators_data  # noqa: E501
+        assert cursor.execute('SELECT * from eth2_daily_staking_details').fetchall() == daily_stats
+
+    db.logout()
+
+
+@pytest.mark.parametrize('use_clean_caching_directory', [True])
+def test_upgrade_db_41_to_42(user_data_dir, messages_aggregator):
+    """Test upgrading the DB from version 41 to version 42"""
+    _use_prepared_db(user_data_dir, 'v41_rotkehlchen.db')
+    db_v41 = _init_db_with_target_version(
+        target_version=41,
+        user_data_dir=user_data_dir,
+        msg_aggregator=messages_aggregator,
+        resume_from_backup=False,
+    )
+    with db_v41.conn.write_ctx() as cursor:
+        assert table_exists(cursor, 'zksynclite_tx_type') is False
+        assert table_exists(cursor, 'zksynclite_transactions') is False
+        assert table_exists(cursor, 'calendar') is False
+        assert table_exists(cursor, 'calendar_reminders') is False
+
+        # history events that need to be deleted because their transaction are not in the database
+        expected_events_ids = [(17987,), (17988,), (17989,)]
+        assert cursor.execute(
+            'SELECT identifier FROM history_events ORDER BY identifier',
+        ).fetchall() == expected_events_ids
+        assert cursor.execute(
+            'SELECT identifier FROM evm_events_info',
+        ).fetchall() == expected_events_ids
+        assert cursor.execute(
+            'SELECT parent_identifier FROM history_events_mappings',
+        ).fetchall() == expected_events_ids
+
+        assert cursor.execute('SELECT MAX(seq) FROM location').fetchone()[0] == 45
+        assert cursor.execute('SELECT COUNT(tx_hash) FROM balancer_events').fetchone()[0] == 2
+        assert cursor.execute('SELECT name from used_query_ranges').fetchall() == [
+            ('ETHinternaltxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('ETHtokentxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('ETHtxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('GNOSISinternaltxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('GNOSIStokentxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('GNOSIStxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('balancer_events_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('gnosisbridge_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('kraken_asset_movements_kraken',),
+            ('kraken_history_events_kraken',),
+            ('kraken_margins_kraken',),
+            ('kraken_trades_kraken',),
+            ('yearn_vaults_events_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('yearn_vaults_v2_events_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+        ]
+        assert cursor.execute(
+            'SELECT COUNT(*), version FROM yearn_vaults_events GROUP BY version',
+        ).fetchall() == [(2, 1), (3, 2)]
+        raw_list = cursor.execute(
+            'SELECT value FROM settings WHERE name=?', ('evmchains_to_skip_detection',),
+        ).fetchone()[0]
+        assert [
+            ChainID.deserialize_from_name(x) for x in json.loads(raw_list)
+        ] == [ChainID.POLYGON_POS, ChainID.GNOSIS]
+
+        # get settings and confirm manualcurrent is present before the upgrade
+        cursor.execute('SELECT value FROM settings WHERE name="current_price_oracles"')
+        oracles = json.loads(cursor.fetchone()[0])
+        assert 'manualcurrent' in oracles
+
+    # Execute upgrade
+    db = _init_db_with_target_version(
+        target_version=42,
+        user_data_dir=user_data_dir,
+        msg_aggregator=messages_aggregator,
+        resume_from_backup=False,
+    )
+    assert messages_aggregator.consume_errors() == []
+    assert messages_aggregator.consume_warnings() == []
+
+    with db.conn.read_ctx() as cursor:
+        assert table_exists(cursor, 'zksynclite_tx_type') is True
+        assert table_exists(cursor, 'zksynclite_transactions') is True
+        assert table_exists(cursor, 'calendar') is True
+        assert table_exists(cursor, 'calendar_reminders') is True
+        assert table_exists(cursor, 'balancer_events') is False
+        assert table_exists(cursor, 'yearn_vaults_events') is False
+        assert cursor.execute('SELECT name from used_query_ranges').fetchall() == [
+            ('ETHinternaltxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('ETHtokentxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('ETHtxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('GNOSISinternaltxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('GNOSIStokentxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('GNOSIStxs_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('gnosisbridge_0x7716a99194d758c8537F056825b75Dd0C8FDD89f',),
+            ('kraken_asset_movements_kraken',),
+            ('kraken_history_events_kraken',),
+            ('kraken_margins_kraken',),
+            ('kraken_trades_kraken',),
+        ]
+        assert cursor.execute('SELECT * FROM zksynclite_tx_type').fetchall() == [
+            ('A', 1), ('B', 2), ('C', 3), ('D', 4), ('E', 5), ('F', 6), ('G', 7),
+        ]
+        for new_loc in (Location.SCROLL, Location.ZKSYNC_LITE):
+            assert cursor.execute(  # Check that new locations were added
+                'SELECT location FROM location WHERE seq=?',
+                (new_loc.value,),
+            ).fetchone()[0] == new_loc.serialize_for_db()
+        raw_list = cursor.execute(
+            'SELECT value FROM settings WHERE name=?', ('evmchains_to_skip_detection',),
+        ).fetchone()[0]
+        assert [
+            SupportedBlockchain.deserialize(x) for x in json.loads(raw_list)
+        ] == [SupportedBlockchain.POLYGON_POS, SupportedBlockchain.GNOSIS]
+
+        # get current oracles and check that manualcurrent was removed and all others remain.
+        settings = db.get_settings(cursor=cursor)
+        assert CurrentPriceOracle.MANUALCURRENT not in settings.current_price_oracles
+
+        # the evm events with the exception of 17987 don't have a transaction
+        # in the db, and should have been deleted
+        assert cursor.execute('SELECT identifier FROM history_events').fetchall() == [(17987,)]
+        assert cursor.execute('SELECT identifier FROM evm_events_info').fetchall() == [(17987,)]
+        assert cursor.execute(
+            'SELECT parent_identifier FROM history_events_mappings',
+        ).fetchall() == [(17987,)]
+    db.logout()
+
+
+@pytest.mark.parametrize('use_clean_caching_directory', [True])
+def test_upgrade_db_42_to_43(user_data_dir, messages_aggregator, data_dir):
+    """Test upgrading the DB from version 42 to version 43"""
+    _use_prepared_db(user_data_dir, 'v42_rotkehlchen.db')
+    db_v42 = _init_db_with_target_version(
+        target_version=42,
+        user_data_dir=user_data_dir,
+        msg_aggregator=messages_aggregator,
+        resume_from_backup=False,
+    )
+    test_address = '0xc37b40ABdB939635068d3c5f13E7faF686F03B65'
+    with db_v42.conn.read_ctx() as cursor:
+        nfts = cursor.execute('SELECT name FROM nfts').fetchall()
+        assert nfts == [('yabir.eth',)]
+        assert cursor.execute(
+            'SELECT location from history_events WHERE location_label=?',
+            (test_address,),
+        ).fetchall() == [(Location.ZKSYNC_LITE.serialize_for_db(),), (Location.POLYGON_POS.serialize_for_db(),)]  # noqa: E501
+        # check hop-protocol counterparty is there
+        assert cursor.execute('SELECT COUNT(*) from evm_events_info WHERE counterparty=?', ('hop-protocol',)).fetchone()[0] == 1  # noqa: E501
+        assert cursor.execute('SELECT COUNT(*) from evm_events_info WHERE counterparty=?', ('hop',)).fetchone()[0] == 0  # noqa: E501
+        assert cursor.execute(
+            'INSERT INTO user_credentials VALUES (?, ?, ?, ?, ?)',
+            ('coinbasepro', Location.COINBASEPRO.serialize_for_db(), 'api_key', 'api_secret', 'passphrase'),  # noqa: E501
+        ).rowcount == 1
+
+    # create csv files that will be deleted in the db upgrade and a parquet one to keep
+    airdrops_dir = data_dir / APPDIR_NAME / AIRDROPSDIR_NAME
+    airdrops_dir.mkdir(parents=True)
+    uniswap_path = airdrops_dir / 'uniswap.csv'
+    zk_path = airdrops_dir / 'zk.csv'
+    zk_parquet_path = airdrops_dir / 'zk.parquet'
+    uniswap_path.touch()
+    zk_path.touch()
+    zk_parquet_path.touch()
+    assert uniswap_path.exists() is True
+    assert zk_path.exists() is True
+
+    # Execute upgrade
+    db = _init_db_with_target_version(
+        target_version=43,
+        user_data_dir=user_data_dir,
+        msg_aggregator=messages_aggregator,
+        resume_from_backup=False,
+    )
+    assert messages_aggregator.consume_errors() == []
+    assert messages_aggregator.consume_warnings() == []
+
+    with db.conn.read_ctx() as cursor:
+        nfts = cursor.execute('SELECT name, usd_price FROM nfts').fetchall()
+        assert nfts == [('yabir.eth', 0)]
+        # assert hop-protocol counterparty got renamed
+        assert cursor.execute(
+            'SELECT location from history_events WHERE location_label=?',
+            (test_address,),
+        ).fetchall() == [(Location.ZKSYNC_LITE.serialize_for_db(),)]
+        assert cursor.execute('SELECT COUNT(*) from evm_events_info WHERE counterparty=?', ('hop-protocol',)).fetchone()[0] == 0  # noqa: E501
+        assert cursor.execute('SELECT COUNT(*) from evm_events_info WHERE counterparty=?', ('hop',)).fetchone()[0] == 1  # noqa: E501
+
+        cursor.execute('SELECT seq FROM location WHERE location=?', 'p')
+        assert cursor.fetchone() == (Location.HTX.value,)
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM user_credentials WHERE location=?',
+            (Location.COINBASEPRO.serialize_for_db(),),
+        ).fetchone()[0] == 0
+
+    assert uniswap_path.exists() is False
+    assert zk_path.exists() is False
+    assert zk_parquet_path.exists() is True
+    db.logout()
+
+
+@pytest.mark.parametrize('use_clean_caching_directory', [True])
+def test_upgrade_db_43_to_44(user_data_dir, messages_aggregator):
+    """Test upgrading the DB from version 43 to version 44"""
+    _use_prepared_db(user_data_dir, 'v43_rotkehlchen.db')
+    db_v43 = _init_db_with_target_version(
+        target_version=43,
+        user_data_dir=user_data_dir,
+        msg_aggregator=messages_aggregator,
+        resume_from_backup=False,
+    )
+    bad_address, tether_address = '0xc37b40ABdB939635068d3c5f13E7faF686F03B65', '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'  # noqa: E501
+    with db_v43.conn.read_ctx() as cursor:
+        assert cursor.execute(  # we have one entry with null values and two with the details
+            'SELECT identifier, last_price, last_price_asset FROM nfts',
+        ).fetchall() == [
+            ('_nft_0xfd9d8036f899ed5a9fd8cac7968e5f24d3db2a64_1_0xc37b40ABdB939635068d3c5f13E7faF686F03B65', '0', 'ETH'),  # noqa: E501
+            ('_nft_0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85_26612040215479394739615825115912800930061094786769410446114278812336794170041', '0.00059', 'ETH'),  # noqa: E501
+            ('_nft_0x88997988a6a5aaf29ba973d298d276fe75fb69ab_1_0xc37b40ABdB939635068d3c5f13E7faF686F03B65', None, None),  # noqa: E501
+        ]
+        assert set(cursor.execute('SELECT object_reference, tag_name FROM tag_mappings').fetchall()) == {  # noqa: E501
+            ('ETH0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'safe'),
+            ('OPTIMISM0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'safe'),
+            ('GNOSIS0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'safe'),
+            ('5', 'staked'),
+            ('13', 'beefy'),
+            ('ARBITRUM_ONE0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'safe'),
+            ('GNOSIS0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'beefy'),
+        }
+        old_receipt_logs = cursor.execute('SELECT * from evmtx_receipt_logs').fetchall()
+        assert set(cursor.execute(
+            'SELECT * FROM address_book WHERE address IN (?, ?)',
+            (bad_address, tether_address),
+        ).fetchall()) == {
+            (tether_address, None, 'Black Tether'),
+            (bad_address, None, 'yabirgb.eth'),
+            (bad_address, None, 'yabir.eth'),
+        }
+
+    with db_v43.conn.write_ctx() as write_cursor:
+        write_cursor.execute(
+            'INSERT INTO settings(name, value) VALUES(?, ?)',
+            ('historical_price_oracles', '["manual", "cryptocompare", "coingecko", "defillama"]'),
+        )
+        db_v43.update_used_query_range(
+            write_cursor=write_cursor,
+            name='zksynclitetxs_0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12',
+            start_ts=Timestamp(0),
+            end_ts=ts_now(),
+        )
+
+    # Execute upgrade
+    db = _init_db_with_target_version(
+        target_version=44,
+        user_data_dir=user_data_dir,
+        msg_aggregator=messages_aggregator,
+        resume_from_backup=False,
+    )
+    assert messages_aggregator.consume_errors() == []
+    assert messages_aggregator.consume_warnings() == []
+
+    with db.conn.read_ctx() as cursor:
+        assert cursor.execute(  # we have one entry with null values and two with the details
+            'SELECT identifier, last_price, last_price_asset FROM nfts',
+        ).fetchall() == [
+            ('_nft_0xfd9d8036F899ed5a9fD8cac7968E5F24D3db2A64_1_0xc37b40ABdB939635068d3c5f13E7faF686F03B65', '0', 'ETH'),  # noqa: E501
+            ('_nft_0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85_26612040215479394739615825115912800930061094786769410446114278812336794170041', '0.00059', 'ETH'),  # noqa: E501
+            ('_nft_0x88997988a6A5aAF29BA973d298D276FE75fb69ab_1_0xc37b40ABdB939635068d3c5f13E7faF686F03B65', '0', 'ETH'),  # noqa: E501
+        ]
+        new_receipt_logs = cursor.execute('SELECT * from evmtx_receipt_logs').fetchall()
+        assert new_receipt_logs == [(x[0], x[1], x[2], x[3], x[4]) for x in old_receipt_logs]
+        assert set(cursor.execute('SELECT object_reference, tag_name FROM tag_mappings').fetchall()) == {  # noqa: E501
+            ('0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'safe'),
+            ('0xc37b40ABdB939635068d3c5f13E7faF686F03B65', 'beefy'),
+            ('5', 'staked'),
+            ('13', 'beefy'),
+        }
+        # check that addressbook addresses got correctly migrated
+        assert set(cursor.execute(
+            'SELECT * FROM address_book WHERE address IN (?, ?)',
+            (bad_address, tether_address),
+        ).fetchall()) == {
+            (tether_address, ANY_BLOCKCHAIN_ADDRESSBOOK_VALUE, 'Black Tether'),
+            (bad_address, ANY_BLOCKCHAIN_ADDRESSBOOK_VALUE, 'yabirgb.eth'),
+        }
+        assert cursor.execute(
+            'SELECT value FROM settings WHERE name="historical_price_oracles"',
+        ).fetchone()[0] == '["manual", "cryptocompare", "coingecko", "defillama", "uniswapv3", "uniswapv2"]'  # noqa: E501
+        assert cursor.execute(
+            'SELECT * FROM used_query_ranges WHERE name LIKE "zksynclitetxs_%"',
+        ).fetchone() is None
+
+    db.logout()
 
 
 def test_latest_upgrade_correctness(user_data_dir):
@@ -1970,10 +2560,10 @@ def test_latest_upgrade_correctness(user_data_dir):
     this is just to reminds us not to forget to add create table statements.
     """
     msg_aggregator = MessagesAggregator()
-    base_database = 'v39_rotkehlchen.db'
+    base_database = 'v43_rotkehlchen.db'
     _use_prepared_db(user_data_dir, base_database)
     last_db = _init_db_with_target_version(
-        target_version=39,
+        target_version=43,
         user_data_dir=user_data_dir,
         msg_aggregator=msg_aggregator,
         resume_from_backup=False,
@@ -1988,7 +2578,7 @@ def test_latest_upgrade_correctness(user_data_dir):
 
     # Execute upgrade
     db = _init_db_with_target_version(
-        target_version=40,
+        target_version=44,
         user_data_dir=user_data_dir,
         msg_aggregator=msg_aggregator,
         resume_from_backup=False,
@@ -2010,7 +2600,8 @@ def test_latest_upgrade_correctness(user_data_dir):
     result = cursor.execute('SELECT name FROM sqlite_master WHERE type="view"')
     views_after_creation = {x[0] for x in result}
 
-    removed_tables = {'ledger_action_type', 'ledger_actions'}
+    assert cursor.execute('SELECT value FROM settings WHERE name="version"').fetchone()[0] == '44'
+    removed_tables = set()
     removed_views = set()
     missing_tables = tables_before - tables_after_upgrade
     missing_views = views_before - views_after_upgrade
@@ -2019,14 +2610,10 @@ def test_latest_upgrade_correctness(user_data_dir):
     assert tables_after_creation - tables_after_upgrade == set()
     assert views_after_creation - views_after_upgrade == set()
     new_tables = tables_after_upgrade - tables_before
-    assert new_tables == {
-        'skipped_external_events',
-        'accounting_rules',
-        'linked_rules_properties',
-        'unresolved_remote_conflicts',
-    }
+    assert new_tables == {'cowswap_orders', 'gnosispay_data'}
     new_views = views_after_upgrade - views_before
     assert new_views == set()
+    db.logout()
 
 
 def test_steps_counted_properly_in_upgrades(user_data_dir):
@@ -2058,6 +2645,7 @@ def test_steps_counted_properly_in_upgrades(user_data_dir):
         # Check that the db version in progress handler is correct
         assert progress_handler.current_version == upgrade.from_version + 1
         assert progress_handler.start_version == MIN_SUPPORTED_USER_DB_VERSION + 1
+    last_db.logout()
 
 
 def test_db_newer_than_software_raises_error(data_dir, username, sql_vm_instructions_cb):
@@ -2077,10 +2665,16 @@ def test_db_newer_than_software_raises_error(data_dir, username, sql_vm_instruct
     data.db.conn.commit()
 
     # now relogin and check that an error is thrown
+    data.logout()
     del data
     data = DataHandler(data_dir, msg_aggregator, sql_vm_instructions_cb)
     with pytest.raises(DBUpgradeError):
         data.unlock(username, '123', create_new=False, resume_from_backup=False)
+    DBConnection(  # close the db connection
+        path=data_dir / USERDB_NAME,
+        connection_type=DBConnectionType.USER,
+        sql_vm_instructions_cb=DEFAULT_SQL_VM_INSTRUCTIONS_CB,
+    ).close()
 
 
 def test_upgrades_list_is_sane():
@@ -2108,51 +2702,85 @@ def test_old_versions_raise_error(user_data_dir):  # pylint: disable=unused-argu
     assert 'Your account was last opened by a very old version of rotki' in str(upgrade_exception)
 
 
+@pytest.mark.parametrize('use_clean_caching_directory', [True])
 def test_unfinished_upgrades(user_data_dir):
-    _use_prepared_db(user_data_dir, 'v33_rotkehlchen.db')
     msg_aggregator = MessagesAggregator()
-    db = _init_db_with_target_version(
-        target_version=33,
-        user_data_dir=user_data_dir,
-        msg_aggregator=msg_aggregator,
-        resume_from_backup=False,
-    )
-    with db.user_write() as write_cursor:
-        db.set_setting(  # Pretend that an upgrade was started
-            write_cursor=write_cursor,
-            name='ongoing_upgrade_from_version',
-            value=33,
-        )
-    db.logout()
-    # There are no backups, so it is supposed to raise an error
-    with pytest.raises(DBUpgradeError):
-        _init_db_with_target_version(
-            target_version=34,
+    for backup_version in (33, 31):  # try both with correct and wrong backup
+        _use_prepared_db(user_data_dir, 'v33_rotkehlchen.db')
+        db = _init_db_with_target_version(
+            target_version=33,
             user_data_dir=user_data_dir,
             msg_aggregator=msg_aggregator,
-            resume_from_backup=True,
+            resume_from_backup=False,
         )
+        with db.user_write() as write_cursor:
+            db.set_setting(  # Pretend that an upgrade was started
+                write_cursor=write_cursor,
+                name='ongoing_upgrade_from_version',
+                value=33,
+            )
+        db.logout()
+        # Without resume_from_backup there is a permission error
+        with pytest.raises(RotkehlchenPermissionError) as exc_info:
+            _init_db_with_target_version(
+                target_version=34,
+                user_data_dir=user_data_dir,
+                msg_aggregator=msg_aggregator,
+                resume_from_backup=False,
+            )
+        assert 'The encrypted database is in a semi upgraded state' in str(exc_info.value)
 
-    # Add a backup
-    backup_path = user_data_dir / f'{ts_now()}_rotkehlchen_db_v33.backup'
-    shutil.copy(Path(__file__).parent.parent / 'data' / 'v33_rotkehlchen.db', backup_path)
-    backup_connection = DBConnection(
-        path=str(backup_path),
-        connection_type=DBConnectionType.USER,
-        sql_vm_instructions_cb=0,
-    )
-    backup_connection.executescript('PRAGMA key="123"')  # unlock
-    with backup_connection.write_ctx() as write_cursor:
-        write_cursor.execute('INSERT INTO settings VALUES("is_backup", "Yes")')  # mark as a backup  # noqa: E501
+        # There are no backups, so it is supposed to raise an error
+        with pytest.raises(DBUpgradeError) as exc_info:
+            _init_db_with_target_version(
+                target_version=34,
+                user_data_dir=user_data_dir,
+                msg_aggregator=msg_aggregator,
+                resume_from_backup=True,
+            )
+        assert 'Your encrypted database is in a half-upgraded state at v33 and' in str(exc_info.value)  # noqa: E501
 
-    db = _init_db_with_target_version(  # Now the backup should be used
-        target_version=34,
-        user_data_dir=user_data_dir,
-        msg_aggregator=msg_aggregator,
-        resume_from_backup=True,
-    )
-    # Check that there is no setting left
-    with db.conn.read_ctx() as cursor:
-        assert db.get_setting(cursor, 'ongoing_upgrade_from_version') is None
-        # Check that the backup was used
-        assert cursor.execute('SELECT value FROM settings WHERE name="is_backup"').fetchone()[0] == 'Yes'  # noqa: E501
+        # Add multiple backups
+        for write_version in (backup_version, backup_version - 1):
+            backup_path = user_data_dir / f'{ts_now()}_rotkehlchen_db_v{write_version}.backup'
+            shutil.copy(Path(__file__).parent.parent / 'data' / 'v33_rotkehlchen.db', backup_path)
+            backup_connection = DBConnection(
+                path=str(backup_path),
+                connection_type=DBConnectionType.USER,
+                sql_vm_instructions_cb=0,
+            )
+            backup_connection.executescript('PRAGMA key="123"')  # unlock
+            with backup_connection.write_ctx() as write_cursor:
+                write_cursor.execute('INSERT INTO settings VALUES(?, ?)', ('is_backup', write_version))  # mark as a backup  # noqa: E501
+            backup_connection.close()
+
+            if backup_version == 33:
+                db = _init_db_with_target_version(  # Now the backup should be used
+                    target_version=34,
+                    user_data_dir=user_data_dir,
+                    msg_aggregator=msg_aggregator,
+                    resume_from_backup=True,
+                )
+            else:  # backups exist, but not matching the DB
+                with pytest.raises(DBUpgradeError) as exc_info:
+                    _init_db_with_target_version(
+                        target_version=34,
+                        user_data_dir=user_data_dir,
+                        msg_aggregator=msg_aggregator,
+                        resume_from_backup=True,
+                    )
+                assert 'Your encrypted database is in a half-upgraded state at v33 and' in str(exc_info.value)  # noqa: E501
+                break  # and end the test
+
+        else:  # Check that there is no setting left
+            with db.conn.read_ctx() as cursor:
+                assert db.get_setting(cursor, 'ongoing_upgrade_from_version') is None
+                # Check that the backup was used
+                assert cursor.execute('SELECT value FROM settings WHERE name="is_backup"').fetchone()[0] == '33'  # noqa: E501
+
+            for f in os.listdir(user_data_dir):
+                if f.endswith('backup'):
+                    with suppress(PermissionError):  # in windows this can happen
+                        (Path(user_data_dir) / f).unlink()
+
+            db.logout()

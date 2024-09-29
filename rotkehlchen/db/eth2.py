@@ -3,16 +3,24 @@ from typing import TYPE_CHECKING, Literal
 
 from pysqlcipher3 import dbapi2 as sqlcipher
 
-from rotkehlchen.chain.ethereum.modules.eth2.structures import Eth2Validator, ValidatorDailyStats
-from rotkehlchen.chain.ethereum.modules.eth2.utils import form_withdrawal_notes, timestamp_to_epoch
+from rotkehlchen.chain.ethereum.modules.eth2.structures import (
+    ValidatorDailyStats,
+    ValidatorDetails,
+    ValidatorDetailsWithStatus,
+)
+from rotkehlchen.chain.ethereum.modules.eth2.utils import form_withdrawal_notes
 from rotkehlchen.constants import ONE, ZERO
-from rotkehlchen.constants.timing import DAY_IN_SECONDS
-from rotkehlchen.db.filtering import ETH_STAKING_EVENT_JOIN, EthStakingEventFilterQuery
+from rotkehlchen.constants.timing import DAY_IN_SECONDS, HOUR_IN_SECONDS
+from rotkehlchen.db.filtering import (
+    ETH_STAKING_EVENT_JOIN,
+    EthStakingEventFilterQuery,
+    EthWithdrawalFilterQuery,
+)
 from rotkehlchen.errors.misc import InputError
 from rotkehlchen.fval import FVal
 from rotkehlchen.history.events.structures.base import HistoryBaseEntryType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
-from rotkehlchen.types import Timestamp
+from rotkehlchen.types import ChecksumEvmAddress, Eth2PubKey, Timestamp
 from rotkehlchen.utils.misc import ts_ms_to_sec
 
 if TYPE_CHECKING:
@@ -49,10 +57,11 @@ class DBEth2:
         with self.db.conn.read_ctx() as cursor:
             stats_data = cursor.execute(
                 query_str,
-                # 2 days since stats page only appears once day is over. So if today is
-                # 27/10 19:46 the last full day it has is 26/10 00:00, which is more than a day
-                # but less than 2
-                (up_to_ts, DAY_IN_SECONDS * 2 + 1),
+                # stats page entry only appears once day is over and some times it takes
+                # a longer time to update since it counts beacon chain days.
+                # So we will put two days and more than half to be sure we don't
+                # query too often
+                (up_to_ts, DAY_IN_SECONDS * 2 + HOUR_IN_SECONDS * 18),
             ).fetchall()
             exited_data = {}
             cursor.execute(
@@ -99,14 +108,14 @@ class DBEth2:
 
         Returns a tuple with the following in order:
          - A list of the daily stats
-         - How many are the total entries found for the filter
+         - How many are the total entries found for the filter (ignoring pagination)
          - Sum of ETH gained/lost for the filter
         """
         stats = self.get_validator_daily_stats(cursor, filter_query=filter_query)
         query, bindings = filter_query.prepare(with_pagination=False)
         # TODO: A weakness of this query is that it does not take into account the
         # ownership proportion of the validator in the PnL here
-        query = 'SELECT COUNT(*), SUM(pnl) from eth2_daily_staking_details ' + query
+        query = f'SELECT COUNT(*), SUM(pnl) FROM (SELECT * FROM  eth2_daily_staking_details {query})'  # noqa: E501
         count, eth_sum_str = cursor.execute(query, bindings).fetchone()
         return stats, count, FVal(eth_sum_str) if eth_sum_str is not None else ZERO
 
@@ -121,70 +130,105 @@ class DBEth2:
         cursor.execute(query, bindings)
         daily_stats = [ValidatorDailyStats.deserialize_from_db(x) for x in cursor]
         # Take into account the proportion of the validator owned
-        validators_ownership = {
-            validator.index: validator.ownership_proportion
-            for validator in self.get_validators(cursor)
-        }
+        validators_ownership = self.get_index_to_ownership(cursor)
         for daily_stat in daily_stats:
             owned_proportion = validators_ownership.get(daily_stat.validator_index, ONE)
             if owned_proportion != ONE:
-                daily_stat.pnl = daily_stat.pnl * owned_proportion
+                daily_stat.pnl *= owned_proportion
         return daily_stats
 
     def validator_exists(
             self,
             cursor: 'DBCursor',
             field: Literal['validator_index', 'public_key'],
-            arg: int | str,
+            arg: int | Eth2PubKey,
     ) -> bool:
         cursor.execute(f'SELECT COUNT(*) from eth2_validators WHERE {field}=?', (arg,))
         return cursor.fetchone()[0] == 1  # count always returns
 
-    def get_validators(self, cursor: 'DBCursor') -> list[Eth2Validator]:
-        cursor.execute('SELECT * from eth2_validators;')
-        return [Eth2Validator.deserialize_from_db(x) for x in cursor]
+    def get_pubkey_to_ownership(self, cursor: 'DBCursor') -> dict[Eth2PubKey, FVal]:
+        return {x[0]: FVal(x[1]) for x in cursor.execute('SELECT public_key, ownership_proportion FROM eth2_validators')}  # noqa: E501
+
+    def get_index_to_ownership(self, cursor: 'DBCursor') -> dict[int, FVal]:
+        return {x[0]: FVal(x[1]) for x in cursor.execute('SELECT validator_index, ownership_proportion FROM eth2_validators WHERE validator_index IS NOT NULL')}  # noqa: E501
+
+    def get_validators(self, cursor: 'DBCursor') -> list[ValidatorDetails]:
+        cursor.execute(
+            'SELECT validator_index, public_key, ownership_proportion, withdrawal_address, '
+            'activation_timestamp, withdrawable_timestamp, exited_timestamp FROM eth2_validators;',
+        )
+        return [ValidatorDetails.deserialize_from_db(x) for x in cursor]
+
+    def get_validators_with_status(
+            self,
+            cursor: 'DBCursor',
+            validator_indices: set[int] | None,
+    ) -> list[ValidatorDetailsWithStatus]:
+        result: list[ValidatorDetailsWithStatus] = []
+        exited_indices = self.get_exited_validator_indices(cursor)
+        cursor.execute(
+            'SELECT validator_index, public_key, ownership_proportion, withdrawal_address, '
+            'activation_timestamp, withdrawable_timestamp, exited_timestamp FROM eth2_validators;',
+        )
+        for entry in cursor:
+            validator = ValidatorDetailsWithStatus.deserialize_from_db(entry)
+            validator.determine_status(exited_indices)
+            result.append(validator)
+
+        if validator_indices is not None:
+            result = [x for x in result if x.validator_index is not None and x.validator_index in validator_indices]  # noqa: E501
+
+        return result
 
     def get_active_validator_indices(self, cursor: 'DBCursor') -> set[int]:
-        """Returns the indices of the tracked validators that we know have not exited
-
-        Does so by using processed events, so will only return a list as up to date
-        as the events we got
-        """
+        """Returns the indices of the tracked validators that we know have not exited"""
         cursor.execute(
-            'SELECT EV.validator_index FROM eth2_validators EV LEFT JOIN '
-            'eth_staking_events_info SE ON EV.validator_index = SE.validator_index '
-            'WHERE SE.validator_index IS NULL '
-            'UNION '
-            'SELECT DISTINCT EV.validator_index FROM eth2_validators EV INNER JOIN '
-            'eth_staking_events_info SE ON EV.validator_index = SE.validator_index '
-            'WHERE EV.validator_index NOT IN ('
-            'SELECT validator_index from eth_staking_events_info WHERE is_exit_or_blocknumber=1)',
+            'SELECT validator_index from eth2_validators WHERE exited_timestamp IS NULL',
         )
         return {x[0] for x in cursor}
 
     def get_exited_validator_indices(self, cursor: 'DBCursor') -> set[int]:
-        """Returns the indices of the tracked validators that we know have exited
-
-        Does so by using processed events, so will only return a list as up to date
-        as the events we got
-        """
+        """Returns the indices of the tracked validators that we know have exite"""
         cursor.execute(
-            'SELECT validator_index FROM eth_staking_events_info WHERE is_exit_or_blocknumber=1',
-        )  # checking against literal 1 is safe since block 1 was not mined during PoS
+            'SELECT validator_index FROM eth2_validators WHERE exited_timestamp IS NOT NULL',
+        )
         return {x[0] for x in cursor}
 
-    def set_validator_exit(self, write_cursor: 'DBCursor', index: int, exit_epoch: int) -> None:
-        """If the validator has withdrawal events, find last one and mark as exit if after exit epoch"""  # noqa: E501
+    def get_associated_with_addresses_validator_indices(
+            self,
+            cursor: 'DBCursor',
+            addresses: list[ChecksumEvmAddress],
+    ) -> set[int]:
+        """Returns indices of validators that are associated with the given addresses.
+
+        Association means either it's a withdrawal address for any validator or
+        has been used as a fee recipient for a validator or deposited to a validator.
+        """
+        questionmarks = '?' * len(addresses)
+        cursor.execute(
+            f'SELECT S.validator_index FROM eth_staking_events_info S LEFT JOIN '
+            f'history_events H on S.identifier=H.identifier WHERE H.location_label IN '
+            f'({",".join(questionmarks)})', addresses,
+        )
+        return {x[0] for x in cursor}
+
+    def set_validator_exit(
+            self,
+            write_cursor: 'DBCursor',
+            index: int,
+            withdrawable_timestamp: Timestamp,
+    ) -> None:
+        """If the validator has withdrawal events, find last one and mark as exit if after withdrawable ts"""  # noqa: E501
         write_cursor.execute(
             'SELECT HE.identifier, HE.timestamp, HE.amount FROM history_events HE LEFT JOIN '
             'eth_staking_events_info SE ON SE.identifier = HE.identifier '
-            'WHERE SE.validator_index=? ORDER BY HE.timestamp DESC LIMIT 1',
-            (index,),
+            'WHERE SE.validator_index=? AND HE.entry_type=? ORDER BY HE.timestamp DESC LIMIT 1',
+            (index, HistoryBaseEntryType.ETH_WITHDRAWAL_EVENT.value),
         )
         if (latest_result := write_cursor.fetchone()) is None:
             return  # no event found so nothing to do
 
-        if timestamp_to_epoch(ts_ms_to_sec(latest_result[1])) > exit_epoch:
+        if (exit_ts := ts_ms_to_sec(latest_result[1])) >= withdrawable_timestamp:
             write_cursor.execute(
                 'UPDATE eth_staking_events_info SET is_exit_or_blocknumber=? WHERE identifier=?',
                 (1, latest_result[0]),
@@ -193,29 +237,71 @@ class DBEth2:
                 'UPDATE history_events SET notes=? WHERE identifier=?',
                 (form_withdrawal_notes(is_exit=True, validator_index=index, amount=latest_result[2]), latest_result[0]),  # noqa: E501
             )
+            write_cursor.execute(
+                'UPDATE eth2_validators SET exited_timestamp=? WHERE validator_index=?',
+                (exit_ts, index),
+            )
 
-    def add_validators(self, write_cursor: 'DBCursor', validators: list[Eth2Validator]) -> None:
-        write_cursor.executemany(
-            'INSERT OR IGNORE INTO '
-            'eth2_validators(validator_index, public_key, ownership_proportion) VALUES(?, ?, ?)',
-            [x.serialize_for_db() for x in validators],
+    def add_or_update_validators_except_ownership(
+            self,
+            write_cursor: 'DBCursor',
+            validators: list[ValidatorDetails],
+    ) -> None:
+        """Adds or update validator data but keeps the ownership already in the DB"""
+        self.add_or_update_validators(
+            write_cursor=write_cursor,
+            validators=validators,
+            updatable_attributes=('validator_index', 'withdrawal_address', 'activation_timestamp', 'withdrawable_timestamp'),  # noqa: E501
         )
 
-    def edit_validator(self, validator_index: int, ownership_proportion: FVal) -> None:
+    def add_or_update_validators(
+            self,
+            write_cursor: 'DBCursor',
+            validators: list[ValidatorDetails],
+            updatable_attributes: tuple[str, ...] = ('validator_index', 'ownership_proportion', 'withdrawal_address', 'activation_timestamp', 'withdrawable_timestamp', 'exited_timestamp'),  # noqa: E501
+    ) -> None:
+        """Adds or updates validator data
+
+        This used to do an INSERT OR REPLACE with an executemany. While that approach
+        was simpler and "worked" it also killed all foreign key relations and since
+        at the time of writing the daily stats have a foreign key relation to this table
+        all the daily stats were deleted.
+        """
+        for validator in validators:
+            result = write_cursor.execute(
+                'SELECT validator_index, public_key, ownership_proportion, withdrawal_address, '
+                'activation_timestamp, withdrawable_timestamp, exited_timestamp '
+                'FROM eth2_validators WHERE public_key=?', (validator.public_key,),
+            ).fetchone()
+            if result is not None:  # update case
+                db_validator = ValidatorDetails.deserialize_from_db(result)
+                for attr in updatable_attributes:
+                    if getattr(db_validator, attr) != (new_value := getattr(validator, attr)):
+                        write_cursor.execute(
+                            f'UPDATE eth2_validators SET {attr}=? WHERE public_key=?',
+                            (new_value, validator.public_key),
+                        )
+            else:  # insertion case
+                write_cursor.execute(
+                    'INSERT INTO '
+                    'eth2_validators(validator_index, public_key, ownership_proportion, withdrawal_address, activation_timestamp, withdrawable_timestamp, exited_timestamp) VALUES(?, ?, ?, ?, ?, ?, ?)',  # noqa: E501
+                    validator.serialize_for_db(),
+                )
+
+    def edit_validator_ownership(self, write_cursor: 'DBCursor', validator_index: int, ownership_proportion: FVal) -> None:  # noqa: E501
         """Edits the ownership proportion for a validator identified by its index.
         May raise:
         - InputError if we try to edit a non existing validator.
         """
-        with self.db.user_write() as cursor:
-            cursor.execute(
-                'UPDATE eth2_validators SET ownership_proportion=? WHERE validator_index = ?',
-                (str(ownership_proportion), validator_index),
+        write_cursor.execute(
+            'UPDATE eth2_validators SET ownership_proportion=? WHERE validator_index = ?',
+            (str(ownership_proportion), validator_index),
+        )
+        if write_cursor.rowcount == 0:
+            raise InputError(
+                f'Tried to edit validator with index {validator_index} '
+                f'that is not in the database',
             )
-            if cursor.rowcount == 0:
-                raise InputError(
-                    f'Tried to edit validator with index {validator_index} '
-                    f'that is not in the database',
-                )
 
     def delete_validators(self, validator_indices: list[int]) -> None:
         """Deletes the given validators from the DB. Due to marshmallow here at least one
@@ -253,25 +339,43 @@ class DBEth2:
     @staticmethod
     def _validator_stats_process_queries(
             cursor: 'DBCursor',
+            amount_querystr: str,
             filter_query: EthStakingEventFilterQuery,
-    ) -> FVal:
-        """Execute DB query and extract numerical value after using filter_query"""
-        base_query = 'SELECT SUM(CAST(amount AS REAL)) ' + ETH_STAKING_EVENT_JOIN
-        query, bindings = filter_query.prepare(with_pagination=False)
-        cursor.execute(base_query + query, bindings)
-        if (amount := cursor.fetchone()[0]) is not None:
-            return FVal(amount)
+    ) -> dict[int, FVal]:
+        """Execute DB query and extract numerical value per validator after using filter_query
 
-        return ZERO
+        Return a dict of validator index to sum of amounts per validator in the filter
+        """
+        base_query = f'SELECT validator_index, {amount_querystr} ' + ETH_STAKING_EVENT_JOIN
+        query, bindings = filter_query.prepare(with_pagination=False, with_order=False)
+        cursor.execute(base_query + query + ' GROUP BY eth_staking_events_info.validator_index', bindings)  # noqa: E501
+
+        return {entry[0]: FVal(entry[1]) for entry in cursor}
 
     def get_validators_profit(
             self,
-            withdrawals_filter_query: EthStakingEventFilterQuery,
+            cursor: 'DBCursor',
+            withdrawals_filter_query: EthWithdrawalFilterQuery,
+            exits_filter_query: EthWithdrawalFilterQuery,
             execution_filter_query: EthStakingEventFilterQuery,
-    ) -> tuple[FVal, FVal]:
-        """Query profit as sum of withdrawn ETH and rewards for block production and mev"""
-        with self.db.conn.read_ctx() as cursor:
-            withdrawals_amount = self._validator_stats_process_queries(cursor=cursor, filter_query=withdrawals_filter_query)  # noqa: E501
-            execution_rewards_amount = self._validator_stats_process_queries(cursor=cursor, filter_query=execution_filter_query)  # noqa: E501
+    ) -> tuple[dict[int, FVal], dict[int, FVal], dict[int, FVal]]:
+        """Query withdrawals, exits, EL rewards amounts for the given filter.
 
-        return withdrawals_amount, execution_rewards_amount
+        Returns each of the different amount sums for the period per validator
+        """
+        withdrawals_amounts = self._validator_stats_process_queries(
+            cursor=cursor,
+            amount_querystr='SUM(CAST(amount AS REAL))',
+            filter_query=withdrawals_filter_query,
+        )
+        exits_pnl = self._validator_stats_process_queries(
+            cursor=cursor,
+            amount_querystr='CAST(amount AS REAL) - 32',
+            filter_query=exits_filter_query,
+        )
+        execution_rewards_amounts = self._validator_stats_process_queries(
+            cursor=cursor,
+            amount_querystr='SUM(CAST(amount AS REAL))',
+            filter_query=execution_filter_query,
+        )
+        return withdrawals_amounts, exits_pnl, execution_rewards_amounts

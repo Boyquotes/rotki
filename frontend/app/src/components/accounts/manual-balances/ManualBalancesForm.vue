@@ -1,195 +1,94 @@
 <script setup lang="ts">
 import { helpers, required } from '@vuelidate/validators';
-import { TRADE_LOCATION_EXTERNAL } from '@/data/defaults';
-import { type TradeLocation } from '@/types/history/trade/location';
-import { type ManualBalance } from '@/types/manual-balances';
+import useVuelidate from '@vuelidate/core';
 import { toMessages } from '@/utils/validation';
-import { BalanceType } from '@/types/balances';
 import ManualBalancesPriceForm from '@/components/accounts/manual-balances/ManualBalancesPriceForm.vue';
+import type { ManualBalance, RawManualBalance } from '@/types/manual-balances';
+import type { ValidationErrors } from '@/types/api/errors';
 
-const props = withDefaults(
-  defineProps<{
-    edit?: ManualBalance | null;
-    context: BalanceType;
-  }>(),
-  {
-    edit: null
-  }
-);
+const props = defineProps<{
+  modelValue: RawManualBalance | ManualBalance;
+  submitting: boolean;
+}>();
 
 const emit = defineEmits<{
-  (e: 'clear'): void;
+  (e: 'update:model-value', value: RawManualBalance | ManualBalance): void;
 }>();
 
 const { t } = useI18n();
 
-const { edit, context } = toRefs(props);
+const priceForm = ref<InstanceType<typeof ManualBalancesPriceForm>>();
 
-const errors: Ref<Record<string, string[]>> = ref({});
+const errors = defineModel<ValidationErrors>('errorMessages', { required: true });
+const asset = useSimplePropVModel(props, 'asset', emit);
+const label = useSimplePropVModel(props, 'label', emit);
+const balanceType = useSimplePropVModel(props, 'balanceType', emit);
+const location = useSimplePropVModel(props, 'location', emit);
 
-const id = ref<number | null>(null);
-const asset = ref<string>('');
-const label = ref<string>('');
-const amount = ref<string>('');
-const tags: Ref<string[]> = ref([]);
-const location: Ref<TradeLocation> = ref(TRADE_LOCATION_EXTERNAL);
-const balanceType: Ref<BalanceType> = ref(BalanceType.ASSET);
-const form = ref<any>(null);
-const priceForm: Ref<InstanceType<typeof ManualBalancesPriceForm> | null> =
-  ref(null);
-
-const reset = () => {
-  get(form)?.reset();
-  set(balanceType, get(context));
-  set(errors, {});
-};
-
-const clear = () => {
-  emit('clear');
-  reset();
-};
-
-const setBalance = (balance: ManualBalance) => {
-  set(id, balance.id);
-  set(asset, balance.asset);
-  set(label, balance.label);
-  set(amount, balance.amount.toFixed());
-  set(tags, balance.tags ?? []);
-  set(location, balance.location);
-  set(balanceType, balance.balanceType);
-};
-
-watch(
-  edit,
-  balance => {
-    if (!balance) {
-      reset();
-    } else {
-      setBalance(balance);
-    }
+const tags = computed<string[]>({
+  get() {
+    return props.modelValue.tags ?? [];
   },
-  { immediate: true }
-);
+  set(tags: string[]) {
+    emit('update:model-value', {
+      ...props.modelValue,
+      tags: tags.length > 0 ? tags : null,
+    });
+  },
+});
 
-const { editManualBalance, addManualBalance, manualLabels } =
-  useManualBalancesStore();
-const { refreshPrices } = useBalances();
-const { setMessage } = useMessageStore();
+const amount = computed({
+  get() {
+    return props.modelValue.amount.toString();
+  },
+  set(amount: string) {
+    emit('update:model-value', {
+      ...props.modelValue,
+      amount: bigNumberify(amount),
+    });
+  },
+});
 
-const { submitting, setValidation, setSubmitFunc } = useManualBalancesForm();
+const { manualLabels } = useManualBalancesStore();
 
 const rules = {
   amount: {
-    required: helpers.withMessage(
-      t('manual_balances_form.validation.amount'),
-      required
-    )
+    required: helpers.withMessage(t('manual_balances_form.validation.amount'), required),
   },
   label: {
-    required: helpers.withMessage(
-      t('manual_balances_form.validation.label_empty'),
-      required
-    )
+    required: helpers.withMessage(t('manual_balances_form.validation.label_empty'), required),
+    doesNotExist: helpers.withMessage(
+      ({ $model: label }) =>
+        t('manual_balances_form.validation.label_exists', {
+          label,
+        }),
+      (label: string) => !get(manualLabels).includes(label),
+    ),
   },
   asset: {
-    required: helpers.withMessage(
-      t('manual_balances_form.validation.asset'),
-      required
-    )
+    required: helpers.withMessage(t('manual_balances_form.validation.asset'), required),
   },
   location: {
-    required
-  }
+    required,
+  },
 };
 
-const v$ = setValidation(
+const v$ = useVuelidate(
   rules,
   {
     amount,
     asset,
     label,
-    location
+    location,
   },
-  { $autoDirty: true, $externalResults: errors }
+  { $autoDirty: true, $externalResults: errors },
 );
-
-const save = async () => {
-  const balance: Omit<ManualBalance, 'id' | 'asset'> = {
-    amount: bigNumberify(get(amount)),
-    label: get(label),
-    tags: get(tags),
-    location: get(location),
-    balanceType: get(balanceType)
-  };
-
-  const usedAsset: string = get(asset);
-
-  const idVal = get(id);
-  const isEdit = get(edit) && idVal;
-
-  const form = get(priceForm);
-  await form?.savePrice(usedAsset);
-
-  const status = await (isEdit
-    ? editManualBalance({ ...balance, id: idVal, asset: usedAsset })
-    : addManualBalance({ ...balance, asset: usedAsset }));
-
-  startPromise(refreshPrices(true));
-
-  if (status.success) {
-    clear();
-    return true;
-  }
-
-  if (status.message) {
-    if (typeof status.message !== 'string') {
-      set(errors, status.message);
-      await get(v$).$validate();
-    } else {
-      const obj = { message: status.message };
-      setMessage({
-        description: isEdit
-          ? t('actions.manual_balances.edit.error.description', obj)
-          : t('actions.manual_balances.add.error.description', obj)
-      });
-    }
-  }
-  return false;
-};
-
-setSubmitFunc(save);
-
-watch(label, label => {
-  if (get(edit)) {
-    return;
-  }
-
-  const validationErrors = get(errors)['label'];
-  if (get(manualLabels).includes(label)) {
-    if (validationErrors && validationErrors.length > 0) {
-      return;
-    }
-    set(errors, {
-      ...get(errors),
-      label: [
-        t('manual_balances_form.validation.label_exists', {
-          label
-        }).toString()
-      ]
-    });
-  } else {
-    const { label, ...data } = get(errors);
-    set(errors, data);
-  }
-
-  get(v$).label.$validate();
-});
 
 const { setOpenDialog, setPostSubmitFunc } = useCustomAssetForm();
 
-const postSubmit = (assetId: string) => {
+function postSubmit(assetId: string) {
   set(asset, assetId);
-};
+}
 
 setPostSubmitFunc(postSubmit);
 
@@ -197,24 +96,32 @@ const customAssetTypes = ref<string[]>([]);
 
 const { getCustomAssetTypes } = useAssetManagementApi();
 
-const openCustomAssetForm = async () => {
-  if (get(customAssetTypes).length === 0) {
+async function openCustomAssetForm() {
+  if (get(customAssetTypes).length === 0)
     set(customAssetTypes, await getCustomAssetTypes());
-  }
 
   setOpenDialog(true);
-};
+}
 
-onMounted(async () => {
-  const editPayload = get(edit);
-  if (editPayload) {
-    set(asset, editPayload.asset);
-  }
+async function validate() {
+  await get(v$).$validate();
+}
+
+async function savePrice() {
+  await get(priceForm)?.savePrice(get(asset));
+}
+
+defineExpose({
+  validate,
+  savePrice,
 });
 </script>
 
 <template>
-  <form ref="form" data-cy="manual-balance-form" class="flex flex-col gap-2">
+  <RuiForm
+    data-cy="manual-balance-form"
+    class="flex flex-col gap-2"
+  >
     <RuiTextField
       v-model="label"
       class="manual-balances-form__label"
@@ -242,7 +149,10 @@ onMounted(async () => {
         :disabled="submitting"
         @blur="v$.asset.$touch()"
       />
-      <RuiTooltip :popper="{ placement: 'top' }" open-delay="400">
+      <RuiTooltip
+        :popper="{ placement: 'top' }"
+        :open-delay="400"
+      >
         <template #activator>
           <RuiButton
             variant="text"
@@ -255,7 +165,10 @@ onMounted(async () => {
           >
             <div class="flex">
               <RuiIcon name="server-line" />
-              <RuiIcon name="add-circle-line" class="-mt-4 -ml-2" />
+              <RuiIcon
+                name="add-circle-line"
+                class="-mt-4 -ml-2"
+              />
             </div>
           </RuiButton>
         </template>
@@ -276,7 +189,7 @@ onMounted(async () => {
       :label="t('common.amount')"
       :error-messages="toMessages(v$.amount)"
       class="manual-balances-form__amount"
-      outlined
+      variant="outlined"
       autocomplete="off"
       :disabled="submitting"
       @blur="v$.amount.$touch()"
@@ -286,16 +199,12 @@ onMounted(async () => {
       v-model="tags"
       :label="t('manual_balances_form.fields.tags')"
       :disabled="submitting"
-      outlined
       class="manual-balances-form__tags"
     />
 
     <LocationSelector
       v-model="location"
       class="manual-balances-form__location"
-      attach=".manual-balances-form__location"
-      :menu-props="{ top: true }"
-      outlined
       :error-messages="toMessages(v$.location)"
       :disabled="submitting"
       :label="t('common.location')"
@@ -306,5 +215,5 @@ onMounted(async () => {
       :title="t('asset_management.add_title')"
       :types="customAssetTypes"
     />
-  </form>
+  </RuiForm>
 </template>

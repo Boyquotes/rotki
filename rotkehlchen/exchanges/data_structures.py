@@ -33,10 +33,10 @@ from rotkehlchen.types import (
     TradePair,
     TradeType,
 )
-from rotkehlchen.user_messages import MessagesAggregator
 
 if TYPE_CHECKING:
     from rotkehlchen.accounting.pot import AccountingPot
+    from rotkehlchen.user_messages import MessagesAggregator
 
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ AssetMovementDBTuple = tuple[
 ]
 
 
-@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=True)
+@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
 class AssetMovement(AccountingEventMixin):
     location: Location
     category: AssetMovementCategory
@@ -270,7 +270,7 @@ class Trade(AccountingEventMixin):
             self.quote_asset.identifier +
             str(self.amount) +
             str(self.rate) +
-            (self.link if self.link else '')
+            (self.link or '')
         )
         return TradeID(hash_id(string))
 
@@ -303,7 +303,7 @@ class Trade(AccountingEventMixin):
     def __str__(self) -> str:
         return (
             f'trade at {self.location!s} location and date '
-            f'{datetime.datetime.fromtimestamp(self.timestamp, tz=datetime.timezone.utc)} '
+            f'{datetime.datetime.fromtimestamp(self.timestamp, tz=datetime.UTC)} '
             f'of type {self.trade_type!s} with base asset: {self.base_asset.symbol_or_name()} '
             f'and quote asset: {self.quote_asset.symbol_or_name()}'
         )
@@ -740,7 +740,7 @@ def trades_from_dictlist(
         start_ts: Timestamp,
         end_ts: Timestamp,
         location: str,
-        msg_aggregator: MessagesAggregator,
+        msg_aggregator: 'MessagesAggregator',
 ) -> list[Trade]:
     """ Gets a list of dict trades, most probably read from the json files and
     a time period. Returns it as a list of the Trade tuples that are inside the time period

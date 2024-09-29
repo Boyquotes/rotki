@@ -1,14 +1,23 @@
 from collections import defaultdict
+from contextlib import suppress
 from unittest.mock import patch
 
 import pytest
 
 from rotkehlchen.accounting.mixins.event import AccountingEventType
+from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.api.server import APIServer
+from rotkehlchen.assets.asset import Asset
+from rotkehlchen.chain.evm.accounting.structures import TxEventSettings
 from rotkehlchen.constants import ONE, ZERO
-from rotkehlchen.constants.assets import A_BTC, A_ETH, A_LINK, A_USDT
+from rotkehlchen.constants.assets import A_BTC, A_ETH, A_EUR, A_KSM, A_LINK, A_USDT
+from rotkehlchen.db.accounting_rules import DBAccountingRules
+from rotkehlchen.db.history_events import DBHistoryEvents
+from rotkehlchen.errors.misc import InputError
 from rotkehlchen.exchanges.data_structures import AssetMovement, MarginPosition, Trade
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.base import HistoryEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.accounting import accounting_create_and_process_history
 from rotkehlchen.tests.utils.exchanges import mock_normal_coinbase_query
 from rotkehlchen.tests.utils.history import prices
@@ -19,6 +28,7 @@ from rotkehlchen.types import (
     Location,
     Price,
     Timestamp,
+    TimestampMS,
     TradeType,
 )
 
@@ -41,18 +51,16 @@ def test_account_for_coinbase_income_expense(rotkehlchen_api_server_with_exchang
     with patch.object(coinbase.session, 'get', side_effect=mock_normal_coinbase_query):
         report, events = accounting_create_and_process_history(rotki=rotki, start_ts=0, end_ts=1611426233)  # noqa: E501
 
-    expected_total_actions = 10
+    expected_total_actions = 7
     assert report['total_actions'] == expected_total_actions
     events_map = defaultdict(int)
     for event in events:
-        events_map[event.type] += 1
+        events_map[event.event_type] += 1
 
-    events_map.pop(AccountingEventType.PREFORK_ACQUISITION)
     assert events_map[AccountingEventType.TRADE] == 4
-    assert events_map[AccountingEventType.FEE] == 2
-    assert events_map[AccountingEventType.ASSET_MOVEMENT] == 3
+    assert events_map[AccountingEventType.ASSET_MOVEMENT] == 1
     assert events_map[AccountingEventType.TRANSACTION_EVENT] == 2
-    assert sum(events_map.values()) == 11  # processed events
+    assert sum(events_map.values()) == 7  # processed events
 
 
 @pytest.mark.parametrize('have_decoders', [True])
@@ -111,39 +119,135 @@ def test_exchanges_removed_api_keys(rotkehlchen_api_server_with_exchanges: APISe
     _, events = accounting_create_and_process_history(rotki=rotki, start_ts=Timestamp(0), end_ts=Timestamp(1611426233))  # noqa: E501
     assert len(events) == 6
     event1 = events[0]
-    assert event1.type == AccountingEventType.TRADE
+    assert event1.event_type == AccountingEventType.TRADE
     assert event1.location == Location.COINBASE
     assert event1.taxable_amount == FVal(1.5)
     assert event1.asset == A_BTC
 
     event2 = events[1]
-    assert event2.type == AccountingEventType.TRADE
+    assert event2.event_type == AccountingEventType.TRADE
     assert event2.location == Location.COINBASE
     assert event2.free_amount == ONE
     assert event2.asset == A_ETH
 
     event3 = events[2]
-    assert event3.type == AccountingEventType.TRADE
+    assert event3.event_type == AccountingEventType.TRADE
     assert event3.location == Location.EXTERNAL
     assert event3.taxable_amount == FVal(7)
     assert event3.asset == A_USDT
 
     event4 = events[3]
-    assert event4.type == AccountingEventType.TRADE
+    assert event4.event_type == AccountingEventType.TRADE
     assert event4.location == Location.EXTERNAL
     assert event4.free_amount == FVal(49)
     assert event4.asset == A_LINK
 
     event5 = events[4]
-    assert event5.type == AccountingEventType.ASSET_MOVEMENT
+    assert event5.event_type == AccountingEventType.ASSET_MOVEMENT
     assert event5.location == Location.COINBASE
     assert event5.free_amount == ZERO
     assert event5.taxable_amount == FVal(0.00001)
     assert event5.asset == A_BTC
 
     event6 = events[5]
-    assert event6.type == AccountingEventType.MARGIN_POSITION
+    assert event6.event_type == AccountingEventType.MARGIN_POSITION
     assert event6.location == Location.COINBASE
     assert event6.free_amount == ZERO
     assert event6.taxable_amount == ONE
     assert event6.asset == A_BTC
+
+
+@pytest.mark.parametrize('have_decoders', [True])
+@pytest.mark.parametrize('default_mock_price_value', [FVal(1.5)])
+@pytest.mark.parametrize('ethereum_accounts', [[]])
+@pytest.mark.parametrize('added_exchanges', [[]])
+def test_process_kraken_events(rotkehlchen_api_server_with_exchanges: APIServer):
+    """
+    Test that trades and assets movements get ignored from kraken events but any other
+    type of event gets processed
+    """
+    rotki = rotkehlchen_api_server_with_exchanges.rest_api.rotkehlchen
+    with suppress(InputError):
+        DBAccountingRules(rotki.data.db).add_accounting_rule(
+            event_type=HistoryEventType.ADJUSTMENT,
+            event_subtype=HistoryEventSubType.RECEIVE,
+            counterparty=None,
+            rule=TxEventSettings(
+                taxable=True,
+                count_entire_amount_spend=True,
+                count_cost_basis_pnl=True,
+            ),
+            links={},
+        )
+
+    history = [
+        HistoryEvent(  # should be ignored
+            identifier=7,
+            event_identifier='event_0',
+            sequence_index=1,
+            timestamp=TimestampMS(1675532700000),
+            location=Location.KRAKEN,
+            asset=A_ETH,
+            event_type=HistoryEventType.TRADE,
+            event_subtype=HistoryEventSubType.SPEND,
+            balance=Balance(amount=FVal('0.0025')),
+            notes='SPEND 0.0025 ETH in kraken',
+        ), HistoryEvent(  # should be ignored as part of the trade
+            identifier=8,
+            event_identifier='event_0',
+            sequence_index=2,
+            timestamp=TimestampMS(1675532700000),
+            location=Location.KRAKEN,
+            asset=A_EUR,
+            event_type=HistoryEventType.TRADE,
+            event_subtype=HistoryEventSubType.RECEIVE,
+            balance=Balance(amount=FVal('0.0025')),
+            notes='Receive 0.0025 EUR in kraken',
+        ), HistoryEvent(  # should be processed
+            identifier=9,
+            event_identifier='event_1',
+            sequence_index=1,
+            timestamp=TimestampMS(1675913100000),
+            location=Location.KRAKEN,
+            asset=A_KSM,
+            event_type=HistoryEventType.STAKING,
+            event_subtype=HistoryEventSubType.REWARD,
+            balance=Balance(amount=FVal('0.1932938')),
+            notes='Staking reward of 0.1932938 ETH in kraken',
+        ), HistoryEvent(  # should be processed
+            identifier=10,
+            event_identifier='event_2',
+            sequence_index=1,
+            timestamp=TimestampMS(1675914100000),
+            location=Location.KRAKEN,
+            asset=Asset('ETHW'),
+            event_type=HistoryEventType.ADJUSTMENT,
+            event_subtype=HistoryEventSubType.RECEIVE,
+            balance=Balance(amount=FVal('0.1932938')),
+            notes='Receive forked asset',
+        ), HistoryEvent(  # should be ignored
+            identifier=11,
+            event_identifier='event_3',
+            sequence_index=1,
+            timestamp=TimestampMS(1695914100000),
+            location=Location.KRAKEN,
+            asset=Asset('BTC'),
+            event_type=HistoryEventType.DEPOSIT,
+            event_subtype=HistoryEventSubType.DEPOSIT_ASSET,
+            balance=Balance(amount=ONE),
+            notes='Deposit BTC brrrrr',
+        )]
+
+    with rotki.data.db.user_write() as write_cursor:
+        DBHistoryEvents(rotki.data.db).add_history_events(write_cursor, history=history)
+
+    _, events = accounting_create_and_process_history(
+        rotki=rotki,
+        start_ts=Timestamp(0),
+        end_ts=Timestamp(1726501801),
+    )
+    assert len(events) == 2
+    assert events[0].event_type == AccountingEventType.STAKING
+    assert events[0].asset == A_KSM
+    assert events[1].asset == Asset('ETHW')
+    assert events[1].notes == 'Receive forked asset'

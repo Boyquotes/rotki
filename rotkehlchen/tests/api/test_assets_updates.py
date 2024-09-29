@@ -20,7 +20,7 @@ from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_ok_async_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     wait_for_async_task,
 )
 from rotkehlchen.tests.utils.mock import MockResponse
@@ -152,7 +152,7 @@ INSERT INTO assets(identifier, name, type) VALUES("EUR", "Ευρώ", "A"); INSER
             result = outcome['result']
             assert outcome['message'] == ''
         else:
-            result = assert_proper_response_with_result(response)
+            result = assert_proper_sync_response_with_result(response)
         assert result['local'] == 999999992
         assert result['remote'] == 999999996
         assert result['new_changes'] == 5  # 994 (3) + 995(2)
@@ -173,7 +173,7 @@ INSERT INTO assets(identifier, name, type) VALUES("EUR", "Ευρώ", "A"); INSER
             assert outcome['message'] == ''
             result = outcome['result']
         else:
-            result = assert_proper_response_with_result(response)
+            result = assert_proper_sync_response_with_result(response)
 
         errors = rotki.msg_aggregator.consume_errors()
         warnings = rotki.msg_aggregator.consume_warnings()
@@ -199,7 +199,7 @@ INSERT INTO assets(identifier, name, type) VALUES("EUR", "Ευρώ", "A"); INSER
         assert new_token.decimals == 18
         assert new_token.protocol is None
 
-        new_asset = CryptoAsset('121-ada-FADS-as')  # type: ignore[unreachable]
+        new_asset = CryptoAsset('121-ada-FADS-as')
         assert new_asset.identifier == '121-ada-FADS-as'
         assert new_asset.name == 'A name'
         assert new_asset.symbol == 'SYMBOL'
@@ -278,7 +278,7 @@ INSERT INTO assets(identifier, name, type) VALUES("eip155:1/erc20:0x1B175474E890
             result = outcome['result']
             assert outcome['message'] == ''
         else:
-            result = assert_proper_response_with_result(response)
+            result = assert_proper_sync_response_with_result(response)
         assert result['local'] == 999999990
         assert result['remote'] == 999999991
         assert result['new_changes'] == 3
@@ -299,7 +299,7 @@ INSERT INTO assets(identifier, name, type) VALUES("eip155:1/erc20:0x1B175474E890
             assert outcome['message'] == 'Found conflicts during assets upgrade'
             result = outcome['result']
         else:
-            result = assert_proper_response_with_result(
+            result = assert_proper_sync_response_with_result(
                 response,
                 message='Found conflicts during assets upgrade',
                 status_code=HTTPStatus.CONFLICT,
@@ -328,7 +328,7 @@ INSERT INTO assets(identifier, name, type) VALUES("eip155:1/erc20:0x1B175474E890
                 'evm_chain': 'ethereum',
                 'token_kind': 'erc20',
                 'decimals': 18,
-                'cryptocompare': None,
+                'cryptocompare': 'DAI',
                 'coingecko': 'dai',
                 'protocol': None,
             },
@@ -359,7 +359,7 @@ INSERT INTO assets(identifier, name, type) VALUES("eip155:1/erc20:0x1B175474E890
                 'address': None,
                 'token_kind': None,
                 'decimals': None,
-                'cryptocompare': None,
+                'cryptocompare': 'DASH',
                 'coingecko': 'dash',
                 'protocol': None,
             },
@@ -430,7 +430,7 @@ INSERT INTO assets(identifier, name, type) VALUES("eip155:1/erc20:0x1B175474E890
             assert outcome['message'] == ''
             result = outcome['result']
         else:
-            result = assert_proper_response_with_result(
+            result = assert_proper_sync_response_with_result(
                 response,
                 message='',
                 status_code=HTTPStatus.OK,
@@ -470,7 +470,7 @@ INSERT INTO assets(identifier, name, type) VALUES("eip155:1/erc20:0x1B175474E890
         assert dash.forked is None
         assert dash.swapped_for is None
         assert dash.coingecko == 'dash'
-        assert dash.cryptocompare is None
+        assert dash.cryptocompare == 'DASH'
         assert cursor.execute('SELECT COUNT(*) from common_asset_details WHERE identifier="DASH";').fetchone()[0] == 1  # noqa: E501
         assert cursor.execute('SELECT COUNT(*) from assets WHERE identifier="DASH";').fetchone()[0] == 1  # noqa: E501
 
@@ -499,7 +499,7 @@ INSERT INTO assets(identifier, name, type) VALUES("eip155:1/erc20:0x1B175474E890
         assert ctk.evm_address == '0x1B175474E89094C44Da98b954EedeAC495271d0F'
         assert ctk.decimals == 18
         assert ctk.protocol is None
-        assert cursor.execute('SELECT COUNT(*) from evm_tokens WHERE address="0x1B175474E89094C44Da98b954EedeAC495271d0F";').fetchone()[0] == 1  # type: ignore[unreachable]  # noqa: E501
+        assert cursor.execute('SELECT COUNT(*) from evm_tokens WHERE address="0x1B175474E89094C44Da98b954EedeAC495271d0F";').fetchone()[0] == 1  # noqa: E501
         assert cursor.execute('SELECT COUNT(*) from assets WHERE identifier="eip155:1/erc20:0x1B175474E89094C44Da98b954EedeAC495271d0F";').fetchone()[0] == 1  # noqa: E501
 
 
@@ -550,7 +550,7 @@ INSERT INTO assets(identifier, name, type) VALUES("eip155:1/erc20:0xa74476443119
             result = outcome['result']
             assert outcome['message'] == ''
         else:
-            result = assert_proper_response_with_result(response)
+            result = assert_proper_sync_response_with_result(response)
         assert result['local'] == 999999990
         assert result['remote'] == 999999991
         assert result['new_changes'] == 2
@@ -571,7 +571,7 @@ INSERT INTO assets(identifier, name, type) VALUES("eip155:1/erc20:0xa74476443119
             assert outcome['message'] == 'Found conflicts during assets upgrade'
             result = outcome['result']
         else:
-            result = assert_proper_response_with_result(
+            result = assert_proper_sync_response_with_result(
                 response,
                 message='Found conflicts during assets upgrade',
                 status_code=HTTPStatus.CONFLICT,
@@ -640,7 +640,7 @@ INSERT INTO assets(identifier, name, type) VALUES("eip155:1/erc20:0xa74476443119
             assert outcome['message'] == ''
             result = outcome['result']
         else:
-            result = assert_proper_response_with_result(
+            result = assert_proper_sync_response_with_result(
                 response,
                 message='',
                 status_code=HTTPStatus.OK,
@@ -664,7 +664,7 @@ INSERT INTO assets(identifier, name, type) VALUES("eip155:1/erc20:0xa74476443119
         assert gnt.decimals == 18
         assert gnt.protocol is None
 
-        new_asset = CryptoAsset('121-ada-FADS-as')  # type: ignore[unreachable]
+        new_asset = CryptoAsset('121-ada-FADS-as')
         assert new_asset.identifier == '121-ada-FADS-as'
         assert new_asset.name == 'A name'
         assert new_asset.symbol == 'SYMBOL'
@@ -717,7 +717,7 @@ INSERT INTO evm_tokens(identifier, token_kind, chain, address, decimals, protoco
                 'assetupdatesresource',
             ),
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert result['local'] == 0
         assert result['remote'] == 1
         assert result['new_changes'] == 2
@@ -728,7 +728,7 @@ INSERT INTO evm_tokens(identifier, token_kind, chain, address, decimals, protoco
                 'assetupdatesresource',
             ),
         )
-        result = assert_proper_response_with_result(
+        result = assert_proper_sync_response_with_result(
             response,
             message='Found conflicts during assets upgrade',
             status_code=HTTPStatus.CONFLICT,
@@ -788,7 +788,7 @@ INSERT INTO evm_tokens(identifier, token_kind, chain, address, decimals, protoco
             ),
             json={'conflicts': conflicts},
         )
-        result = assert_proper_response_with_result(
+        result = assert_proper_sync_response_with_result(
             response,
             message='',
             status_code=HTTPStatus.OK,
@@ -846,14 +846,14 @@ def test_update_no_user_loggedin(rotkehlchen_api_server: 'APIServer') -> None:
     assert_error_response(
         response=response,
         contained_in_msg='No user is currently logged in',
-        status_code=HTTPStatus.CONFLICT,
+        status_code=HTTPStatus.UNAUTHORIZED,
     )
 
 
 def test_async_db_reset(rotkehlchen_api_server: 'APIServer') -> None:
     """Test the endpoint for reseting the globaldb using an async task"""
     asset_id = 'my_custom_id'
-    GlobalDBHandler().add_asset(CryptoAsset.initialize(
+    GlobalDBHandler.add_asset(CryptoAsset.initialize(
         identifier=asset_id,
         asset_type=AssetType.OWN_CHAIN,
         name='Lolcoin2',

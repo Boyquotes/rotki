@@ -1,20 +1,31 @@
 import datetime
+from contextlib import suppress
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock, patch
 
 import gevent
 import pytest
 
-from rotkehlchen.assets.utils import _query_or_get_given_token_info
+from rotkehlchen.assets.utils import _query_or_get_given_token_info, get_or_create_evm_token
 from rotkehlchen.chain.ethereum.tokens import EthereumTokens
 from rotkehlchen.chain.evm.tokens import generate_multicall_chunks
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants import ONE
-from rotkehlchen.constants.assets import A_OMG, A_WETH
+from rotkehlchen.constants.assets import A_GNOSIS_EURE, A_OMG, A_WETH
+from rotkehlchen.db.constants import EVM_ACCOUNTS_DETAILS_TOKENS
+from rotkehlchen.errors.misc import InputError
 from rotkehlchen.fval import FVal
+from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.tests.utils.constants import A_LPT
 from rotkehlchen.tests.utils.factories import make_evm_address
-from rotkehlchen.types import ChainID, EvmTokenKind, SupportedBlockchain
+from rotkehlchen.types import ChainID, ChecksumEvmAddress, EvmTokenKind, SupportedBlockchain
 from rotkehlchen.utils.misc import ts_now
+
+if TYPE_CHECKING:
+    from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
+    from rotkehlchen.chain.gnosis.manager import GnosisManager
+    from rotkehlchen.db.dbhandler import DBHandler
+
 
 ERC20_INFO_RESPONSE = ((True, b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x06'), (True, b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04USDT\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'), (True, b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\nTether USD\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'))  # noqa: E501
 ERC721_INFO_RESPONSE = ((True, b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x06BLOCKS\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'), (True, b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00 \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\nArt Blocks\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'))  # noqa: E501
@@ -25,9 +36,7 @@ def fixture_ethereumtokens(ethereum_inquirer, database, inquirer):  # pylint: di
     return EthereumTokens(database, ethereum_inquirer)
 
 
-# TODO: This needs VCR, but I removed it due to inability to make it work.
-# Recording a cassette works. But rerunning it with the cassete seems to fail when
-# trying to replay the 2nd request, saying it differs.
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('ignored_assets', [[A_LPT]])
 @pytest.mark.parametrize('ethereum_modules', [['makerdao_vaults']])
 @pytest.mark.parametrize('ethereum_accounts', [[
@@ -116,11 +125,12 @@ def test_last_queried_ts(tokens, freezer):
     """
     Checks that after detecting evm tokens last_queried_timestamp is updated and there
     are no duplicates.
+    Note: It is hard to VCR because https://github.com/orgs/rotki/projects/11/views/2?pane=issue&itemId=70915550
     """
     # We don't need to query the chain here, so mock tokens list
     evm_tokens_patch = patch(
         'rotkehlchen.globaldb.handler.GlobalDBHandler.get_evm_tokens',
-        new=lambda _, chain_id=ChainID.ETHEREUM, exceptions=None, protocol=None: [],
+        new=lambda chain_id=ChainID.ETHEREUM, exceptions=None, protocol=None: [],
     )
     beginning = ts_now()
     address = '0x4bBa290826C253BD854121346c370a9886d1bC26'
@@ -138,7 +148,7 @@ def test_last_queried_ts(tokens, freezer):
         assert int(after_first_query[0][1]) >= beginning
 
         continuation = beginning + 10
-        freezer.move_to(datetime.datetime.fromtimestamp(continuation, tz=datetime.timezone.utc))
+        freezer.move_to(datetime.datetime.fromtimestamp(continuation, tz=datetime.UTC))
         # Detect again
         tokens.detect_tokens(
             only_cache=False,
@@ -218,7 +228,10 @@ def _do_spawn(database):
 
 @pytest.mark.parametrize('number_of_eth_accounts', [100])
 @pytest.mark.parametrize('sql_vm_instructions_cb', [10])
-def test_flaky_binding_parameter_zero(database, ethereum_accounts):
+def test_flaky_binding_parameter_zero(
+        database: 'DBHandler',
+        ethereum_accounts: list[ChecksumEvmAddress],
+) -> None:
     """Test that reproduces https://github.com/rotki/rotki/issues/5432 reliably.
 
     Seems to be an sqlite driver implementation error that causes a wrong instance of
@@ -231,14 +244,16 @@ def test_flaky_binding_parameter_zero(database, ethereum_accounts):
     without any delay. It works splendid. Same solution the coveragepy people used:
     https://github.com/nedbat/coveragepy/issues/1010
     """
-    stuff = []
+    stuff: list[tuple[Any, ...]] = []
     # Populate some data in the evm_accounts_details table, since this is what's used in the bug
     for idx, address in enumerate(ethereum_accounts):
         if idx % 2 == 0:
             stuff.append((address, 1, 'last_queried_timestamp', 42))
         else:
-            stuff.append((address, 1, 'tokens', 'eip155:1/erc20:0x6B175474E89094C44Da98b954EedeAC495271d0F'))  # noqa: E501
-            stuff.append((address, 1, 'tokens', 'eip155:1/erc20:0x6810e776880C02933D47DB1b9fc05908e5386b96'))  # noqa: E501
+            stuff.extend((
+                (address, 1, 'tokens', 'eip155:1/erc20:0x6B175474E89094C44Da98b954EedeAC495271d0F'),  # noqa: E501
+                (address, 1, 'tokens', 'eip155:1/erc20:0x6810e776880C02933D47DB1b9fc05908e5386b96'),  # noqa: E501
+            ))
 
     with database.user_write() as write_cursor:
         write_cursor.executemany(
@@ -252,4 +267,121 @@ def test_flaky_binding_parameter_zero(database, ethereum_accounts):
     gevent.sleep(.1)
     with database.conn.read_ctx() as cursor:
         for address in ethereum_accounts:
-            database.get_tokens_for_address(cursor, address, SupportedBlockchain.ETHEREUM)
+            database.get_tokens_for_address(
+                cursor=cursor,
+                address=address,
+                blockchain=SupportedBlockchain.ETHEREUM,
+                token_exceptions=set(),
+            )
+
+
+@pytest.mark.parametrize('number_of_eth_accounts', [1])
+def test_old_curve_gauge(ethereum_inquirer: 'EthereumInquirer'):
+    """Test that querying new and old gauges get the data correctly.
+    Old one should pick the default values provided and the new one should
+    get the values from the chain
+    """
+    # old gauge
+    gauge_address = string_to_evm_address('0xC2b1DF84112619D190193E48148000e3990Bf627')
+    with suppress(InputError):
+        GlobalDBHandler.delete_evm_token(gauge_address, chain_id=ChainID.ETHEREUM)
+
+    gauge_token = get_or_create_evm_token(
+        userdb=ethereum_inquirer.database,
+        evm_address=gauge_address,
+        chain_id=ethereum_inquirer.chain_id,
+        evm_inquirer=ethereum_inquirer,
+        decimals=18,
+        name='USDK Gauge Deposit',
+        symbol='USDK curve-gauge',
+    )
+    assert gauge_token.name == 'USDK Gauge Deposit'
+    assert gauge_token.symbol == 'USDK curve-gauge'
+    assert gauge_token.decimals == 18
+
+    # new gauge
+    gauge_address = string_to_evm_address('0x182B723a58739a9c974cFDB385ceaDb237453c28')
+    with suppress(InputError):
+        GlobalDBHandler.delete_evm_token(gauge_address, chain_id=ChainID.ETHEREUM)
+
+    gauge_token = get_or_create_evm_token(
+        userdb=ethereum_inquirer.database,
+        evm_address=gauge_address,
+        chain_id=ethereum_inquirer.chain_id,
+        evm_inquirer=ethereum_inquirer,
+        fallback_decimals=18,
+        fallback_name='stETH Gauge Deposit',
+        fallback_symbol='stETH curve-gauge',
+    )
+    assert gauge_token.name == 'Curve.fi steCRV Gauge Deposit'
+    assert gauge_token.symbol == 'steCRV-gauge'
+    assert gauge_token.decimals == 18
+
+
+@pytest.mark.parametrize('number_of_eth_accounts', [1])
+def test_chain_is_not_queried_when_details(ethereum_inquirer: 'EthereumInquirer'):
+    """Test that if we provide the values of name, decimals and symbol we don't query
+    the chain without need
+    """
+    lido_address = string_to_evm_address('0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32')
+    with suppress(InputError):
+        GlobalDBHandler.delete_evm_token(lido_address, chain_id=ChainID.ETHEREUM)
+
+    with patch(
+        'rotkehlchen.assets.utils._query_or_get_given_token_info',
+        side_effect=_query_or_get_given_token_info,
+    ) as patched_query:
+        new_token = get_or_create_evm_token(
+            userdb=ethereum_inquirer.database,
+            evm_address=lido_address,
+            chain_id=ethereum_inquirer.chain_id,
+            evm_inquirer=ethereum_inquirer,
+            decimals=17,
+            name='new LDO',
+            symbol='nLDO',
+        )
+        assert patched_query.call_count == 0
+
+    assert new_token.name == 'new LDO'
+    assert new_token.symbol == 'nLDO'
+    assert new_token.decimals == 17
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('gnosis_accounts', [['0xc37b40ABdB939635068d3c5f13E7faF686F03B65']])
+def test_monerium_queries(
+        gnosis_manager: 'GnosisManager',
+        gnosis_accounts: list[ChecksumEvmAddress],
+):
+    """Test that we query balances for the new monerium eure but not the old one"""
+    new_eure = get_or_create_evm_token(  # ensure that the new eure is in the db
+        userdb=gnosis_manager.node_inquirer.database,
+        evm_address=string_to_evm_address('0x420CA0f9B9b604cE0fd9C18EF134C705e5Fa3430'),
+        chain_id=(chain_id := gnosis_manager.node_inquirer.chain_id),
+        evm_inquirer=gnosis_manager.node_inquirer,
+    )
+    tokens = gnosis_manager.tokens.detect_tokens(
+        only_cache=False,
+        addresses=gnosis_accounts,
+    )[gnosis_accounts[0]][0]
+    assert new_eure in tokens  # type: ignore
+
+    # insert the old eure and see that is not queried
+    with gnosis_manager.node_inquirer.database.user_write() as write_cursor:
+        write_cursor.execute(
+            'INSERT OR REPLACE INTO evm_accounts_details '
+            '(account, chain_id, key, value) VALUES (?, ?, ?, ?)',
+            (
+                gnosis_accounts[0],
+                chain_id.serialize_for_db(),
+                EVM_ACCOUNTS_DETAILS_TOKENS,
+                A_GNOSIS_EURE.identifier,
+            ),
+        )
+
+    tokens_second_query = gnosis_manager.tokens.detect_tokens(
+        only_cache=False,
+        addresses=gnosis_accounts,
+    )[gnosis_accounts[0]][0]
+    assert new_eure in tokens_second_query  # type: ignore
+    assert A_GNOSIS_EURE not in tokens_second_query  # type: ignore

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { type SelectedReport } from '@/types/reports';
+import type { SelectedReport } from '@/types/reports';
 
 const props = withDefaults(
   defineProps<{
@@ -7,17 +7,17 @@ const props = withDefaults(
     initialOpen?: boolean;
   }>(),
   {
-    initialOpen: false
-  }
+    initialOpen: false,
+  },
 );
 
 const emit = defineEmits<{
   (e: 'regenerate'): void;
 }>();
 
-const regenerateReport = () => {
+function regenerateReport() {
   emit('regenerate');
-};
+}
 
 const { initialOpen, report } = toRefs(props);
 const mainDialogOpen = ref<boolean>(get(initialOpen));
@@ -30,9 +30,8 @@ const actionableItemsLength = computed(() => {
 
   const items = get(actionableItems);
 
-  if (items) {
+  if (items)
     total = items.missingAcquisitions.length + items.missingPrices.length;
-  }
 
   return total;
 });
@@ -41,19 +40,30 @@ const { t } = useI18n();
 </script>
 
 <template>
-  <div v-if="actionableItemsLength" class="flex">
-    <VDialog v-model="mainDialogOpen" max-width="1000">
-      <template #activator="{ on }">
-        <RuiButton color="error" v-on="on">
+  <div
+    v-if="actionableItemsLength"
+    class="flex"
+  >
+    <RuiDialog
+      v-model="mainDialogOpen"
+      max-width="1000"
+    >
+      <template #activator="{ attrs }">
+        <RuiButton
+          color="error"
+          v-bind="attrs"
+        >
           <span class="pr-2">
             {{ t('profit_loss_report.actionable.show_issues') }}
           </span>
           <template #append>
             <RuiChip
               size="sm"
-              class="!text-white !p-0 !bg-rui-error-darker"
-              :label="actionableItemsLength"
-            />
+              color="error"
+              class="!p-0 !bg-rui-error-darker"
+            >
+              {{ actionableItemsLength.toString() }}
+            </RuiChip>
           </template>
         </RuiButton>
       </template>
@@ -63,6 +73,6 @@ const { t } = useI18n();
         @set-dialog="mainDialogOpen = $event"
         @regenerate="regenerateReport()"
       />
-    </VDialog>
+    </RuiDialog>
   </div>
 </template>

@@ -14,8 +14,8 @@ from rotkehlchen.tests.utils.api import (
     assert_ok_async_response,
     assert_proper_response,
     assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     wait_for_async_task,
-    wait_for_async_task_with_result,
 )
 from rotkehlchen.tests.utils.avalanche import AVALANCHE_ACC1_AVAX_ADDR, AVALANCHE_ACC2_AVAX_ADDR
 from rotkehlchen.tests.utils.substrate import SUBSTRATE_ACC1_DOT_ADDR
@@ -46,7 +46,6 @@ def test_add_avax_blockchain_account_invalid(rotkehlchen_api_server):
 
 
 @pytest.mark.parametrize('number_of_eth_accounts', [0])
-@pytest.mark.parametrize('avalanche_mock_data', [{'covalent_balances': 'test_balances/covalent_query_balances.json'}])  # noqa: E501
 def test_add_avax_blockchain_account(rotkehlchen_api_server: 'APIServer') -> None:
     """Test adding an Avalanche blockchain account when there is none in the db
     works as expected."""
@@ -74,7 +73,7 @@ def test_add_avax_blockchain_account(rotkehlchen_api_server: 'APIServer') -> Non
         'named_blockchain_balances_resource',
         blockchain=avalance_chain_key,
     ))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
 
     # Check per account
     account_balances = result['per_account'][avalance_chain_key][AVALANCHE_ACC1_AVAX_ADDR]
@@ -92,7 +91,6 @@ def test_add_avax_blockchain_account(rotkehlchen_api_server: 'APIServer') -> Non
 
 @pytest.mark.parametrize('number_of_eth_accounts', [0])
 @pytest.mark.parametrize('avax_accounts', [[AVALANCHE_ACC1_AVAX_ADDR, AVALANCHE_ACC2_AVAX_ADDR]])
-@pytest.mark.parametrize('avalanche_mock_data', [{'covalent_balances': 'test_balances/covalent_query_balances.json'}])  # noqa: E501
 def test_remove_avax_blockchain_account(rotkehlchen_api_server: 'APIServer') -> None:
     """Test removing an Avalanche blockchain account works as expected"""
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
@@ -113,11 +111,11 @@ def test_remove_avax_blockchain_account(rotkehlchen_api_server: 'APIServer') -> 
             'async_query': async_query,
         },
     )
-    if async_query:
-        task_id = assert_ok_async_response(response)
-        result = wait_for_async_task_with_result(rotkehlchen_api_server, task_id)
-    else:
-        result = assert_proper_response_with_result(response)
+    result = assert_proper_response_with_result(
+        response=response,
+        rotkehlchen_api_server=rotkehlchen_api_server,
+        async_query=async_query,
+    )
 
     # Check per account
     avax_chain_key = SupportedBlockchain.AVALANCHE.serialize()

@@ -6,8 +6,15 @@ from unittest.mock import patch
 
 import pytest
 
+from rotkehlchen.accounting.structures.balance import Balance
+from rotkehlchen.assets.utils import get_or_create_evm_token
+from rotkehlchen.chain.evm.constants import ZERO_ADDRESS
+from rotkehlchen.chain.evm.decoding.hop.constants import CPT_HOP
+from rotkehlchen.chain.evm.types import string_to_evm_address
+from rotkehlchen.chain.scroll.constants import SCROLL_ETHERSCAN_NODE
 from rotkehlchen.constants import ONE
-from rotkehlchen.constants.assets import A_BTC, A_ETH
+from rotkehlchen.constants.assets import A_BTC, A_ETH, A_PAX, A_USDT
+from rotkehlchen.constants.prices import ZERO_PRICE
 from rotkehlchen.data_migrations.constants import LAST_DATA_MIGRATION
 from rotkehlchen.data_migrations.manager import (
     MIGRATION_LIST,
@@ -16,30 +23,36 @@ from rotkehlchen.data_migrations.manager import (
 )
 from rotkehlchen.db.constants import UpdateType
 from rotkehlchen.db.dbhandler import DBHandler
+from rotkehlchen.db.history_events import DBHistoryEvents
 from rotkehlchen.fval import FVal
 from rotkehlchen.globaldb.handler import GlobalDBHandler
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.icons import IconManager
 from rotkehlchen.tests.utils.blockchain import setup_evm_addresses_activity_mock
 from rotkehlchen.tests.utils.exchanges import check_saved_events_for_exchange
 from rotkehlchen.tests.utils.factories import make_evm_address
 from rotkehlchen.types import (
-    SUPPORTED_EVM_CHAINS,
+    SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE,
+    ChainID,
     ChecksumEvmAddress,
+    EvmTokenKind,
     Location,
     SupportedBlockchain,
+    TimestampMS,
     TradeType,
+    deserialize_evm_tx_hash,
 )
 
 if TYPE_CHECKING:
     from rotkehlchen.api.server import APIServer
+    from rotkehlchen.inquirer import Inquirer
     from rotkehlchen.tests.fixtures.websockets import WebsocketReader
 
 
 def _create_invalid_icon(icon_identifier: str, icons_dir: Path) -> Path:
-    icon_filepath = icons_dir / f'{icon_identifier}_small.png'
-    with open(icon_filepath, 'wb') as f:
-        f.write(b'abcd')
-
+    icon_filepath = Path(icons_dir / f'{icon_identifier}_small.png')
+    icon_filepath.write_bytes(b'abcd')
     return icon_filepath
 
 
@@ -60,8 +73,8 @@ def assert_progress_message(msg, step_num, description, migration_version, migra
     assert msg['data']['target_version'] == LAST_DATA_MIGRATION
     migration = msg['data']['current_migration']
     assert migration['version'] == migration_version
-    assert migration['total_steps'] == (migration_steps if step_num != 0 else 0)
-    assert migration['current_step'] == step_num
+    assert migration['total_steps'] == migration_steps
+    assert migration['current_step'] == step_num + 1
     if description is not None:
         assert description in migration['description']
     else:
@@ -76,41 +89,39 @@ def assert_add_addresses_migration_ws_messages(
 ) -> None:
     """Asserts that all steps of a data migration that adds addresses are correctly applied
     by checking the websocket messages"""
-    num_messages = migration_steps + 1  # +1 for the message for added address
+    num_messages = migration_steps
     websocket_connection.wait_until_messages_num(num=num_messages, timeout=10)
     assert websocket_connection.messages_num() == num_messages
 
     for i in range(num_messages):
         msg = websocket_connection.pop_message()
         if i == migration_steps:  # message for added address. The message is only one and not one per chain. The added addresses per chain are checked from the message data  # noqa: E501
-            assert msg['type'] == 'evm_accounts_detection'
-            assert sorted(msg['data'], key=operator.itemgetter('evm_chain', 'address')) == sorted(
-                chain_to_added_address, key=operator.itemgetter('evm_chain', 'address'),
+            assert msg['type'] == 'evmlike_accounts_detection'
+            assert sorted(msg['data'], key=operator.itemgetter('chain', 'address')) == sorted(
+                chain_to_added_address, key=operator.itemgetter('chain', 'address'),
             )  # checks that the addresses have been added
-        elif i == 0:  # new migration round message
-            assert_progress_message(msg, i, None, migration_version, migration_steps)
 
         if migration_version == 10:
-            if i == 1:
+            if i == 0:
                 assert_progress_message(msg, i, 'Fetching new spam assets info', migration_version, migration_steps)  # noqa: E501
-            elif i == 2:
+            elif i == 1:
                 assert_progress_message(msg, i, 'Ensuring polygon node consistency', migration_version, migration_steps)  # noqa: E501
-            if 3 <= i <= 6:
+            if 2 <= i <= 5:
                 assert_progress_message(msg, i, 'EVM chain activity', migration_version, migration_steps)  # noqa: E501
-            elif i == 7:
+            elif i == 6:
                 assert_progress_message(msg, i, 'Potentially write migrated addresses to the DB', migration_version, migration_steps)  # noqa: E501
 
         elif migration_version in {11, 12}:
-            if i == 1:
+            if i == 0:
                 assert_progress_message(msg, i, 'Fetching new spam assets and rpc data info', migration_version, migration_steps)  # noqa: E501
-            elif i in {2, 3}:
+            elif i in {1, 2}:
                 assert_progress_message(msg, i, 'EVM chain activity', migration_version, migration_steps)  # noqa: E501
-            elif i == 4:
+            elif i == 3:
                 assert_progress_message(msg, i, 'Potentially write migrated addresses to the DB', migration_version, migration_steps)  # noqa: E501
 
 
 def detect_accounts_migration_check(
-        expected_detected_addresses_per_chain: dict[SUPPORTED_EVM_CHAINS, list[ChecksumEvmAddress]],  # noqa: E501
+        expected_detected_addresses_per_chain: dict[SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE, list[ChecksumEvmAddress]],  # noqa: E501
         migration_version: int,
         migration_steps: int,
         migration_list: list[MigrationRecord],
@@ -148,12 +159,11 @@ def detect_accounts_migration_check(
     assert set(accounts.eth) == set(current_evm_accounts)
     assert set(rotki.chains_aggregator.accounts.eth) == set(current_evm_accounts)
     chain_to_added_address = []
-    for chain in expected_detected_addresses_per_chain:
-        chain_addresses = expected_detected_addresses_per_chain[chain]
+    for chain, chain_addresses in expected_detected_addresses_per_chain.items():
         assert set(getattr(accounts, chain.get_key())) == set(chain_addresses)
         assert set(getattr(rotki.chains_aggregator.accounts, chain.get_key())) == set(chain_addresses)  # noqa: E501
         chain_to_added_address.extend(
-            [{'evm_chain': chain.to_chain_id().to_name(), 'address': address} for address in chain_addresses],  # noqa: E501
+            [{'chain': chain.serialize(), 'address': address} for address in chain_addresses],
         )
 
     assert_add_addresses_migration_ws_messages(websocket_connection, migration_version, migration_steps, chain_to_added_address)  # noqa: E501
@@ -266,8 +276,8 @@ def test_failed_migration(database):
         DataMigrationManager(rotki).maybe_migrate_data()
 
     with database.conn.read_ctx() as cursor:
-        settings = database.get_settings(cursor)
-    assert settings.last_data_migration == 0, 'no migration should have happened'
+        last_data_migration = database.get_setting(cursor=cursor, name='last_data_migration')
+    assert last_data_migration == 0, 'no migration should have happened'
     errors = rotki.msg_aggregator.consume_errors()
     warnings = rotki.msg_aggregator.consume_warnings()
     assert len(warnings) == 0
@@ -458,6 +468,183 @@ def test_migration_13(
     )
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('data_migration_version', [13])
+@pytest.mark.parametrize('perform_upgrades_at_unlock', [True])
+@pytest.mark.parametrize('ethereum_accounts', [[
+    '0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12',  # should have zksynclite
+    '0xfa8666aE51F5b136596248d9411b03AC9040fff0',  # should have scroll
+    '0x2F4c0f60f2116899FA6D4b9d8B979167CE963d25',  # should have neither
+]])
+@pytest.mark.parametrize('legacy_messages_via_websockets', [True])
+@pytest.mark.parametrize('network_mocking', [False])
+@pytest.mark.parametrize('scroll_manager_connect_at_start', [(SCROLL_ETHERSCAN_NODE,)])
+def test_migration_14(
+        rotkehlchen_api_server: 'APIServer',
+        ethereum_accounts: list[ChecksumEvmAddress],
+        websocket_connection: 'WebsocketReader',
+) -> None:
+    """
+    Test migration 14
+
+    - Test that detecting scroll and zksynclite accounts works properly
+    """
+    detect_accounts_migration_check(
+        expected_detected_addresses_per_chain={
+            SupportedBlockchain.SCROLL: [ethereum_accounts[1]],
+            SupportedBlockchain.ZKSYNC_LITE: [ethereum_accounts[0]],
+        },
+        migration_version=14,
+        migration_steps=6,  # 3 (current eth accounts) + 3 (potentially write to db + updating spam assets and rpc nodes + new round msg)  # noqa: E501
+        migration_list=[MIGRATION_LIST[7]],
+        current_evm_accounts=ethereum_accounts,
+        rotkehlchen_api_server=rotkehlchen_api_server,
+        websocket_connection=websocket_connection,
+    )
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('have_decoders', [True])
+@pytest.mark.parametrize('data_migration_version', [14])
+@pytest.mark.parametrize('perform_upgrades_at_unlock', [True])
+@pytest.mark.parametrize('should_mock_current_price_queries', [False])
+@pytest.mark.parametrize('base_accounts', [[
+    '0xAE70bC0Cbe03ceF2a14eCA507a2863441C6Df7A1',
+    '0xC960338B529e0353F570f62093Fd362B8FB55f0B',
+]])
+def test_migration_15(rotkehlchen_api_server: 'APIServer', inquirer: 'Inquirer') -> None:
+    """Test migration 15
+
+    - Test that Hop LP tokens' protocol is set after the migration."""
+    rotki = rotkehlchen_api_server.rest_api.rotkehlchen
+    base_manager = rotki.chains_aggregator.get_chain_manager(SupportedBlockchain.BASE)
+    inquirer.inject_evm_managers([(ChainID.BASE, base_manager)])
+
+    # check Hop LP token price before migration
+    test_hop_lp_1 = get_or_create_evm_token(
+        userdb=rotki.data.db,
+        evm_address=string_to_evm_address('0xbBA837dFFB3eCf4638D200F11B8c691eA641AdCb'),
+        chain_id=ChainID.ARBITRUM_ONE,
+        token_kind=EvmTokenKind.ERC20,
+    )
+    test_hop_lp_2 = get_or_create_evm_token(
+        userdb=rotki.data.db,
+        evm_address=string_to_evm_address('0xe9605BEc1c5C3E81F974F80b8dA9fBEFF4845d4D'),
+        chain_id=ChainID.BASE,
+        token_kind=EvmTokenKind.ERC20,
+    )
+    assert test_hop_lp_2.protocol is None
+    assert inquirer.find_usd_price(test_hop_lp_2) == ZERO_PRICE
+
+    with rotki.data.db.conn.write_ctx() as write_cursor:
+        DBHistoryEvents(rotki.data.db).add_history_events(
+            write_cursor=write_cursor,
+            history=[
+                EvmEvent(
+                    sequence_index=2,
+                    timestamp=TimestampMS(1714582939000),
+                    location=Location.ARBITRUM_ONE,
+                    event_type=HistoryEventType.RECEIVE,
+                    event_subtype=HistoryEventSubType.RECEIVE_WRAPPED,
+                    asset=test_hop_lp_1,
+                    balance=Balance(amount=FVal('0.023220146656543904')),
+                    location_label='0xC960338B529e0353F570f62093Fd362B8FB55f0B',
+                    notes='Receive 0.023220146656543904 HOP-LP-rETH after providing liquidity in Hop',  # noqa: E501
+                    tx_hash=deserialize_evm_tx_hash('0x2ab0135c1c200cf5095bd107c9e8c0d712b2a14374cc328848256d896d6e4685'),
+                    counterparty=CPT_HOP,
+                    address=ZERO_ADDRESS,
+                ),
+                EvmEvent(
+                    sequence_index=2,
+                    timestamp=TimestampMS(1714582939000),
+                    location=Location.BASE,
+                    event_type=HistoryEventType.RECEIVE,
+                    event_subtype=HistoryEventSubType.RECEIVE_WRAPPED,
+                    asset=test_hop_lp_2,
+                    balance=Balance(amount=FVal('0.023220146656543904')),
+                    location_label='0xAE70bC0Cbe03ceF2a14eCA507a2863441C6Df7A1',
+                    notes='Receive 0.023220146656543904 HOP-LP-ETH after providing liquidity in Hop',  # noqa: E501
+                    tx_hash=deserialize_evm_tx_hash('0xa50286f6288ca13452a490d766aaf969d20cce7035b514423a7b1432fd329cc5'),
+                    counterparty=CPT_HOP,
+                    address=ZERO_ADDRESS,
+                ),
+            ],
+        )
+    with patch(
+        'rotkehlchen.data_migrations.manager.MIGRATION_LIST',
+        new=[MIGRATION_LIST[8]],
+    ):
+        DataMigrationManager(rotki).maybe_migrate_data()
+
+    # Hop LP token price before migration
+    assert inquirer.find_usd_price(test_hop_lp_2).is_close(3803.566408)
+
+
+@pytest.mark.parametrize('data_migration_version', [15])
+@pytest.mark.parametrize('perform_upgrades_at_unlock', [True])
+def test_migration_16(rotkehlchen_api_server: 'APIServer', globaldb: 'GlobalDBHandler') -> None:
+    """Test migration 16
+
+    - Test that all underlying tokens that are their own parent are removed."""
+    # add some underlying tokens with their own parent as themselves
+    with globaldb.conn.write_ctx() as write_cursor:
+        write_cursor.execute(
+            'INSERT INTO underlying_tokens_list (identifier, parent_token_entry, weight) VALUES (?, ?, ?)',  # noqa: E501
+            (A_USDT.identifier, A_USDT.identifier, 1),
+        )
+        write_cursor.execute(
+            'INSERT INTO underlying_tokens_list (identifier, parent_token_entry, weight) VALUES (?, ?, ?)',  # noqa: E501
+            (A_PAX.identifier, A_PAX.identifier, 1),
+        )
+
+    with globaldb.conn.read_ctx() as cursor:
+        underlying_count_before = cursor.execute(
+            'SELECT COUNT(*) FROM underlying_tokens_list',
+        ).fetchone()[0]
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM underlying_tokens_list WHERE identifier=parent_token_entry',
+        ).fetchone()[0] == 2
+
+    with patch(
+        'rotkehlchen.data_migrations.manager.MIGRATION_LIST',
+        new=[MIGRATION_LIST[9]],
+    ):
+        DataMigrationManager(rotkehlchen_api_server.rest_api.rotkehlchen).maybe_migrate_data()
+
+    # Check that the two underlying tokens have been removed
+    with globaldb.conn.read_ctx() as cursor:
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM underlying_tokens_list',
+        ).fetchone()[0] == underlying_count_before - 2
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM underlying_tokens_list WHERE identifier=parent_token_entry',
+        ).fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('data_migration_version', [16])
+@pytest.mark.parametrize('perform_upgrades_at_unlock', [False])
+@pytest.mark.parametrize('custom_globaldb', ['v7_global.db'])
+@pytest.mark.parametrize('use_custom_database', ['v43_rotkehlchen.db'])
+@pytest.mark.parametrize('target_globaldb_version', [8])
+def test_migration_17(rotkehlchen_api_server: 'APIServer') -> None:
+    with patch(
+        'rotkehlchen.data_migrations.manager.MIGRATION_LIST',
+        new=[MIGRATION_LIST[10]],
+    ):
+        DataMigrationManager(rotkehlchen_api_server.rest_api.rotkehlchen).maybe_migrate_data()
+    rotki = rotkehlchen_api_server.rest_api.rotkehlchen
+    with rotki.data.db.conn.read_ctx() as cursor:
+        assert cursor.execute(
+            'SELECT COUNT(*) FROM location WHERE location IN (?, ?, ?, ?)',
+            (
+                Location.BITCOIN.serialize_for_db(),
+                Location.BITCOIN_CASH.serialize_for_db(),
+                Location.POLKADOT.serialize_for_db(),
+                Location.KUSAMA.serialize_for_db(),
+            ),
+        ).fetchone()[0] == 4
+
+
 @pytest.mark.parametrize('perform_upgrades_at_unlock', [False])
 # make sure fixtures does not modify DB last_data_migration
 @pytest.mark.parametrize('data_migration_version', [None])
@@ -479,3 +666,8 @@ def test_new_db_remembers_last_migration_even_if_no_migrations_run(database):
     with rotki.data.db.conn.read_ctx() as cursor:
         cursor.execute('SELECT value FROM settings WHERE name="last_data_migration"')
         assert int(cursor.fetchone()[0]) == LAST_DATA_MIGRATION
+
+
+def test_last_data_migration_constant() -> None:
+    """Test that the LAST_DATA_MIGRATION constant is updated correctly"""
+    assert max(x.version for x in MIGRATION_LIST) == LAST_DATA_MIGRATION

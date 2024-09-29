@@ -1,6 +1,7 @@
 import random
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 import pytest
 import requests
@@ -12,16 +13,18 @@ from rotkehlchen.constants.assets import A_ETH, A_SUSHI, A_USDT
 from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.db.filtering import HistoryEventFilterQuery
 from rotkehlchen.db.history_events import DBHistoryEvents
+from rotkehlchen.errors.asset import UnknownAsset
 from rotkehlchen.fval import FVal
 from rotkehlchen.history.events.structures.eth2 import EthWithdrawalEvent
 from rotkehlchen.history.events.structures.evm_event import SUB_SWAPS_DETAILS, EvmEvent
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
+from rotkehlchen.tests.utils.accounting import toggle_ignore_an_asset
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_ok_async_response,
     assert_proper_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     assert_simple_ok_response,
 )
 from rotkehlchen.tests.utils.history_base_entry import (
@@ -52,6 +55,7 @@ def assert_editing_works(
         events_db: 'DBHistoryEvents',
         sequence_index: int,
         autoedited: dict[str, Any] | None = None,
+        also_redecode: bool = False,
 ):
     """A function to assert editing works per entry type. If autoedited is given
     then we check that some fields, given in autoedited, were automatically edited
@@ -66,7 +70,24 @@ def assert_editing_works(
             assert hasattr(entry, attr), f'No {attr} in entry'
             setattr(entry, attr, value)
 
-    """Assert that editing any subclass of history base entry is successfully done"""
+    def assert_event_got_edited(entry: 'HistoryBaseEntry'):
+        with events_db.db.conn.read_ctx() as cursor:
+            events = events_db.get_history_events(
+                cursor=cursor,
+                filter_query=HistoryEventFilterQuery.make(event_identifiers=[entry.event_identifier]),
+                has_premium=True,
+                group_by_event_ids=False,
+            )
+
+        # now that actual edit happened, tweak autoedited fields for the equality check
+        if autoedited:
+            for key, value in autoedited.items():
+                setattr(entry, key, value)
+
+        for event in events:
+            if event.identifier == entry.identifier:
+                assert event == entry
+
     entry.timestamp = TimestampMS(entry.timestamp + 2)
     entry.balance = Balance(amount=FVal('1500.1'), usd_value=FVal('1499.45'))
     edit_entry('event_type', HistoryEventType.DEPOSIT)
@@ -86,24 +107,24 @@ def assert_editing_works(
     )
     assert_simple_ok_response(response)
     assert entry.identifier is not None
-    with events_db.db.conn.read_ctx() as cursor:
-        events = events_db.get_history_events(
-            cursor=cursor,
-            filter_query=HistoryEventFilterQuery.make(event_identifiers=[entry.event_identifier]),
-            has_premium=True,
-            group_by_event_ids=False,
-        )
+    assert_event_got_edited(entry)
 
-    # now that actual edit happened, tweak autoedited fields for the equality check
-    if autoedited:
-        for key, value in autoedited.items():
-            setattr(entry, key, value)
+    if not also_redecode:
+        return
 
-    for event in events:
-        if event.identifier == entry.identifier:
-            assert event == entry
+    assert isinstance(entry, EvmEvent)  # should be an evm event for redeocding
+
+    # also redecode without custom deletion and see the custom events
+    # are still correctly shown and not deleted
+    response = requests.put(
+        api_url_for(rotkehlchen_api_server, 'evmtransactionsresource'),
+        json={'evm_chain': 'ethereum', 'tx_hash': entry.tx_hash.hex(), 'delete_custom': False},
+    )
+    assert_simple_ok_response(response)
+    assert_event_got_edited(entry)
 
 
+@pytest.mark.parametrize('have_decoders', [True])  # so we can run redecode after add/edit/delete
 @pytest.mark.parametrize('number_of_eth_accounts', [0])
 def test_add_edit_delete_entries(rotkehlchen_api_server: 'APIServer'):
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
@@ -115,7 +136,7 @@ def test_add_edit_delete_entries(rotkehlchen_api_server: 'APIServer'):
             api_url_for(rotkehlchen_api_server, 'historyeventresource'),
             json=json_data,
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert 'identifier' in result
         entry.identifier = result['identifier']
 
@@ -168,7 +189,7 @@ def test_add_edit_delete_entries(rotkehlchen_api_server: 'APIServer'):
         contained_in_msg='Failed to add event to the DB. It already exists',
         status_code=HTTPStatus.CONFLICT,
     )
-    assert_editing_works(entry, rotkehlchen_api_server, db, 4)  # evm event
+    assert_editing_works(entry, rotkehlchen_api_server, db, 4, also_redecode=True)  # evm event
     assert_editing_works(entries[5], rotkehlchen_api_server, db, 5)  # history event
     assert_editing_works(entries[6], rotkehlchen_api_server, db, 6, {'notes': 'Exited validator 1001 with 1500.1 ETH', 'event_identifier': 'EW_1001_19460'})  # eth withdrawal event  # noqa: E501
     assert_editing_works(entries[7], rotkehlchen_api_server, db, 7, {'notes': 'Deposit 1500.1 ETH to validator 1001'})  # eth deposit event  # noqa: E501
@@ -327,7 +348,7 @@ def test_event_with_details(rotkehlchen_api_server: 'APIServer'):
             'historyeventresource',
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     events = result['entries']
     assert events[1]['has_details'] is True
 
@@ -364,7 +385,7 @@ def test_event_with_details(rotkehlchen_api_server: 'APIServer'):
             'eventdetailsresource',
         ), json={'identifier': events[1]['entry']['identifier']},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == {SUB_SWAPS_DETAILS: event2.extra_data[SUB_SWAPS_DETAILS]}  # type: ignore[index]  # extra_data is not None here
 
 
@@ -389,7 +410,7 @@ def test_get_events(rotkehlchen_api_server: 'APIServer'):
             'historyeventresource',
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries_found'] == 9
     assert result['entries_limit'] == 100
     assert result['entries_total'] == 9
@@ -413,7 +434,7 @@ def test_get_events(rotkehlchen_api_server: 'APIServer'):
         ),
         json={'group_by_event_ids': True},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries_found'] == 6
     assert result['entries_limit'] == 100
     assert result['entries_total'] == 6
@@ -430,7 +451,7 @@ def test_get_events(rotkehlchen_api_server: 'APIServer'):
         ),
         json={'group_by_event_ids': True, 'offset': 1, 'limit': 1},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 1
     assert result['entries_found'] == 6
     assert result['entries_limit'] == 100
@@ -444,7 +465,7 @@ def test_get_events(rotkehlchen_api_server: 'APIServer'):
         ),
         json={'group_by_event_ids': True, 'offset': 0, 'limit': 1, 'asset': 'ETH'},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 1
     assert result['entries_found'] == 4
     assert result['entries_limit'] == 100
@@ -458,7 +479,7 @@ def test_get_events(rotkehlchen_api_server: 'APIServer'):
         ),
         json={'location': Location.KRAKEN.serialize()},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 1
     assert result['entries_found'] == 1
     assert result['entries_limit'] == 100
@@ -471,11 +492,80 @@ def test_get_events(rotkehlchen_api_server: 'APIServer'):
         ),
         json={'location': Location.ETHEREUM.serialize()},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 8
     assert result['entries_found'] == 8
     assert result['entries_limit'] == 100
     assert result['entries_total'] == 9
+
+    # test pagination and exclude_ignored_assets and group by event ids works
+    toggle_ignore_an_asset(rotkehlchen_api_server, A_ETH)
+    for exclude_ignored_assets, found in ((True, 2), (False, 6)):
+        response = requests.post(
+            api_url_for(
+                rotkehlchen_api_server,
+                'historyeventresource',
+            ),
+            json={'group_by_event_ids': True, 'offset': 0, 'limit': 5, 'exclude_ignored_assets': exclude_ignored_assets},  # noqa: E501
+        )
+        result = assert_proper_sync_response_with_result(response)
+        assert len(result['entries']) == min(found, 5)
+        assert result['entries_found'] == found
+        assert result['entries_limit'] == 100
+        assert result['entries_total'] == 6
+
+    # test pagination and exclude_ignored_assets without group by event ids works
+    for exclude_ignored_assets, events_found, sub_events_found in ((True, 3, 3), (False, 9, 9)):
+        response = requests.post(
+            api_url_for(
+                rotkehlchen_api_server,
+                'historyeventresource',
+            ),
+            json={'group_by_event_ids': False, 'offset': 0, 'limit': 5, 'exclude_ignored_assets': exclude_ignored_assets},  # noqa: E501
+        )
+        result = assert_proper_sync_response_with_result(response)
+        assert len(result['entries']) == min(sub_events_found, 5)
+        assert result['entries_found'] == events_found
+        assert result['entries_limit'] == 100
+        assert result['entries_total'] == 9
+
+    # test pagination works fine with/without exclude_ignored_assets filter with/without premium
+    db_history_events = DBHistoryEvents(rotkehlchen_api_server.rest_api.rotkehlchen.data.db)
+    with db_history_events.db.user_write() as cursor:
+        for limit, exclude_ignored, total, found in (
+            (None, False, 6, 6),  # premium without ignoring assets, we get all the events
+            (None, True, 2, 2),  # premium with ignoring assets (ETH), we get only 2 events
+            (3, False, 6, 3),  # free limit (3) without ignoring assets, total events are 6 but we get only 3 (limited)  # noqa: E501
+            (2, True, 2, 2),  # free limit (2) with ignoring assets, total events are 2, all shown (limit not exceeded)  # noqa: E501
+            (1, False, 6, 1),  # free limit (1) without ignoring assets, total events are 6 but we get only 1 (limited)  # noqa: E501
+            (1, True, 2, 1),  # free limit (1) with ignoring assets, total events are 2 but we get only 1 (limited)  # noqa: E501
+        ):
+            assert db_history_events.get_history_events_count(
+                cursor=cursor,
+                group_by_event_ids=True,
+                query_filter=HistoryEventFilterQuery.make(exclude_ignored_assets=exclude_ignored),
+                entries_limit=limit,
+            ) == (total, found)
+
+    # test query an event with an unknown asset
+    def mock_check_asset_existence(identifier: str, query_packaged_db: bool = True):
+        raise UnknownAsset(identifier)
+
+    with patch(
+        target='rotkehlchen.assets.asset.AssetResolver.check_existence',
+        new=mock_check_asset_existence,
+    ):
+        response = requests.post(
+            api_url_for(
+                rotkehlchen_api_server,
+                'historyeventresource',
+            ),
+        )
+    assert_proper_sync_response_with_result(response)
+    assert rotkehlchen_api_server.rest_api.rotkehlchen.msg_aggregator.consume_errors() == [
+        'Could not deserialize one or more history event(s). '
+        'Try redecoding the event(s) or check the logs for more details.',
+    ]
 
 
 @pytest.mark.parametrize('number_of_eth_accounts', [0])

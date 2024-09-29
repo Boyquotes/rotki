@@ -95,7 +95,7 @@ selfkey_asset_data = AssetData(
     chain_id=ChainID.ETHEREUM,
     token_kind=EvmTokenKind.ERC20,
     decimals=18,
-    cryptocompare=None,
+    cryptocompare='KEY',
     coingecko='selfkey',
     protocol=None,
 )
@@ -268,14 +268,13 @@ def test_get_asset_with_symbol(globaldb):
     # both categories of assets
     asset_data = globaldb.get_assets_with_symbol('KEY')
     bihukey_address = string_to_evm_address('0x4Cd988AfBad37289BAAf53C13e98E2BD46aAEa8c')
-    aave_address = string_to_evm_address('0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9')
     renbtc_address = string_to_evm_address('0xEB4C2781e4ebA804CE9a9803C67d0893436bB27D')
-    assert asset_data == [
+    expected_assets = {
         selfkey_asset,
         EvmToken.initialize(
             name='Bihu KEY',
             symbol='KEY',
-            started=1507822985,
+            started=Timestamp(1507822985),
             forked=None,
             swapped_for=None,
             address=bihukey_address,
@@ -290,55 +289,26 @@ def test_get_asset_with_symbol(globaldb):
             name='KeyCoin',
             symbol='KEY',
             asset_type=AssetType.OWN_CHAIN,
-            started=1405382400,
+            started=Timestamp(1405382400),
             forked=None,
             swapped_for=None,
             cryptocompare='KEYC',
             coingecko='',
-        )]
+        )}
+    assert expected_assets.issubset(set(asset_data))
+    assert all('key' in asset.symbol.lower() for asset in asset_data) is True
     # only non-ethereum token
     assert globaldb.get_assets_with_symbol('BIDR') == [bidr_asset]
     # only ethereum token
-    expected_assets = [EvmToken.initialize(
-        name='Aave Token',
-        symbol='AAVE',
-        started=1600970788,
-        forked=None,
-        swapped_for=None,
-        address=aave_address,
-        chain_id=ChainID.ETHEREUM,
-        token_kind=EvmTokenKind.ERC20,
-        decimals=18,
-        cryptocompare=None,
-        coingecko='aave',
-        protocol=None,
-    ), EvmToken.initialize(
-        name='Aave (PoS)',
-        symbol='AAVE',
-        started=None,
-        forked=None,
-        swapped_for=None,
-        address='0xD6DF932A45C0f255f85145f286eA0b292B21C90B',
-        chain_id=ChainID.POLYGON_POS,
-        token_kind=EvmTokenKind.ERC20,
-        decimals=18,
-        cryptocompare='',
-        coingecko='aave',
-        protocol=None,
-    ), EvmToken.initialize(
-        name='Binance-Peg Aave Token',
-        symbol='AAVE',
-        started=Timestamp(1611903498),
-        forked=None,
-        swapped_for=None,
-        address='0xfb6115445Bff7b52FeB98650C87f44907E58f802',
-        chain_id=ChainID.BINANCE,
-        token_kind=EvmTokenKind.ERC20,
-        decimals=18,
-        cryptocompare='',
-        coingecko='aave',
-        protocol=None,
-    )]
+    expected_assets = [
+        Asset('eip155:1/erc20:0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9').resolve_to_evm_token(),
+        Asset('eip155:137/erc20:0xD6DF932A45C0f255f85145f286eA0b292B21C90B').resolve_to_evm_token(),
+        Asset('eip155:56/erc20:0xfb6115445Bff7b52FeB98650C87f44907E58f802').resolve_to_evm_token(),
+        Asset('eip155:534352/erc20:0x79379C0E09a41d7978f883a56246290eE9a8c4d3').resolve_to_evm_token(),
+        Asset('eip155:42161/erc20:0xba5DdD1f9d7F570dc94a51479a000E3BCE967196').resolve_to_evm_token(),
+        Asset('eip155:10/erc20:0x76FB31fb4af56892A25e32cFC43De717950c9278').resolve_to_evm_token(),
+        Asset('eip155:250/erc20:0x6a07A792ab2965C72a5B8088d3a069A7aC3a993B').resolve_to_evm_token(),
+    ]
     assert globaldb.get_assets_with_symbol('AAVE') == expected_assets
     # finally non existing asset
     assert globaldb.get_assets_with_symbol('DASDSADSDSDSAD') == []
@@ -383,7 +353,11 @@ def test_get_asset_with_symbol(globaldb):
         cryptocompare='',
         coingecko='renbtc',
         protocol=None,
-    )]
+    ),
+        EvmToken('eip155:10/erc20:0x85f6583762Bc76d775eAB9A7456db344f12409F7'),
+        EvmToken('eip155:137/erc20:0x8117214C361098915E6ec1a108dEF4e63F3C9ee5'),
+        EvmToken('eip155:42161/erc20:0xDBf31dF14B66535aF65AaC99C32e9eA844e14501'),
+    ]
     for x in itertools.product(('ReNbTc', 'renbtc', 'RENBTC', 'rEnBTc'), (None, AssetType.EVM_TOKEN)):  # noqa: E501
         assert globaldb.get_assets_with_symbol(*x) == expected_renbtc
 
@@ -419,7 +393,7 @@ def test_get_all_asset_data_specific_ids(globaldb):
         chain_id=None,
         token_kind=None,
         decimals=None,
-        cryptocompare=None,
+        cryptocompare='BTC',
         coingecko='bitcoin',
         protocol=None,
     )
@@ -435,7 +409,7 @@ def test_get_all_asset_data_specific_ids(globaldb):
         chain_id=None,
         token_kind=None,
         decimals=None,
-        cryptocompare=None,
+        cryptocompare='ETH',
         coingecko='ethereum',
         protocol=None,
     )
@@ -729,7 +703,7 @@ def test_global_db_reset(globaldb, database):
         symbol='1INCH',
         decimals=18,
     )
-    GlobalDBHandler().edit_evm_token(one_inch_update)
+    GlobalDBHandler.edit_evm_token(one_inch_update)
 
     # Add some data to the tables that reference assets to make sure that it is not
     # touched by the reset
@@ -740,8 +714,8 @@ def test_global_db_reset(globaldb, database):
         timestamp=1337,
         price=ONE,
     )
-    GlobalDBHandler().add_single_historical_price(historical_price)
-    GlobalDBHandler().add_user_owned_assets([A_ETH, A_DAI, A_CRV])
+    GlobalDBHandler.add_single_historical_price(historical_price)
+    GlobalDBHandler.add_user_owned_assets([A_ETH, A_DAI, A_CRV])
     db_custom_assets = DBCustomAssets(database)
     custom_asset = CustomAsset.initialize(
         identifier=str(uuid4()),
@@ -922,7 +896,7 @@ def test_asset_deletion(globaldb):
     )
 
     # Then delete this token
-    GlobalDBHandler().delete_evm_token(
+    GlobalDBHandler.delete_evm_token(
         address=token_data.evm_address,
         chain_id=ChainID.ETHEREUM,
     )
@@ -941,7 +915,7 @@ def test_asset_deletion(globaldb):
         also_eth=False,
     )
     # Delete asset
-    GlobalDBHandler().delete_asset_by_identifier(identifier=asset_id)
+    GlobalDBHandler.delete_asset_by_identifier(identifier=asset_id)
     # Check that it was deleted properly
     check_tables(
         asset_id=asset_id,
@@ -1205,6 +1179,7 @@ def test_get_assets_missing_information_by_symbol(globaldb):
     assert assets[0].name == 'Test token'
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 def test_for_spam_tokens(database: 'DBHandler', ethereum_inquirer: EthereumInquirer) -> None:
     """Test different cases of spam assets that we already know"""
     assert check_if_spam_token(symbol='USDC', name='USD-SWAP˳COM') is True  # test for unicode symbols that might resemble dots  # noqa: E501
@@ -1270,6 +1245,12 @@ def test_for_spam_tokens(database: 'DBHandler', ethereum_inquirer: EthereumInqui
     with database.conn.read_ctx() as cursor:
         assert token.identifier not in database.get_ignored_asset_ids(cursor)
 
+    # check for names that used `-` and then something that could be a url extension
+    assert check_if_spam_token(
+        symbol='yvCurve-LINK',
+        name='Curve LINK Pool yVault',
+    ) is False
+
 
 def test_get_evm_tokens(globaldb):
     tokens = globaldb.get_evm_tokens(chain_id=ChainID.POLYGON_POS)
@@ -1285,3 +1266,49 @@ def test_get_evm_tokens(globaldb):
     tokens = globaldb.get_evm_tokens(chain_id=ChainID.ETHEREUM, protocol=CPT_COMPOUND, exceptions=(exception_address,))  # noqa: E501
     assert len(tokens) == tokens_without_exception - 1
     assert not any(token.evm_address == exception_address for token in tokens)
+
+
+def test_assets_in_same_collection(globaldb: GlobalDBHandler):
+    """Check that we get the expected related assets when querying assets in a collection"""
+    wsteth = Asset('eip155:1/erc20:0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0')
+    realted_assets = globaldb.get_assets_in_same_collection(identifier=wsteth.identifier)
+
+    assert realted_assets == (
+        wsteth,
+        Asset('eip155:10/erc20:0x1F32b1c2345538c0c6f582fCB022739c4A194Ebb'),
+        Asset('eip155:100/erc20:0x6C76971f98945AE98dD7d4DFcA8711ebea946eA6'),
+        Asset('eip155:42161/erc20:0x5979D7b546E38E414F7E9822514be443A4800529'),
+        Asset('eip155:534352/erc20:0xf610A9dfB7C89644979b4A0f27063E9e7d7Cda32'),
+        Asset('eip155:8453/erc20:0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452'),
+    )
+
+    # check an asset with no related assets
+    assert globaldb.get_assets_in_same_collection(identifier=A_ETH.identifier) == (A_ETH,)
+
+
+def test_check_wal_mode_of_package_db(globaldb: GlobalDBHandler) -> None:
+    """
+    If the packaged db is modified and the wal mode is activated users can have issues
+    when the database is in a read only device. To avoid such issues we need to ensure
+    that no new files are created and this is why we prevent from shipping the dpackaged database
+    in WAL mode.
+    """
+    with globaldb.packaged_db_conn().cursor() as cursor:
+        journal_mode = cursor.execute('PRAGMA journal_mode').fetchone()[0]
+
+    assert journal_mode == 'delete'
+
+
+def test_error_bad_underlying_token(globaldb: GlobalDBHandler):
+    """Test that we raise error if we try to add a token as its own underlying token"""
+    a_lusd = A_LUSD.resolve_to_evm_token()
+    with (
+        pytest.raises(InputError),
+        globaldb.conn.write_ctx() as write_cursor,
+    ):
+        globaldb._add_underlying_tokens(
+            write_cursor=write_cursor,
+            parent_token_identifier=A_LUSD.identifier,
+            underlying_tokens=[UnderlyingToken(address=a_lusd.evm_address, token_kind=EvmTokenKind.ERC20, weight=ONE)],  # noqa: E501
+            chain_id=a_lusd.chain_id,
+        )

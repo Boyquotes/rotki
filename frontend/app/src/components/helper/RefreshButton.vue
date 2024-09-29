@@ -7,8 +7,8 @@ withDefaults(
   }>(),
   {
     disabled: false,
-    loading: false
-  }
+    loading: false,
+  },
 );
 
 const emit = defineEmits<{
@@ -17,7 +17,10 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <RuiTooltip :popper="{ placement: 'top' }" open-delay="400">
+  <RuiTooltip
+    :popper="{ placement: 'top' }"
+    :open-delay="400"
+  >
     <template #activator>
       <RuiButton
         icon
@@ -31,6 +34,6 @@ const emit = defineEmits<{
         <RuiIcon name="refresh-line" />
       </RuiButton>
     </template>
-    <span>{{ tooltip }}</span>
+    {{ tooltip }}
   </RuiTooltip>
 </template>

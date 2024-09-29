@@ -1,27 +1,15 @@
-import {
-  AssetEntry,
-  type Balance,
-  type BigNumber,
-  NumericString
-} from '@rotki/common';
+import { AssetEntry, type Balance, type BigNumber, NumericString } from '@rotki/common';
 import { forEach } from 'lodash-es';
 import { z } from 'zod';
-import {
-  type PriceOracle,
-  PriceOracleEnum
-} from '@/types/settings/price-oracle';
+import { type PriceOracle, PriceOracleEnum } from '@/types/settings/price-oracle';
 
-export const AssetPriceInput = z.tuple([
-  NumericString,
-  z.number(),
-  z.boolean()
-]);
+export const AssetPriceInput = z.tuple([NumericString, z.number(), z.boolean()]);
 
 export const AssetPrice = z.object({
   value: NumericString,
   usdPrice: NumericString.nullish(),
   isManualPrice: z.boolean(),
-  isCurrentCurrency: z.boolean()
+  isCurrentCurrency: z.boolean(),
 });
 
 export const AssetPrices = z.record(AssetPrice);
@@ -32,9 +20,9 @@ export const AssetPriceResponse = z
   .object({
     assets: z.record(AssetPriceInput),
     targetAsset: z.string(),
-    oracles: z.record(PriceOracleEnum, z.number())
+    oracles: z.record(PriceOracleEnum, z.number()),
   })
-  .transform(response => {
+  .transform((response) => {
     const mappedAssets: AssetPrices = {};
     const assets = response.assets;
     forEach(assets, (val, asset) => {
@@ -42,7 +30,7 @@ export const AssetPriceResponse = z
       mappedAssets[asset] = {
         value,
         isManualPrice: oracle === response.oracles.manualcurrent,
-        isCurrentCurrency
+        isCurrentCurrency,
       };
     });
 
@@ -53,7 +41,7 @@ export type AssetPriceResponse = z.infer<typeof AssetPriceResponse>;
 
 export const AssetPair = z.object({
   fromAsset: z.string(),
-  toAsset: z.string()
+  toAsset: z.string(),
 });
 
 export type AssetPair = z.infer<typeof AssetPair>;
@@ -73,7 +61,7 @@ const AssetTimedPrices = z.record(TimedPrices);
 
 export const HistoricPrices = z.object({
   assets: AssetTimedPrices,
-  targetAsset: z.string()
+  targetAsset: z.string(),
 });
 
 export type HistoricPrices = z.infer<typeof HistoricPrices>;
@@ -92,17 +80,22 @@ export interface AssetPriceInfo extends Balance {
 }
 
 export const ManualPrice = AssetPair.extend({
-  price: NumericString
+  price: NumericString,
 });
 
 export type ManualPrice = z.infer<typeof ManualPrice>;
+
+export type ManualPriceWithUsd = ManualPrice & {
+  id: number;
+  usdPrice: BigNumber;
+};
 
 export const ManualPrices = z.array(ManualPrice);
 
 export type ManualPrices = z.infer<typeof ManualPrices>;
 
 export const HistoricalPrice = ManualPrice.extend({
-  timestamp: z.number()
+  timestamp: z.number(),
 });
 
 export type HistoricalPrice = z.infer<typeof HistoricalPrice>;
@@ -112,26 +105,22 @@ export const HistoricalPrices = z.array(HistoricalPrice);
 export type HistoricalPrices = z.infer<typeof HistoricalPrices>;
 
 export const ManualPriceFormPayload = AssetPair.extend({
-  price: z.string()
+  price: z.string(),
 });
 
 export type ManualPriceFormPayload = z.infer<typeof ManualPriceFormPayload>;
 
 export const HistoricalPriceFormPayload = ManualPriceFormPayload.extend({
-  timestamp: z.number()
+  timestamp: z.number(),
 });
 
-export type HistoricalPriceFormPayload = z.infer<
-  typeof HistoricalPriceFormPayload
->;
+export type HistoricalPriceFormPayload = z.infer<typeof HistoricalPriceFormPayload>;
 
 export const HistoricalPriceDeletePayload = AssetPair.extend({
-  timestamp: z.number()
+  timestamp: z.number(),
 });
 
-export type HistoricalPriceDeletePayload = z.infer<
-  typeof HistoricalPriceDeletePayload
->;
+export type HistoricalPriceDeletePayload = z.infer<typeof HistoricalPriceDeletePayload>;
 
 export interface ManualPricePayload {
   readonly fromAsset: string | null;
@@ -141,13 +130,15 @@ export interface ManualPricePayload {
 export const PriceInformation = z.object({
   usdPrice: NumericString,
   manuallyInput: z.boolean(),
-  priceAsset: z.string().nonempty(),
-  priceInAsset: NumericString
+  priceAsset: z.string().min(1),
+  priceInAsset: NumericString,
 });
 
 export type PriceInformation = z.infer<typeof PriceInformation>;
 
 export const NftPrice = PriceInformation.merge(AssetEntry);
+
+export type NftPrice = z.infer<typeof NftPrice>;
 
 export const NftPriceArray = z.array(NftPrice);
 

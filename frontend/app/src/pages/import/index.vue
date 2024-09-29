@@ -1,27 +1,41 @@
 <script setup lang="ts">
+import { NoteLocation } from '@/types/notes';
+
+definePage({
+  name: 'import',
+  meta: {
+    noteLocation: NoteLocation.IMPORT,
+  },
+});
+
 const { t } = useI18n();
 </script>
 
 <template>
   <TablePageLayout :title="[t('import_data.title')]">
     <template #buttons>
-      <HintMenuIcon left>
+      <HintMenuIcon :popper="{ placement: 'left-start' }">
         {{ t('import_data.description') }}
       </HintMenuIcon>
     </template>
 
     <RuiAlert
-      variant="outlined"
       type="warning"
-      :title="t('import_data.notice_warning')"
+      :title="t('common.important_notice')"
     >
-      <i18n tag="span" path="import_data.notice">
+      <i18n-t
+        tag="span"
+        keypath="import_data.notice"
+      >
         <template #link>
-          <ExternalLink url="https://github.com/rotki/rotki/issues/new/choose">
+          <ExternalLink
+            color="primary"
+            :url="externalLinks.githubNewIssue"
+          >
             {{ t('import_data.notice_link') }}
           </ExternalLink>
         </template>
-      </i18n>
+      </i18n-t>
     </RuiAlert>
 
     <GroupedImport />

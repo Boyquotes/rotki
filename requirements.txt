@@ -1,36 +1,38 @@
-gevent==23.9.1
-greenlet==2.0.2
+gevent==24.2.1
+greenlet==3.0.3
 gevent-websocket==0.10.1  # like the below is abandoned
 wsaccel==0.6.6  # recommended for acceleration of gevent-websocket. But abandoned.
-web3==5.31.3
-rotki-content-hash==0.0.3  # fork of content-hash due to https://github.com/filips123/ContentHashPy/issues/1
-rotki-pysqlcipher3==2023.7.1
-requests==2.31.0
-urllib3==1.26.14
-coincurve==18.0.0
+web3==6.20.1
+content-hash==2.0.0
+rotki-pysqlcipher3==2024.1.2
+requests==2.32.3
+urllib3==2.2.3
+coincurve==20.0.0
 base58check==1.0.2
 bech32==1.2.0
-gql==2.0.0
-scalecodec==1.2.7
+gql[requests]==3.5.0
+scalecodec==1.2.11
 py-sr25519-bindings==0.2.0
 py-ed25519-zebra-bindings==1.0.1
 py-bip39-bindings==0.1.11
-substrate-interface==1.7.4
-beautifulsoup4==4.12.2
-maxminddb==2.5.1
-miniupnpc==2.0.2; sys_platform != 'win32'
-miniupnpc==2.2.3; sys_platform == 'win32'
-cryptography==41.0.7
-py-machineid==0.4.4
-more-itertools==10.1.0  # for peekable iterators
-regex==2023.10.3  # used for unicode information in detection of spam tokens
+substrate-interface==1.7.10
+beautifulsoup4==4.12.3
+maxminddb==2.6.2
+pywin32==306; sys_platform == 'win32'
+miniupnpc==2.2.7
+cryptography==43.0.1
+py-machineid==0.6.0
+more-itertools==10.4.0  # for peekable iterators
+regex==2024.9.11  # used for unicode information in detection of spam tokens
+eth-abi==5.1.0
+polars-lts-cpu==1.8.2
 
 # For the rest api
-flask-cors==4.0.0
-flask==3.0.0
-marshmallow==3.20.1
-webargs==8.3.0
-werkzeug==3.0.0
+flask-cors==5.0.0
+flask==3.0.3
+marshmallow==3.22.0
+webargs==8.6.0
+werkzeug==3.0.4
 
 # for icon validation
 filetype==1.2.0
@@ -39,11 +41,15 @@ filetype==1.2.0
 polyleven==0.8
 
 # We used to only use this for packaging, but now use it for the version comparison functionality
-packaging==23.1
+packaging==24.0
 
-bip-utils==2.8.0
-
-typing-extensions==4.5.0 # used for typing.ParamSpec and typing.Concatenate (in stdlib since python 3.10). Also limiting temporarily to 4.5.0 due to a bug in multiformats which is used by rotki-content-hash: https://github.com/hashberg-io/multiformats/issues/10
+bip-utils==2.9.3
 
 #constraints
 pycparser<=2.17 # ugly -- to avoid https://github.com/eliben/pycparser/pull/198
+
+# To build JWT for coinbase exchange key validation
+PyJWT==2.9.0
+
+# Hardcode version due to web3.py not pinning it properly
+eth-typing==4.4.0

@@ -1,77 +1,72 @@
 <script setup lang="ts">
-import { type DataTableHeader } from '@/types/vuetify';
-import { type TablePagination } from '@/types/pagination';
-import {
-  type CustomAsset,
-  type CustomAssetRequestPayload
-} from '@/types/asset';
-import {
-  type Filters,
-  type Matcher
-} from '@/composables/filters/custom-assets';
+import { some } from 'lodash-es';
+import type { DataTableColumn, DataTableSortData, TablePaginationData } from '@rotki/ui-library';
+import type { CustomAsset } from '@/types/asset';
+import type { Filters, Matcher } from '@/composables/filters/custom-assets';
 
 withDefaults(
   defineProps<{
     assets: CustomAsset[];
-    expanded: CustomAsset[];
-    options: TablePagination<CustomAsset>;
-    serverItemLength: number;
     matchers: Matcher[];
-    filters: Filters;
     loading?: boolean;
   }>(),
-  { loading: false }
+  { loading: false },
 );
 
 const emit = defineEmits<{
   (e: 'edit', asset: CustomAsset): void;
   (e: 'delete-asset', asset: CustomAsset): void;
-  (e: 'update:pagination', pagination: CustomAssetRequestPayload): void;
-  (e: 'update:filters', filters: Filters): void;
-  (e: 'update:expanded', expandedAssets: CustomAsset[]): void;
 }>();
 
 const { t } = useI18n();
 
-const tableHeaders = computed<DataTableHeader[]>(() => [
+const paginationModel = defineModel<TablePaginationData>('pagination', { required: true });
+const sortModel = defineModel<DataTableSortData<CustomAsset>>('sort', { required: true });
+const expandedModel = defineModel<CustomAsset[]>('expanded', { required: true });
+const filtersModel = defineModel<Filters>('filters', { required: true });
+
+const cols = computed<DataTableColumn<CustomAsset>[]>(() => [
   {
-    text: t('common.asset'),
-    value: 'name',
-    width: '50%'
+    label: t('common.asset'),
+    key: 'name',
+    class: 'w-1/2',
+    cellClass: 'py-0',
+    sortable: true,
   },
   {
-    text: t('common.type'),
-    value: 'custom_asset_type',
-    width: '50%'
+    label: t('common.type'),
+    key: 'custom_asset_type',
+    class: 'w-1/2',
+    cellClass: 'py-0',
+    sortable: true,
   },
   {
-    text: '',
-    value: 'actions',
-    sortable: false
+    label: '',
+    key: 'actions',
+    cellClass: 'py-0',
   },
-  {
-    text: '',
-    width: '48px',
-    value: 'expand',
-    sortable: false
-  }
 ]);
 
 const edit = (asset: CustomAsset) => emit('edit', asset);
 const deleteAsset = (asset: CustomAsset) => emit('delete-asset', asset);
-const updatePagination = (pagination: CustomAssetRequestPayload) =>
-  emit('update:pagination', pagination);
-const updateFilter = (filters: Filters) => emit('update:filters', filters);
-const updateExpanded = (expandedAssets: CustomAsset[]) =>
-  emit('update:expanded', expandedAssets);
 
-const getAsset = (item: CustomAsset) => ({
-  name: item.name,
-  symbol: item.customAssetType,
-  identifier: item.identifier,
-  isCustomAsset: true,
-  customAssetType: item.customAssetType
-});
+function getAsset(item: CustomAsset) {
+  return {
+    name: item.name,
+    symbol: item.customAssetType,
+    identifier: item.identifier,
+    isCustomAsset: true,
+    customAssetType: item.customAssetType,
+  };
+}
+
+function isExpanded(identifier: string) {
+  return some(get(expandedModel), { identifier });
+}
+
+function expand(item: CustomAsset) {
+  set(expandedModel, isExpanded(item.identifier) ? [] : [item]);
+}
 </script>
 
 <template>
@@ -81,69 +76,71 @@ const getAsset = (item: CustomAsset) => ({
         <HintMenuIcon>
           {{ t('asset_table.custom.subtitle') }}
         </HintMenuIcon>
-        <div class="w-full sm:max-w-[25rem] align-self-center">
+        <div class="w-full sm:max-w-[25rem] self-center">
           <TableFilter
-            :matches="filters"
+            v-model:matches="filtersModel"
             :matchers="matchers"
-            @update:matches="updateFilter($event)"
           />
         </div>
       </div>
     </template>
-    <DataTable
-      :items="assets"
+    <RuiDataTable
+      v-model:pagination.external="paginationModel"
+      v-model:sort.external="sortModel"
+      :rows="assets"
       :loading="loading"
-      :headers="tableHeaders"
-      single-expand
+      :cols="cols"
       :expanded="expanded"
-      :options="options"
-      item-key="identifier"
-      sort-by="name"
+      row-attr="identifier"
+      data-cy="custom-assets-table"
+      single-expand
+      sticky-header
+      outlined
+      dense
       class="custom-assets-table"
-      :sort-desc="false"
-      :server-items-length="serverItemLength"
-      @update:options="updatePagination($event)"
     >
-      <template #item.name="{ item }">
+      <template #item.name="{ row }">
         <AssetDetailsBase
           :changeable="!loading"
           opens-details
-          :asset="getAsset(item)"
+          :asset="getAsset(row)"
         />
       </template>
-      <template #item.custom_asset_type="{ item }">
+      <template #item.custom_asset_type="{ row }">
         <BadgeDisplay>
-          {{ item.customAssetType }}
+          {{ row.customAssetType }}
         </BadgeDisplay>
       </template>
-      <template #item.actions="{ item }">
+      <template #item.actions="{ row }">
         <RowActions
           :edit-tooltip="t('asset_table.edit_tooltip')"
           :delete-tooltip="t('asset_table.delete_tooltip')"
-          @edit-click="edit(item)"
-          @delete-click="deleteAsset(item)"
+          @edit-click="edit(row)"
+          @delete-click="deleteAsset(row)"
         >
           <CopyButton
             :tooltip="t('asset_table.copy_identifier.tooltip')"
-            :value="item.identifier"
+            :value="row.identifier"
           />
         </RowActions>
       </template>
-      <template #expanded-item="{ item }">
-        <TableExpandContainer visible :colspan="tableHeaders.length">
-          <div class="font-bold">{{ t('common.notes') }}:</div>
-          <div class="pt-2">
-            {{ item.notes }}
+      <template #expanded-item="{ row }">
+        <RuiCard>
+          <div class="font-bold">
+            {{ t('common.notes') }}:
           </div>
-        </TableExpandContainer>
+          <div class="pt-2">
+            {{ row.notes }}
+          </div>
+        </RuiCard>
       </template>
-      <template #item.expand="{ item }">
-        <RowExpander
-          v-if="item.notes"
-          :expanded="expanded.includes(item)"
-          @click="updateExpanded(expanded.includes(item) ? [] : [item])"
+      <template #item.expand="{ row }">
+        <RuiTableRowExpander
+          v-if="row.notes"
+          :expanded="isExpanded(row.identifier)"
+          @click="expand(row)"
         />
       </template>
-    </DataTable>
+    </RuiDataTable>
   </RuiCard>
 </template>

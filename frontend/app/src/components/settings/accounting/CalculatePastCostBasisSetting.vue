@@ -1,13 +1,13 @@
 <script setup lang="ts">
 const calculatePastCostBasis = ref(false);
-const { calculatePastCostBasis: enabled } = storeToRefs(
-  useAccountingSettingsStore()
-);
+const { calculatePastCostBasis: enabled } = storeToRefs(useAccountingSettingsStore());
 const { t } = useI18n();
-const switchSuccessMessage = (enabled: boolean) =>
-  enabled
+
+function switchSuccessMessage(enabled: boolean) {
+  return enabled
     ? t('account_settings.messages.cost_basis.enabled')
     : t('account_settings.messages.cost_basis.disabled');
+}
 
 onMounted(() => {
   set(calculatePastCostBasis, get(enabled));
@@ -21,14 +21,14 @@ onMounted(() => {
     :error-message="t('account_settings.messages.cost_basis.error')"
     :success-message="switchSuccessMessage"
   >
-    <VSwitch
+    <RuiSwitch
       v-model="calculatePastCostBasis"
       class="accounting-settings__past-cost-basis"
       :success-messages="success"
       :error-messages="error"
       :label="t('accounting_settings.trade.labels.calculate_past_cost_basis')"
       color="primary"
-      @change="update($event)"
+      @update:model-value="update($event)"
     />
   </SettingsOption>
 </template>

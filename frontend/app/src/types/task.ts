@@ -1,5 +1,5 @@
-import { type Blockchain } from '@rotki/common/lib/blockchain';
-import { type TaskType } from '@/types/task-type';
+import type { TaskType } from '@/types/task-type';
+import type { AxiosResponseTransformer } from 'axios';
 
 export interface Task<T extends TaskMeta> {
   readonly id: number;
@@ -12,6 +12,7 @@ export interface TaskMeta {
   readonly title: string;
   readonly description?: string;
   readonly ignoreResult?: boolean;
+  readonly transformer?: AxiosResponseTransformer[];
 }
 
 export interface ExchangeMeta extends TaskMeta {
@@ -19,7 +20,7 @@ export interface ExchangeMeta extends TaskMeta {
 }
 
 export interface BlockchainMetadata extends TaskMeta {
-  readonly blockchain?: Blockchain;
+  readonly blockchain?: string;
 }
 
 export interface TaskResultResponse<T> {
@@ -46,6 +47,13 @@ export class BackendCancelledTaskError extends Error {
   constructor(msg: string) {
     super(msg);
     this.name = 'BackendCancelledTaskError';
+  }
+}
+
+export class UserCancelledTaskError extends Error {
+  constructor(msg: string) {
+    super(msg);
+    this.name = 'UserCancelledTaskError';
   }
 }
 

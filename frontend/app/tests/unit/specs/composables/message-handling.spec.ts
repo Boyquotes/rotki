@@ -1,17 +1,43 @@
-import { Blockchain } from '@rotki/common/lib/blockchain';
+import { Blockchain } from '@rotki/common';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { mount } from '@vue/test-utils';
 import { SocketMessageType } from '@/types/websocket-messages';
-import { type EvmChainInfo } from '@/types/api/chains';
+import type { EvmChainInfo } from '@/types/api/chains';
 
-vi.mock('@/store/notifications', async () => ({
+vi.mock('vue-router', () => ({
+  useRoute: vi.fn(),
+  useRouter: vi.fn().mockReturnValue({
+    push: vi.fn(),
+  }),
+  createRouter: vi.fn().mockImplementation(() => ({
+    beforeEach: vi.fn(),
+  })),
+  createWebHashHistory: vi.fn(),
+}));
+
+vi.mock('@/store/notifications', () => ({
   useNotificationsStore: vi.fn().mockReturnValue({
-    notify: vi.fn()
-  })
+    notify: vi.fn(),
+  }),
 }));
 
 vi.mock('@/composables/balances/token-detection', () => ({
   useTokenDetection: vi.fn().mockReturnValue({
-    detectTokens: vi.fn()
-  })
+    detectTokens: vi.fn(),
+  }),
+}));
+
+vi.mock('@/composables/blockchain/index', () => ({
+  useBlockchains: vi.fn().mockReturnValue({
+    fetchAccounts: vi.fn(),
+  }),
+}));
+
+vi.mock('@/composables/blockchain/accounts', () => ({
+  useBlockchainAccounts: vi.fn().mockReturnValue({
+    fetchBlockchainAccounts: vi.fn().mockResolvedValue([]),
+    fetchAccounts: vi.fn().mockResolvedValue([]),
+  }),
 }));
 
 vi.mock('@/composables/info/chains', () => ({
@@ -21,14 +47,26 @@ vi.mock('@/composables/info/chains', () => ({
         evmChainName: 'optimism',
         id: Blockchain.OPTIMISM,
         type: 'evm',
+        image: '',
         name: 'Optimism',
-        nativeToken: 'ETH'
-      } satisfies EvmChainInfo
+        nativeToken: 'ETH',
+      } satisfies EvmChainInfo,
+    ]),
+    txChains: computed(() => [
+      {
+        evmChainName: 'optimism',
+        id: Blockchain.OPTIMISM,
+        type: 'evm',
+        name: 'Optimism',
+        image: '',
+        nativeToken: 'ETH',
+      } satisfies EvmChainInfo,
     ]),
     getChain: () => Blockchain.OPTIMISM,
     getChainName: () => Blockchain.OPTIMISM,
-    getNativeAsset: (chain: Blockchain) => chain
-  })
+    getNativeAsset: (chain: Blockchain) => chain,
+    isEvm: (_chain: Blockchain) => true,
+  }),
 }));
 
 describe('composables::message-handling', () => {
@@ -36,8 +74,20 @@ describe('composables::message-handling', () => {
     const pinia = createPinia();
     setActivePinia(pinia);
   });
-  test('notifies the user and runs token detection', async () => {
-    const { handleMessage } = useMessageHandling();
+
+  it('notifies the user and runs token detection', async () => {
+    let messageHandling: ReturnType<typeof useMessageHandling> | undefined;
+
+    mount({
+      template: '<div/>',
+      setup() {
+        messageHandling = useMessageHandling();
+      },
+    });
+
+    assert(messageHandling);
+
+    const { handleMessage } = messageHandling;
     const { notify } = useNotificationsStore();
     const { canRequestData } = storeToRefs(useSessionAuthStore());
     const { detectTokens } = useTokenDetection(Blockchain.OPTIMISM);
@@ -47,11 +97,11 @@ describe('composables::message-handling', () => {
         type: SocketMessageType.EVM_ACCOUNTS_DETECTION,
         data: [
           {
-            evm_chain: 'optimism',
-            address: '0xdead'
-          }
-        ]
-      })
+            chain: 'optimism',
+            address: '0xdead',
+          },
+        ],
+      }),
     );
 
     expect(detectTokens).toHaveBeenCalledTimes(1);

@@ -2,20 +2,16 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from rotkehlchen.chain.ethereum.modules.eth2.utils import (
-    DAY_AFTER_ETH2_GENESIS,
-    INITIAL_ETH_DEPOSIT,
-)
+from rotkehlchen.chain.ethereum.modules.eth2.utils import INITIAL_ETH_DEPOSIT
 from rotkehlchen.constants import ONE
 from rotkehlchen.db.constants import (
     HISTORY_MAPPING_KEY_STATE,
     HISTORY_MAPPING_STATE_CUSTOMIZED,
-    HISTORY_MAPPING_STATE_DECODED,
 )
 from rotkehlchen.db.settings import DEFAULT_ACTIVE_MODULES
 from rotkehlchen.db.utils import table_exists, update_table_schema
 from rotkehlchen.fval import FVal
-from rotkehlchen.logging import RotkehlchenLogsAdapter
+from rotkehlchen.logging import RotkehlchenLogsAdapter, enter_exit_debug_log
 from rotkehlchen.types import ChainID
 
 if TYPE_CHECKING:
@@ -27,10 +23,9 @@ logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
 
+@enter_exit_debug_log()
 def _remove_adex(write_cursor: 'DBCursor') -> None:
     """Remove all adex related tables, events, data in other tables"""
-    log.debug('Enter _remove_adex')
-
     write_cursor.execute('DROP TABLE IF EXISTS adex_events')
     if table_exists(write_cursor, 'used_query_ranges'):
         write_cursor.execute(
@@ -57,21 +52,18 @@ def _remove_adex(write_cursor: 'DBCursor') -> None:
             'UPDATE OR IGNORE settings SET value=? WHERE name="active_modules"',
             (json.dumps(new_value),),
         )
-    log.debug('Exit _remove_adex')
 
 
+@enter_exit_debug_log()
 def _upgrade_ignored_actionids(write_cursor: 'DBCursor') -> None:
     """ignored_action_ids of ActionType ETHEREUM_TRANSACTION need chainid prepended"""
-    log.debug('Enter _upgrade_ignored_actionids')
     if table_exists(write_cursor, 'used_query_ranges'):
         write_cursor.execute('UPDATE ignored_actions SET identifier = "1" || identifier WHERE type="C"')  # noqa: E501
-    log.debug('Exit _upgrade_ignored_actionids')
 
 
+@enter_exit_debug_log()
 def _upgrade_account_details(write_cursor: 'DBCursor') -> None:
     """Upgrade to account_defails table to evm_accounts_details"""
-    log.debug('Enter _upgrade_account_details')
-
     new_data = []
     last_queried_timestamp_map: dict[str, int] = {}
     if table_exists(write_cursor, 'accounts_details'):
@@ -115,13 +107,10 @@ def _upgrade_account_details(write_cursor: 'DBCursor') -> None:
         new_data,
     )
 
-    log.debug('Exit _upgrade_account_details')
 
-
+@enter_exit_debug_log()
 def _rename_eth_to_evm_add_chainid(write_cursor: 'DBCursor') -> None:
     """Rename all eth to evm tables, add chain id and adjust tx mappings"""
-    log.debug('Enter _rename_eth_to_evm_add_chainid')
-
     # Get all data in memory and upgrade it
     transactions = []
     if table_exists(write_cursor, 'ethereum_transactions'):
@@ -384,13 +373,10 @@ def _rename_eth_to_evm_add_chainid(write_cursor: 'DBCursor') -> None:
         tx_mappings,
     )
 
-    log.debug('Exit _rename_eth_to_evm_add_chainid')
 
-
+@enter_exit_debug_log()
 def _upgrade_events_mappings(write_cursor: 'DBCursor') -> None:
     """Upgrade history_events_mappings"""
-    log.debug('Enter _upgrade_events_mappings')
-
     new_data = []
     if table_exists(write_cursor, 'history_events_mappings'):
         write_cursor = write_cursor.execute('SELECT * FROM history_events_mappings')
@@ -428,13 +414,10 @@ def _upgrade_events_mappings(write_cursor: 'DBCursor') -> None:
         new_data,
     )
 
-    log.debug('Exit _upgrade_events_mappings')
 
-
+@enter_exit_debug_log()
 def _upgrade_nfts_table(write_cursor: 'DBCursor') -> None:
     """Upgrade nfts table to add image url, collection name and whether it's a uniswap LP NFT"""
-    log.debug('Enter _upgrade_nfts_table')
-
     write_cursor.execute('DROP TABLE IF EXISTS nfts')
     write_cursor.execute(
         """
@@ -455,9 +438,8 @@ def _upgrade_nfts_table(write_cursor: 'DBCursor') -> None:
         );""",  # noqa: E501
     )
 
-    log.debug('Exit _upgrade_nfts_table')
 
-
+@enter_exit_debug_log()
 def _upgrade_rpc_nodes(write_cursor: 'DBCursor') -> None:
     """
     Change name of web3_nodes to rpc_nodes and fix the schema. Weight should be
@@ -465,8 +447,6 @@ def _upgrade_rpc_nodes(write_cursor: 'DBCursor') -> None:
 
     Really wonder why this was never seen before
     """
-    log.debug('Enter _upgrade_rpc_nodes')
-
     # using "ETH" directly since at this point all blockchain column values should be ETH
     # and there may be a problem (noticed it in the premium DB pulling tests) where
     # web3_nodes did not run through v34->v35 upgrade properly so blockchain column is missing.
@@ -499,12 +479,10 @@ def _upgrade_rpc_nodes(write_cursor: 'DBCursor') -> None:
         nodes_tuples,
     )
 
-    log.debug('Exit _upgrade_rpc_nodes')
 
-
+@enter_exit_debug_log()
 def _upgrade_tags(write_cursor: 'DBCursor') -> None:
     """All tags tied to addresses should now be tied to chain + address"""
-    log.debug('Enter _upgrade_tags')
     write_cursor.execute(
         'SELECT A.blockchain, A.account, B.tag_name from blockchain_accounts AS A '
         'LEFT OUTER JOIN tag_mappings AS B on A.account = B.object_reference',
@@ -520,9 +498,9 @@ def _upgrade_tags(write_cursor: 'DBCursor') -> None:
         'INSERT OR IGNORE INTO tag_mappings(object_reference, tag_name) VALUES(?, ?)',
         insert_tuples,
     )
-    log.debug('Exit _upgrade_tags')
 
 
+@enter_exit_debug_log()
 def _upgrade_address_book_table(write_cursor: 'DBCursor') -> None:
     """Upgrades the address book table by making the blockchain column optional"""
     update_table_schema(
@@ -536,22 +514,21 @@ def _upgrade_address_book_table(write_cursor: 'DBCursor') -> None:
     )
 
 
+@enter_exit_debug_log()
 def _add_okx(write_cursor: 'DBCursor') -> None:
-    log.debug('Enter _add_okx')
     write_cursor.execute('INSERT OR IGNORE INTO location(location, seq) VALUES ("e", 37);')
-    log.debug('Exit _add_okx')
 
 
+@enter_exit_debug_log()
 def _remove_old_tables(write_cursor: 'DBCursor') -> None:
     """In 1.27.0 we added a check for old tables in the DB.
 
     This found that many old DBs still have an eth_tokens table which was left there
     and was not removed in some old upgrade. Time to clean up."""
-    log.debug('Enter _remove_old_tables')
     write_cursor.execute('DROP TABLE IF EXISTS eth_tokens')
-    log.debug('Exit _remove_old_tables')
 
 
+@enter_exit_debug_log()
 def _fix_eth2_pnl_genesis(write_cursor: 'DBCursor') -> None:
     """
     To avoid querying beaconchain for all the stats since genesis manually update
@@ -561,14 +538,14 @@ def _fix_eth2_pnl_genesis(write_cursor: 'DBCursor') -> None:
     fixed_values = []
     write_cursor.execute(
         'SELECT validator_index, pnl FROM eth2_daily_staking_details WHERE timestamp=?',
-        (DAY_AFTER_ETH2_GENESIS,),
+        (1606780800,),  # day after eth2 genesis, as seen during the old scraping
     )
 
     for (validator_index, pnl_str) in write_cursor:
         pnl = FVal(pnl_str)
         if pnl > ONE:
             pnl -= INITIAL_ETH_DEPOSIT
-            fixed_values.append((str(pnl), validator_index, DAY_AFTER_ETH2_GENESIS))
+            fixed_values.append((str(pnl), validator_index, 1606780800))
 
     if len(fixed_values) != 0:
         write_cursor.executemany(
@@ -577,6 +554,7 @@ def _fix_eth2_pnl_genesis(write_cursor: 'DBCursor') -> None:
         )
 
 
+@enter_exit_debug_log()
 def _reset_decoded_events(write_cursor: 'DBCursor') -> None:
     """
     The code is taken from `delete_events_by_tx_hash` right before 1.27 release.
@@ -599,10 +577,11 @@ def _reset_decoded_events(write_cursor: 'DBCursor') -> None:
     write_cursor.executemany(querystr, bindings)
     write_cursor.executemany(
         'DELETE from evm_tx_mappings WHERE tx_hash=? AND chain_id=? AND value=?',
-        [(tx_hash, ChainID.ETHEREUM.serialize_for_db(), HISTORY_MAPPING_STATE_DECODED) for tx_hash in tx_hashes],  # noqa: E501
+        [(tx_hash, ChainID.ETHEREUM.serialize_for_db(), 0) for tx_hash in tx_hashes],  # 0 -> decoded tx state # noqa: E501
     )
 
 
+@enter_exit_debug_log(name='UserDB v35->v36 upgrade')
 def upgrade_v35_to_v36(db: 'DBHandler', progress_handler: 'DBUpgradeProgressHandler') -> None:
     """Upgrades the DB from v35 to v36. This was in v1.27.0 release.
 
@@ -615,7 +594,6 @@ def upgrade_v35_to_v36(db: 'DBHandler', progress_handler: 'DBUpgradeProgressHand
           it's a uniswap LP NFT
         - rename web3_nodes to rpc_nodes
     """
-    log.debug('Entered userdb v35->v36 upgrade')
     progress_handler.set_total_steps(13)
     with db.user_write() as write_cursor:
         _remove_adex(write_cursor)
@@ -644,5 +622,3 @@ def upgrade_v35_to_v36(db: 'DBHandler', progress_handler: 'DBUpgradeProgressHand
         progress_handler.new_step()
         _reset_decoded_events(write_cursor)
         progress_handler.new_step()
-
-    log.debug('Finished userdb v35->v36 upgrade')

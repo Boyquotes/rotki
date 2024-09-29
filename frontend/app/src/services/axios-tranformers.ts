@@ -1,68 +1,68 @@
 import { BigNumber } from '@rotki/common';
-import { type AxiosResponseTransformer } from 'axios';
+import type { AxiosResponseHeaders, AxiosResponseTransformer } from 'axios';
 
-const isObject = (data: any): boolean =>
-  typeof data === 'object' &&
-  data !== null &&
-  !(data instanceof RegExp) &&
-  !(data instanceof Error) &&
-  !(data instanceof Date) &&
-  !(data instanceof BigNumber);
+function isObject(data: any): boolean {
+  return (
+    typeof data === 'object'
+    && data !== null
+    && !(data instanceof RegExp)
+    && !(data instanceof Error)
+    && !(data instanceof Date)
+    && !(data instanceof BigNumber)
+  );
+}
 
-const getUpdatedKey = (key: string, camelCase: boolean): string =>
-  transformCase(key, camelCase);
+function getUpdatedKey(key: string, camelCase: boolean): string {
+  return transformCase(key, camelCase);
+}
 
-const convertKeys = (data: any, camelCase: boolean, skipKey: boolean): any => {
-  if (Array.isArray(data)) {
+function convertKeys(data: any, camelCase: boolean, skipKey: boolean): any {
+  if (Array.isArray(data))
     return data.map(entry => convertKeys(entry, camelCase, false));
-  }
 
-  if (!isObject(data)) {
+  if (!isObject(data))
     return data;
-  }
 
   const converted: Record<string, any> = {};
-  Object.keys(data).map(key => {
+  Object.keys(data).map((key) => {
     const datum = data[key];
     const skipConversion = skipKey || isEvmIdentifier(key);
     const updatedKey = skipConversion ? key : getUpdatedKey(key, camelCase);
 
-    converted[updatedKey] = isObject(datum)
-      ? convertKeys(datum, camelCase, skipKey && key === 'result')
-      : datum;
+    converted[updatedKey] = isObject(datum) ? convertKeys(datum, camelCase, skipKey && key === 'result') : datum;
     return key;
   });
 
   return converted;
-};
+}
 
-export const snakeCaseTransformer = (data: any): any =>
-  convertKeys(data, false, false);
+export function snakeCaseTransformer(data: any): any {
+  return convertKeys(data, false, false);
+}
 
-export const camelCaseTransformer = (data: any): any =>
-  convertKeys(data, true, false);
+export function camelCaseTransformer(data: any): any {
+  return convertKeys(data, true, false);
+}
 
-export const noRootCamelCaseTransformer = (data: any): any =>
-  convertKeys(data, true, true);
+export function noRootCamelCaseTransformer(data: any): any {
+  return convertKeys(data, true, true);
+}
 
-const jsonTransformer: AxiosResponseTransformer = (data, headers) => {
+export function jsonTransformer(data: any, headers: AxiosResponseHeaders): AxiosResponseTransformer {
   let result = data;
   const contentType = headers?.['content-type'];
   const isJson = contentType?.includes('application/json') ?? false;
   if (isJson && typeof data === 'string') {
     try {
       result = JSON.parse(data);
-      // eslint-disable-next-line no-empty
-    } catch {}
+    }
+    catch {}
   }
   return result;
-};
+}
 
-export const setupTransformer = (
-  skipRoot = false
-): AxiosResponseTransformer[] => [
-  jsonTransformer,
-  skipRoot ? noRootCamelCaseTransformer : camelCaseTransformer
-];
+export function setupTransformer(skipRoot = false): AxiosResponseTransformer[] {
+  return [jsonTransformer, skipRoot ? noRootCamelCaseTransformer : camelCaseTransformer];
+}
 
 export const basicAxiosTransformer = setupTransformer();

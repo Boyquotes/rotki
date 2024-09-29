@@ -14,8 +14,8 @@ from rotkehlchen.fval import FVal
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import (
     EVM_CHAINS_WITH_TRANSACTIONS,
-    EVM_LOCATIONS,
-    ChainID,
+    EVM_EVMLIKE_LOCATIONS,
+    SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE,
     CostBasisMethod,
     SupportedBlockchain,
     Timestamp,
@@ -54,6 +54,7 @@ class CSVWriteError(Exception):
 def dict_to_csv_file(
         path: Path,
         dictionary_list: list,
+        csv_delimiter: str,
         headers: Collection | None = None,
 ) -> None:
     """Takes a filepath and a list of dictionaries representing the rows and writes them
@@ -68,7 +69,7 @@ def dict_to_csv_file(
         return
 
     with open(path, 'w', newline='', encoding='utf-8') as f:
-        w = DictWriter(f, fieldnames=dictionary_list[0].keys() if headers is None else headers)
+        w = DictWriter(f, fieldnames=dictionary_list[0].keys() if headers is None else headers, delimiter=csv_delimiter)  # noqa: E501
         w.writeheader()
         try:
             for dic in dictionary_list:
@@ -89,13 +90,15 @@ class CSVExporter(CustomizableDateMixin):
     def reset(self, start_ts: Timestamp, end_ts: Timestamp) -> None:
         self.start_ts = start_ts
         self.end_ts = end_ts
-        self.transaction_explorers: dict[SupportedBlockchain, str] = {
+        self.transaction_explorers: dict[SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE, str] = {
             SupportedBlockchain.ETHEREUM: ETHERSCAN_EXPLORER_TX_URL.format(base_url='etherscan.io'),  # noqa: E501
             SupportedBlockchain.OPTIMISM: ETHERSCAN_EXPLORER_TX_URL.format(base_url='optimistic.etherscan.io'),  # noqa: E501
             SupportedBlockchain.POLYGON_POS: ETHERSCAN_EXPLORER_TX_URL.format(base_url='polygonscan.com'),  # noqa: E501
             SupportedBlockchain.ARBITRUM_ONE: ETHERSCAN_EXPLORER_TX_URL.format(base_url='arbiscan.io'),  # noqa: E501
             SupportedBlockchain.BASE: ETHERSCAN_EXPLORER_TX_URL.format(base_url='basescan.org'),
             SupportedBlockchain.GNOSIS: ETHERSCAN_EXPLORER_TX_URL.format(base_url='gnosisscan.io'),
+            SupportedBlockchain.SCROLL: ETHERSCAN_EXPLORER_TX_URL.format(base_url='scrollscan.com'),  # noqa: E501
+            SupportedBlockchain.ZKSYNC_LITE: 'https://zkscan.io/explorer/transactions/',
         }
         with self.database.conn.read_ctx() as cursor:
             self.reload_settings(cursor)
@@ -152,8 +155,8 @@ class CSVExporter(CustomizableDateMixin):
         cost_basis = f'{cost_basis_column}{index}'
 
         should_count_entire_spend_formula = (
-            name == 'taxable' and event.timestamp >= self.start_ts or
-            name == 'free' and event.timestamp < self.start_ts
+            (name == 'taxable' and event.timestamp >= self.start_ts) or
+            (name == 'free' and event.timestamp < self.start_ts)
         )
         if event.count_entire_amount_spend and should_count_entire_spend_formula:
             equation = (
@@ -206,6 +209,7 @@ class CSVExporter(CustomizableDateMixin):
             'location': '',
             'timestamp': '',
             'asset': '',
+            'asset_identifier': '',
             'free_amount': '',
             'taxable_amount': '',
             'price': '',
@@ -214,8 +218,7 @@ class CSVExporter(CustomizableDateMixin):
             'pnl_free': '',
             'cost_basis_free': '',
         }
-        events.append(template)  # separate with 2 new lines
-        events.append(template)
+        events.extend((template, template))  # separate with 2 new lines
 
         entry = template.copy()
         entry['taxable_amount'] = 'TAXABLE'
@@ -251,10 +254,7 @@ class CSVExporter(CustomizableDateMixin):
             entry['price'] = f'=SUM(H{start_sums_index}:H{start_sums_index + sums - 1})'
         else:
             entry['taxable_amount'] = entry['price'] = 0
-        events.append(entry)
-
-        events.append(template)  # separate with 2 new lines
-        events.append(template)
+        events.extend((entry, template, template))  # separate with 2 new lines
 
         version_result = get_current_version()
         entry = template.copy()
@@ -273,7 +273,6 @@ class CSVExporter(CustomizableDateMixin):
             events: list['ProcessedAccountingEvent'],
             pnls: PnlTotals,
     ) -> tuple[bool, str]:
-        # TODO: Find a way to properly delete the directory after send is complete
         dirpath = Path(mkdtemp())
         success, msg = self.export(events=events, pnls=pnls, directory=dirpath)
         if not success:
@@ -303,13 +302,14 @@ class CSVExporter(CustomizableDateMixin):
         CSV exported file.
         """
         evm_explorer = None
-        if event.location in EVM_LOCATIONS:
+        if event.location in EVM_EVMLIKE_LOCATIONS:
             # provide the explorer url to be used in the notes
-            evm_explorer = self.transaction_explorers[ChainID(event.location.to_chain_id()).to_blockchain()]  # noqa: E501
+            evm_explorer = self.transaction_explorers[SupportedBlockchain.from_location(event.location)]  # type: ignore # type checked via if above # noqa: E501
 
         dict_event = event.to_exported_dict(
             ts_converter=self.timestamp_to_date,
             export_type=AccountingEventExportType.CSV,
+            database=self.database,
             evm_explorer=evm_explorer,
         )
         # For CSV also convert timestamp to date
@@ -333,8 +333,9 @@ class CSVExporter(CustomizableDateMixin):
         try:
             directory.mkdir(parents=True, exist_ok=True)
             dict_to_csv_file(
-                directory / FILENAME_ALL_CSV,
-                serialized_events,
+                path=directory / FILENAME_ALL_CSV,
+                dictionary_list=serialized_events,
+                csv_delimiter=self.settings.csv_export_delimiter,
             )
         except (CSVWriteError, PermissionError) as e:
             return False, str(e)

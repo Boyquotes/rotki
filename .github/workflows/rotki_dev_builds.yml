@@ -17,6 +17,7 @@ env:
 jobs:
   build-linux:
     name: Build linux binary
+    if: ${{ github.repository == 'rotki/rotki' || github.event_name != 'schedule' }}
     env:
       CI: true
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -27,29 +28,29 @@ jobs:
         with:
           fetch-depth: 0
       - name: Load env
-        uses: rotki/action-env@v1
+        uses: rotki/action-env@v2
         with:
           env_file: .github/.env.ci
       - name: Setup python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
       - name: Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: 'frontend/.nvmrc'
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v3
         with:
-          version: ${{ env.PNPM_VERSION }}
+          package_json_file: frontend/package.json
       - name: Get pnpm store directory
         id: pnpm-cache
         shell: bash
         run: |
           echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
       - name: Setup pnpm cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ${{ steps.pnpm-cache.outputs.STORE_PATH }}
@@ -62,12 +63,12 @@ jobs:
         id: packaging
         run: |
           echo "::group::packaging dependencies"
-          pip3 install --upgrade pip==${{ env.PIP_VERSION }}
-          pip3 install -r requirements_packaging.txt
+          pip3 install --upgrade uv==${{env.UV_VERSION}}
+          uv pip install --system -r requirements_packaging.txt
           echo "::endgroup::"
           ./package.py --build full
       - name: Upload files
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: linux-app
           path: |
@@ -75,90 +76,71 @@ jobs:
             dist/*.AppImage.sha512
 
   build-macos:
-    name: 'Build macOS binary'
+    name: 'Build macOS binary ${{ matrix.os.arch }}'
+    if: ${{ github.repository == 'rotki/rotki' || github.event_name != 'schedule' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - runner: macos-14
+            arch: 'arm64'
+            target: 11
+            platform: macosx-11.0-arm64
+          - runner: macos-12
+            arch: 'x86_64'
+            target: 10.9
+            platform: macosx-10.9-x86_64
     env:
       CI: true
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      MACOS_BUILD_ARCH: 'universal2'
-      ARCHFLAGS: '-arch arm64 -arch x86_64'
-      _PYTHON_HOST_PLATFORM: macosx-10.9-universal2
-      MACOSX_DEPLOYMENT_TARGET: 10.9
-      CMAKE_OSX_ARCHITECTURES: 'x86_64;arm64'
+      ARCHFLAGS: -arch ${{ matrix.os.arch }}
+      _PYTHON_HOST_PLATFORM: ${{ matrix.os.platform }}
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.os.target }}
+      CMAKE_OSX_ARCHITECTURES: ${{ matrix.os.arch }}
+      NODE_OPTIONS: --max-old-space-size=4096
     environment: macos_sign
-    runs-on: macos-11
+    runs-on: ${{ matrix.os.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Load env
-        uses: rotki/action-env@v1
+        uses: rotki/action-env@v2
         with:
           env_file: .github/.env.ci
-      - name: Checkout libffi
-        uses: actions/checkout@v4
-        with:
-          repository: libffi/libffi
-          path: libffi
-          ref: v3.4.2
-      - name: Install libffi build tools
-        run: brew install autoconf automake libtool pkg-config
-      - name: Build universal libbfi (required by coincurve)
-        run: |
-          brew uninstall --ignore-dependencies libffi || true
-          echo "::group::Autogen"
-          ./autogen.sh
-          echo "::endgroup::"
-          echo "::group::arm64"
-          ./configure --host=aarch64-apple-darwin CC='gcc -arch arm64' CXX='g++ -arch arm64'
-          make
-          mkdir ../ffi
-          cp -R aarch64-apple-darwin ../ffi/
-          echo "::endgroup::"
-          echo "::group::x86_64"
-          make clean
-          ./configure --host=x86_64-apple-darwin CC='gcc -arch x86_64' CXX='g++ -arch x86_64'
-          make
-          echo "::endgroup::"
-          echo "::group::install"
-          lipo -create -output x86_64-apple-darwin/.libs/libffi.8.dylib x86_64-apple-darwin/.libs/libffi.8.dylib ../ffi/aarch64-apple-darwin/.libs/libffi.8.dylib
-          lipo -create -output x86_64-apple-darwin/.libs/libffi.a x86_64-apple-darwin/.libs/libffi.a ../ffi/aarch64-apple-darwin/.libs/libffi.a
-          lipo -create -output x86_64-apple-darwin/.libs/libffi_convenience.a x86_64-apple-darwin/.libs/libffi_convenience.a ../ffi/aarch64-apple-darwin/.libs/libffi_convenience.a
-          lipo -archs x86_64-apple-darwin/.libs/libffi.8.dylib
-          make install
-          echo "::endgroup::"
-        working-directory: libffi
       - name: Add rust target for building deps
+        if: ${{ matrix.os.arch == 'arm64' }}
         run: rustup target add aarch64-apple-darwin
       - name: Cache python pkg
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/python*.pkg
-          key: ${{ runner.os }}-python-${{ env.PYTHON_VERSION }}-${{ env.PYTHON_MACOS }}
+          key: ${{ runner.os }}-python-${{ env.PYTHON_VERSION }}-${{ env.PYTHON_MACOS }}-${{ matrix.os.arch }}
       - name: Cache python dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/Library/Caches/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-${{ matrix.os.arch }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-${{ matrix.os.arch }}-pip-
       - name: Set up python
         run: packaging/setup-macos-python.sh ${{ env.PYTHON_VERSION }} ${{ env.PYTHON_MACOS }}
       - name: Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: 'frontend/.nvmrc'
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v3
         with:
-          version: ${{ env.PNPM_VERSION }}
+          package_json_file: frontend/package.json
       - name: Get pnpm store directory
         id: pnpm-cache
         shell: bash
         run: |
           echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
       - name: Setup pnpm cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ${{ steps.pnpm-cache.outputs.STORE_PATH }}
@@ -171,11 +153,11 @@ jobs:
         id: packaging
         run: |
           echo "::group::packaging dependencies"
-          pip3 install --upgrade pip==${{ env.PIP_VERSION }}
+          pip3 install --upgrade uv==${{env.UV_VERSION}}
           pip3 install virtualenv
           python3 -m virtualenv ~/venv
           source ~/venv/bin/activate
-          pip3 install -r requirements_packaging.txt
+          uv pip install -r requirements_packaging.txt
           echo "::endgroup::"
           ./package.py --build full
         env:
@@ -184,29 +166,23 @@ jobs:
           IDENTITY: ${{ secrets.IDENTITY }}
           APPLEID: ${{ secrets.APPLEID }}
           APPLEIDPASS: ${{ secrets.APPLEIDPASS }}
-      - name: Upload files (arm64)
-        uses: actions/upload-artifact@v3
+      - name: Upload files (${{ matrix.os.arch }})
+        uses: actions/upload-artifact@v4
         with:
-          name: macos-app-arm64
+          name: macos-app-${{ matrix.os.arch }}
           path: |
-            dist/rotki-darwin_arm64*.dmg
-            dist/rotki-darwin_arm64*.dmg.sha512
-      - name: Upload files (x86_64)
-        uses: actions/upload-artifact@v3
-        with:
-          name: macos-app-x64
-          path: |
-            dist/rotki-darwin_x64*.dmg
-            dist/rotki-darwin_x64*.dmg.sha512
+            dist/rotki-darwin_*.dmg
+            dist/rotki-darwin_*.dmg.sha512
       - name: Upload colibri files
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: macos-colibri
+          name: macos-colibri-${{ matrix.os.arch }}
           path: |
             dist/colibri
 
   build-windows:
     name: Build windows binary
+    if: ${{ github.repository == 'rotki/rotki' || github.event_name != 'schedule' }}
     env:
       CI: true
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -219,29 +195,29 @@ jobs:
         with:
           fetch-depth: 0
       - name: Load env
-        uses: rotki/action-env@v1
+        uses: rotki/action-env@v2
         with:
           env_file: .github/.env.ci
       - name: Set up python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
       - name: Setup node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: 'frontend/.nvmrc'
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v3
         with:
-          version: ${{ env.PNPM_VERSION }}
+          package_json_file: frontend/package.json
       - name: Get pnpm store directory
         id: pnpm-cache
         shell: bash
         run: |
           echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
       - name: Setup pnpm cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |            
             ${{ steps.pnpm-cache.outputs.STORE_PATH }}
@@ -257,13 +233,13 @@ jobs:
           CSC_KEY_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
         run: |
           echo ::group::"packaging dependencies"          
-          pip3 install --upgrade pip==${{ env.PIP_VERSION }}
-          pip3 install -r requirements_packaging.txt
+          pip3 install --upgrade uv==${{env.UV_VERSION}}
+          uv pip install --system -r requirements_packaging.txt
           echo ::endgroup::
           python .\package.py --build full
         shell: powershell
       - name: Upload files
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: windows-app
           path: |
@@ -272,6 +248,7 @@ jobs:
 
   build-docker:
     name: Build docker images
+    if: ${{ github.repository == 'rotki/rotki' || github.event_name != 'schedule' }}
     runs-on: ubuntu-latest
     environment: docker
     steps:
@@ -280,13 +257,13 @@ jobs:
         with:
           fetch-depth: 0
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
       - name: Login to DockerHub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -311,12 +288,13 @@ jobs:
           echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
       - name: Build and push
         id: docker_build
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           platforms: ${{ steps.build_information.outputs.platforms }}
           push: true
+          provenance: mode=max
           tags: rotki/rotki:${{ steps.build_information.outputs.tag }}
           build-args: |
             REVISION=${{ github.sha }}
@@ -328,7 +306,7 @@ jobs:
 
   notify:
     name: 'Success check'
-    if: ${{ always() }}
+    if: ${{ always() && (github.repository == 'rotki/rotki' || github.event_name != 'schedule') }}
     needs: [ 'build-linux', 'build-windows', 'build-macos', 'build-docker' ]
     runs-on: ubuntu-latest
     steps:

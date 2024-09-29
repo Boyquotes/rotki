@@ -1,99 +1,97 @@
 <script setup lang="ts">
-import { type DataTableHeader } from '@/types/vuetify';
-import { type Collection } from '@/types/collection';
 import { Routes } from '@/router/routes';
-import { type TradeLocation } from '@/types/history/trade/location';
-import {
-  type Trade,
-  type TradeEntry,
-  type TradeRequestPayload
-} from '@/types/history/trade';
 import { Section } from '@/types/status';
 import { IgnoreActionType } from '@/types/history/ignored';
 import { SavedFilterLocation } from '@/types/filtering';
+import type { Writeable } from '@rotki/common';
+import type { Trade, TradeEntry, TradeRequestPayload } from '@/types/history/trade';
+import type { Collection } from '@/types/collection';
 import type { Filters, Matcher } from '@/composables/filters/trades';
+import type { DataTableColumn } from '@rotki/ui-library';
 
 const props = withDefaults(
   defineProps<{
-    locationOverview?: TradeLocation;
-    mainPage?: boolean;
+    locationOverview?: string;
   }>(),
   {
     locationOverview: '',
-    mainPage: false
-  }
+  },
 );
 
 const { t } = useI18n();
 
-const { locationOverview, mainPage } = toRefs(props);
+const { locationOverview } = toRefs(props);
 
-const hideIgnoredTrades: Ref<boolean> = ref(false);
+const hideIgnoredTrades = ref<boolean>(false);
+const showIgnoredAssets = ref<boolean>(false);
 
 const router = useRouter();
 const route = useRoute();
 
-const tableHeaders = computed<DataTableHeader[]>(() => {
-  const overview = get(locationOverview);
-  const headers: DataTableHeader[] = [
+const mainPage = computed(() => get(locationOverview) === '');
+
+const tableHeaders = computed<DataTableColumn<TradeEntry>[]>(() => {
+  const overview = !get(mainPage);
+  const headers: DataTableColumn<TradeEntry>[] = [
     {
-      text: '',
-      value: 'ignoredInAccounting',
-      sortable: false,
-      class: !overview ? 'pa-0' : 'pr-0',
-      cellClass: !overview ? 'pa-0' : 'pr-0'
+      label: '',
+      key: 'ignoredInAccounting',
+      class: !overview ? '!p-0' : '',
+      cellClass: !overview ? '!p-0' : '!w-0 !max-w-[4rem]',
     },
     {
-      text: t('common.location'),
-      value: 'location',
-      width: '120px',
-      align: 'center'
-    },
-    {
-      text: t('closed_trades.headers.action'),
-      value: 'type',
-      align: overview ? 'start' : 'center',
-      class: `text-no-wrap ${overview ? 'pl-0' : ''}`,
-      cellClass: overview ? 'pl-0' : ''
-    },
-    {
-      text: t('common.amount'),
-      value: 'amount',
-      align: 'end'
-    },
-    {
-      text: t('closed_trades.headers.base'),
-      value: 'baseAsset',
-      sortable: false
-    },
-    {
-      text: '',
-      value: 'description',
-      sortable: false,
-      width: '40px'
-    },
-    {
-      text: t('closed_trades.headers.quote'),
-      value: 'quoteAsset',
-      sortable: false
-    },
-    {
-      text: t('closed_trades.headers.rate'),
-      value: 'rate',
-      align: 'end'
-    },
-    {
-      text: t('common.datetime'),
-      value: 'timestamp'
-    },
-    {
-      text: t('common.actions_text'),
-      value: 'actions',
+      label: t('common.location'),
+      key: 'location',
+      class: '!w-[7.5rem]',
+      cellClass: '!py-1',
       align: 'center',
-      sortable: false,
-      width: '1px'
+      sortable: true,
     },
-    { text: '', value: 'data-table-expand', sortable: false }
+    {
+      label: t('closed_trades.headers.action'),
+      key: 'type',
+      align: overview ? 'start' : 'center',
+      class: `text-no-wrap${overview ? ' !pl-0' : ''}`,
+      cellClass: overview ? '!pl-0' : 'py-1',
+      sortable: true,
+    },
+    {
+      label: t('common.amount'),
+      key: 'amount',
+      align: 'end',
+      sortable: true,
+    },
+    {
+      label: t('closed_trades.headers.base'),
+      key: 'baseAsset',
+      cellClass: '!py-1',
+    },
+    {
+      label: '',
+      key: 'description',
+    },
+    {
+      label: t('closed_trades.headers.quote'),
+      key: 'quoteAsset',
+      cellClass: '!py-1',
+    },
+    {
+      label: t('closed_trades.headers.rate'),
+      key: 'rate',
+      align: 'end',
+      sortable: true,
+    },
+    {
+      label: t('common.datetime'),
+      key: 'timestamp',
+      sortable: true,
+    },
+    {
+      label: t('common.actions_text'),
+      key: 'actions',
+      align: 'center',
+      class: '!w-px',
+    },
   ];
 
   if (overview) {
@@ -105,12 +103,9 @@ const tableHeaders = computed<DataTableHeader[]>(() => {
 });
 
 const extraParams = computed(() => ({
-  includeIgnoredTrades: (!get(hideIgnoredTrades)).toString()
+  includeIgnoredTrades: !get(hideIgnoredTrades),
+  excludeIgnoredAssets: !get(showIgnoredAssets),
 }));
-
-watch(hideIgnoredTrades, () => {
-  setPage(1);
-});
 
 const assetInfoRetrievalStore = useAssetInfoRetrieval();
 const { assetSymbol } = assetInfoRetrievalStore;
@@ -118,7 +113,6 @@ const { assetSymbol } = assetInfoRetrievalStore;
 const { deleteExternalTrade, fetchTrades, refreshTrades } = useTrades();
 
 const {
-  options,
   selected,
   editableItem,
   itemsToDelete: tradesToDelete,
@@ -129,22 +123,31 @@ const {
   filters,
   matchers,
   setPage,
-  setOptions,
-  setFilter,
-  fetchData
-} = usePaginationFilters<
-  Trade,
-  TradeRequestPayload,
-  TradeEntry,
-  Collection<TradeEntry>,
-  Filters,
-  Matcher
->(locationOverview, mainPage, useTradeFilters, fetchTrades, {
-  onUpdateFilters(query) {
-    set(hideIgnoredTrades, query.includeIgnoredTrades === 'false');
+  pagination,
+  sort,
+  fetchData,
+} = usePaginationFilters<Trade, TradeRequestPayload, TradeEntry, Collection<TradeEntry>, Filters, Matcher>(
+  locationOverview,
+  mainPage,
+  useTradeFilters,
+  fetchTrades,
+  {
+    onUpdateFilters(query) {
+      set(hideIgnoredTrades, query.includeIgnoredTrades === 'false');
+      set(showIgnoredAssets, query.excludeIgnoredAssets === 'false');
+    },
+    customPageParams: computed<Partial<TradeRequestPayload>>(() => {
+      const params: Writeable<Partial<TradeRequestPayload>> = {};
+      const location = get(locationOverview);
+
+      if (location)
+        params.location = toSnakeCase(location);
+
+      return params;
+    }),
+    extraParams,
   },
-  extraParams
-});
+);
 
 useHistoryAutoRefresh(fetchData);
 
@@ -152,23 +155,21 @@ const { setOpenDialog, setPostSubmitFunc } = useTradesForm();
 
 setPostSubmitFunc(fetchData);
 
-const newExternalTrade = () => {
+function newExternalTrade() {
   set(editableItem, null);
   setOpenDialog(true);
-};
+}
 
-const editTradeHandler = (trade: TradeEntry) => {
+function editTradeHandler(trade: TradeEntry) {
   set(editableItem, trade);
   setOpenDialog(true);
-};
+}
 
 const { floatingPrecision } = storeToRefs(useGeneralSettingsStore());
 
-const promptForDelete = (trade: TradeEntry) => {
+function promptForDelete(trade: TradeEntry) {
   const prep = (
-    trade.tradeType === 'buy'
-      ? t('closed_trades.description.with')
-      : t('closed_trades.description.for')
+    trade.tradeType === 'buy' ? t('closed_trades.description.with') : t('closed_trades.description.for')
   ).toLocaleLowerCase();
 
   const base = get(assetSymbol(trade.baseAsset));
@@ -178,14 +179,14 @@ const promptForDelete = (trade: TradeEntry) => {
     t('closed_trades.confirmation.message', {
       pair: `${base} ${prep} ${quote}`,
       action: trade.tradeType,
-      amount: trade.amount.toFormat(get(floatingPrecision))
-    })
+      amount: trade.amount.toFormat(get(floatingPrecision)),
+    }),
   );
   set(tradesToDelete, [trade]);
   showDeleteConfirmation();
-};
+}
 
-const massDelete = () => {
+function massDelete() {
   const selectedVal = get(selected);
   if (selectedVal.length === 1) {
     promptForDelete(selectedVal[0]);
@@ -197,25 +198,23 @@ const massDelete = () => {
   set(
     confirmationMessage,
     t('closed_trades.confirmation.multiple_message', {
-      length: get(tradesToDelete).length
-    })
+      length: get(tradesToDelete).length,
+    }),
   );
 
   showDeleteConfirmation();
-};
+}
 
-const deleteTradeHandler = async () => {
+async function deleteTradeHandler() {
   const tradesToDeleteVal = get(tradesToDelete);
-  if (tradesToDeleteVal.length === 0) {
+  if (tradesToDeleteVal.length === 0)
     return;
-  }
 
   const ids = tradesToDeleteVal.map(trade => trade.tradeId);
   const { success } = await deleteExternalTrade(ids);
 
-  if (!success) {
+  if (!success)
     return;
-  }
 
   set(tradesToDelete, []);
   set(confirmationMessage, '');
@@ -223,38 +222,54 @@ const deleteTradeHandler = async () => {
   const selectedVal = [...get(selected)];
   set(
     selected,
-    selectedVal.filter(trade => !ids.includes(trade.tradeId))
+    selectedVal.filter(trade => !ids.includes(trade.tradeId)),
   );
 
   await fetchData();
-};
+}
 
 const { ignore } = useIgnore(
   {
     actionType: IgnoreActionType.TRADES,
-    toData: (item: TradeEntry) => item.tradeId
+    toData: (item: TradeEntry) => item.tradeId,
   },
   selected,
-  () => fetchData()
+  () => fetchData(),
 );
 
 const { show } = useConfirmStore();
 
-const showDeleteConfirmation = () => {
+function showDeleteConfirmation() {
   show(
     {
       title: t('closed_trades.confirmation.title'),
-      message: get(confirmationMessage)
+      message: get(confirmationMessage),
     },
-    deleteTradeHandler
+    deleteTradeHandler,
   );
-};
+}
 
 const { isLoading: isSectionLoading } = useStatusStore();
 const loading = isSectionLoading(Section.TRADES);
 
-const getItemClass = (item: TradeEntry) =>
-  item.ignoredInAccounting ? 'darken-row' : '';
+const value = computed({
+  get: () => {
+    if (!get(mainPage))
+      return undefined;
+
+    return get(selected).map(({ tradeId }: TradeEntry) => tradeId);
+  },
+  set: (values) => {
+    set(
+      selected,
+      get(trades).data.filter(({ tradeId }: TradeEntry) => values?.includes(tradeId)),
+    );
+  },
+});
+
+function getItemClass(item: TradeEntry) {
+  return item.ignoredInAccounting ? 'opacity-50' : '';
+}
 
 const pageRoute = Routes.HISTORY_TRADES;
 
@@ -264,16 +279,16 @@ onMounted(async () => {
   if (query.add) {
     newExternalTrade();
     await router.replace({ query: {} });
-  } else {
+  }
+  else {
     await fetchData();
     await refreshTrades();
   }
 });
 
 watch(loading, async (isLoading, wasLoading) => {
-  if (!isLoading && wasLoading) {
+  if (!isLoading && wasLoading)
     await fetchData();
-  }
 });
 </script>
 
@@ -313,24 +328,43 @@ watch(loading, async (isLoading, wasLoading) => {
     </template>
 
     <RuiCard>
-      <template v-if="!!locationOverview" #header>
+      <template
+        v-if="!!locationOverview"
+        #header
+      >
         <CardTitle>
-          <NavigatorLink :to="{ path: pageRoute }">
+          <NavigatorLink :to="pageRoute">
             {{ t('closed_trades.title') }}
           </NavigatorLink>
         </CardTitle>
       </template>
 
-      <HistoryTableActions
-        v-if="!locationOverview"
-        class="flex flex-row items-center flex-wrap gap-2 mb-4"
-      >
+      <HistoryTableActions v-if="!locationOverview">
         <template #filter>
+          <TableStatusFilter>
+            <div class="py-1 max-w-[16rem]">
+              <RuiSwitch
+                v-model="hideIgnoredTrades"
+                class="p-4"
+                color="primary"
+                hide-details
+                :label="t('closed_trades.hide_ignored_trades')"
+              />
+              <RuiDivider />
+              <RuiSwitch
+                v-model="showIgnoredAssets"
+                class="p-4"
+                color="primary"
+                hide-details
+                :label="t('transactions.filter.show_ignored_assets')"
+              />
+            </div>
+          </TableStatusFilter>
           <TableFilter
-            :matches="filters"
+            v-model:matches="filters"
+            class="min-w-full sm:min-w-[26rem]"
             :matchers="matchers"
             :location="SavedFilterLocation.HISTORY_TRADES"
-            @update:matches="setFilter($event)"
           />
         </template>
 
@@ -352,123 +386,110 @@ watch(loading, async (isLoading, wasLoading) => {
           class="flex flex-row items-center gap-2"
         >
           {{ t('closed_trades.selected', { count: selected.length }) }}
-          <RuiButton variant="text" @click="selected = []">
+          <RuiButton
+            variant="text"
+            @click="selected = []"
+          >
             {{ t('common.actions.clear_selection') }}
           </RuiButton>
         </div>
       </HistoryTableActions>
 
-      <VSwitch
-        v-if="mainPage"
-        v-model="hideIgnoredTrades"
-        class="mb-4"
-        hide-details
-        :label="t('closed_trades.hide_ignored_trades')"
-      />
-
-      <CollectionHandler :collection="trades" @set-page="setPage($event)">
-        <template #default="{ data, limit, total, showUpgradeRow, itemLength }">
-          <DataTable
-            v-model="selected"
-            :expanded.sync="expanded"
-            :headers="tableHeaders"
-            :items="data"
-            :loading="isLoading"
+      <CollectionHandler
+        :collection="trades"
+        @set-page="setPage($event)"
+      >
+        <template #default="{ data, limit, total, showUpgradeRow }">
+          <RuiDataTable
+            v-model="value"
+            v-model:expanded="expanded"
+            v-model:sort.external="sort"
+            v-model:pagination.external="pagination"
+            :cols="tableHeaders"
+            :rows="data"
+            :loading="isLoading || loading"
             :loading-text="t('trade_history.loading')"
-            :options="options"
-            :server-items-length="itemLength"
             data-cy="closed-trades"
-            :single-select="false"
-            :show-select="!locationOverview"
             :item-class="getItemClass"
-            item-key="tradeId"
-            show-expand
+            row-attr="tradeId"
+            outlined
             single-expand
-            multi-sort
-            :must-sort="false"
-            @update:options="setOptions($event)"
+            sticky-header
           >
-            <template #item.ignoredInAccounting="{ item, isMobile }">
-              <IgnoredInAcountingIcon
-                v-if="item.ignoredInAccounting"
-                :mobile="isMobile"
-              />
+            <template #item.ignoredInAccounting="{ row }">
+              <IgnoredInAcountingIcon v-if="row.ignoredInAccounting" />
+              <span v-else />
             </template>
-            <template #item.location="{ item }">
+            <template #item.location="{ row }">
               <LocationDisplay
                 data-cy="trade-location"
-                :identifier="item.location"
+                :identifier="row.location"
               />
             </template>
-            <template #item.type="{ item }">
-              <BadgeDisplay
-                :color="
-                  item.tradeType.toLowerCase() === 'sell' ? 'red' : 'green'
-                "
-              >
-                {{ item.tradeType }}
+            <template #item.type="{ row }">
+              <BadgeDisplay :color="row.tradeType.toLowerCase() === 'sell' ? 'red' : 'green'">
+                {{ row.tradeType }}
               </BadgeDisplay>
             </template>
-            <template #item.baseAsset="{ item }">
+            <template #item.baseAsset="{ row }">
               <AssetDetails
                 data-cy="trade-base"
                 opens-details
                 hide-name
-                :asset="item.baseAsset"
+                :asset="row.baseAsset"
               />
             </template>
-            <template #item.quoteAsset="{ item }">
+            <template #item.quoteAsset="{ row }">
               <AssetDetails
                 hide-name
                 opens-details
-                :asset="item.quoteAsset"
+                :asset="row.quoteAsset"
                 data-cy="trade-quote"
               />
             </template>
-            <template #item.description="{ item }">
-              {{
-                item.tradeType === 'buy'
-                  ? t('closed_trades.description.with')
-                  : t('closed_trades.description.for')
-              }}
+            <template #item.description="{ row }">
+              {{ row.tradeType === 'buy' ? t('closed_trades.description.with') : t('closed_trades.description.for') }}
             </template>
-            <template #item.rate="{ item }">
+            <template #item.rate="{ row }">
               <AmountDisplay
                 class="closed-trades__trade__rate"
-                :value="item.rate"
+                :value="row.rate"
               />
             </template>
-            <template #item.amount="{ item }">
+            <template #item.amount="{ row }">
               <AmountDisplay
                 class="closed-trades__trade__amount"
-                :value="item.amount"
+                :value="row.amount"
               />
             </template>
-            <template #item.timestamp="{ item }">
-              <DateDisplay :timestamp="item.timestamp" />
+            <template #item.timestamp="{ row }">
+              <DateDisplay :timestamp="row.timestamp" />
             </template>
-            <template #item.actions="{ item }">
+            <template #item.actions="{ row }">
               <RowActions
-                v-if="item.location === 'external'"
+                v-if="row.location === 'external'"
                 :disabled="loading"
                 :edit-tooltip="t('closed_trades.edit_tooltip')"
                 :delete-tooltip="t('closed_trades.delete_tooltip')"
-                @edit-click="editTradeHandler(item)"
-                @delete-click="promptForDelete(item)"
+                @edit-click="editTradeHandler(row)"
+                @delete-click="promptForDelete(row)"
               />
             </template>
-            <template #expanded-item="{ headers, item }">
-              <TradeDetails :span="headers.length" :item="item" />
+            <template #expanded-item="{ row }">
+              <TradeDetails :item="row" />
             </template>
-            <template v-if="showUpgradeRow" #body.prepend="{ headers }">
+            <template
+              v-if="showUpgradeRow"
+              #body.prepend="{ colspan }"
+            >
               <UpgradeRow
                 :limit="limit"
                 :total="total"
-                :colspan="headers.length"
+                :colspan="colspan"
                 :label="t('closed_trades.label')"
               />
             </template>
-          </DataTable>
+          </RuiDataTable>
         </template>
       </CollectionHandler>
       <ExternalTradeFormDialog

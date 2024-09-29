@@ -1,17 +1,35 @@
+import typing
+
 import pytest
 import requests
 
 from rotkehlchen.chain.accounts import BlockchainAccountData
+from rotkehlchen.chain.zksync_lite.structures import (
+    ZKSyncLiteSwapData,
+    ZKSyncLiteTransaction,
+    ZKSyncLiteTXType,
+)
 from rotkehlchen.constants import ONE
+from rotkehlchen.constants.assets import A_DAI, A_ETH
+from rotkehlchen.db.cache import DBCacheStatic
 from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.db.filtering import EvmTransactionsFilterQuery
+from rotkehlchen.fval import FVal
 from rotkehlchen.tests.utils.api import api_url_for, assert_simple_ok_response
 from rotkehlchen.tests.utils.exchanges import (
     check_saved_events_for_exchange,
     mock_exchange_data_in_db,
 )
 from rotkehlchen.tests.utils.factories import make_evm_address, make_evm_tx_hash
-from rotkehlchen.types import ChainID, EvmTransaction, Location, SupportedBlockchain
+from rotkehlchen.types import (
+    ChainID,
+    EvmTransaction,
+    Fee,
+    Location,
+    ModuleName,
+    OnlyPurgableModuleName,
+    SupportedBlockchain,
+)
 
 
 @pytest.mark.parametrize('added_exchanges', [(Location.BINANCE, Location.POLONIEX)])
@@ -49,7 +67,7 @@ def test_purge_single_exchange_data(rotkehlchen_api_server_with_exchanges, added
     check_saved_events_for_exchange(Location.BINANCE, rotki.data.db, should_exist=True)
 
 
-def test_purge_ethereum_transaction_data(rotkehlchen_api_server):
+def test_purge_blockchain_transaction_data(rotkehlchen_api_server):
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
     addr1 = make_evm_address()
     db = DBEvmTx(rotki.data.db)
@@ -58,41 +76,181 @@ def test_purge_ethereum_transaction_data(rotkehlchen_api_server):
             write_cursor=write_cursor,
             account_data=[
                 BlockchainAccountData(chain=SupportedBlockchain.ETHEREUM, address=addr1),
+                BlockchainAccountData(chain=SupportedBlockchain.OPTIMISM, address=addr1),
+                BlockchainAccountData(chain=SupportedBlockchain.GNOSIS, address=addr1),
+                BlockchainAccountData(chain=SupportedBlockchain.ZKSYNC_LITE, address=addr1),
             ],
         )
-        db.add_evm_transactions(
-            write_cursor,
-            [EvmTransaction(
-                tx_hash=make_evm_tx_hash(),
-                chain_id=ChainID.ETHEREUM,
-                timestamp=1,
-                block_number=1,
-                from_address=addr1,
-                to_address=make_evm_address(),
-                value=ONE,
-                gas=ONE,
-                gas_price=ONE,
-                gas_used=ONE,
-                input_data=b'',
-                nonce=1,
-            )],
-            relevant_address=addr1,
-        )
-
-    filter_ = EvmTransactionsFilterQuery.make(chain_id=ChainID.ETHEREUM)
+        for chain_id in (ChainID.ETHEREUM, ChainID.OPTIMISM, ChainID.GNOSIS):
+            for i in range(3 if chain_id == ChainID.ETHEREUM else 2):
+                db.add_evm_transactions(
+                    write_cursor,
+                    [EvmTransaction(
+                        tx_hash=make_evm_tx_hash(),
+                        chain_id=chain_id,
+                        timestamp=i,
+                        block_number=1,
+                        from_address=addr1,
+                        to_address=make_evm_address(),
+                        value=ONE,
+                        gas=ONE,
+                        gas_price=ONE,
+                        gas_used=ONE,
+                        input_data=b'',
+                        nonce=1,
+                    )],
+                    relevant_address=addr1,
+                )
 
     with rotki.data.db.conn.read_ctx() as cursor:
-        result, filter_count = db.get_evm_transactions_and_limit_info(cursor, filter_, True)
-        assert len(result) == 1
-        assert filter_count == 1
+        result, filter_count = db.get_evm_transactions_and_limit_info(cursor, EvmTransactionsFilterQuery.make(), True)  # noqa: E501
+        assert len(result) == 7
+        assert filter_count == 7
         response = requests.delete(
             api_url_for(
                 rotkehlchen_api_server,
-                'evmtransactionsresource',
+                'blockchaintransactionsresource',
             ),
-            json={'evm_chain': 'ethereum'},
+            json={'chain': 'eth'},
         )
         assert_simple_ok_response(response)
-        result, filter_count = db.get_evm_transactions_and_limit_info(cursor, filter_, True)
-    assert len(result) == 0
-    assert filter_count == 0
+        result, filter_count = db.get_evm_transactions_and_limit_info(cursor, EvmTransactionsFilterQuery.make(), True)  # noqa: E501
+        assert len(result) == 4
+        assert filter_count == 4
+        result, filter_count = db.get_evm_transactions_and_limit_info(cursor, EvmTransactionsFilterQuery.make(chain_id=ChainID.ETHEREUM), True)  # noqa: E501
+        assert len(result) == 0
+        assert filter_count == 0
+
+    def _add_zksynclitetxs(write_cursor):
+        for i in range(2):
+            rotki.chains_aggregator.zksync_lite._add_zksynctxs_db(
+                write_cursor=write_cursor,
+                transactions=[ZKSyncLiteTransaction(
+                    tx_hash=make_evm_tx_hash(),
+                    tx_type=ZKSyncLiteTXType.TRANSFER if i == 0 else ZKSyncLiteTXType.SWAP,
+                    timestamp=1,
+                    block_number=1,
+                    from_address=addr1,
+                    to_address=make_evm_address(),
+                    asset=A_ETH,
+                    amount=ONE,
+                    fee=Fee(ONE),
+                    swap_data=None if i == 0 else ZKSyncLiteSwapData(from_asset=A_ETH, from_amount=ONE, to_asset=A_DAI, to_amount=FVal(3000)),  # noqa: E501
+                )],
+            )
+
+    def _assert_zksynclite_txs_num(cursor, tx_num, swap_num):
+        assert cursor.execute('SELECT COUNT(*) FROM zksynclite_transactions').fetchone()[0] == tx_num  # noqa: E501
+        assert cursor.execute('SELECT COUNT(*) FROM zksynclite_swaps').fetchone()[0] == swap_num
+
+    # now add a few zksync lite transactions
+    with rotki.data.db.user_write() as write_cursor:
+        _add_zksynclitetxs(write_cursor)
+        _assert_zksynclite_txs_num(write_cursor, tx_num=2, swap_num=1)
+
+    # see that purging without arguments removes the remaining
+    # optimism, gnosis and zksync_lite transctions
+    response = requests.delete(
+        api_url_for(
+            rotkehlchen_api_server,
+            'blockchaintransactionsresource',
+        ),
+    )
+    assert_simple_ok_response(response)
+    with rotki.data.db.conn.read_ctx() as cursor:
+        result, filter_count = db.get_evm_transactions_and_limit_info(cursor, EvmTransactionsFilterQuery.make(), True)  # noqa: E501
+        assert len(result) == 0
+        assert filter_count == 0
+        _assert_zksynclite_txs_num(cursor, tx_num=0, swap_num=0)
+
+    # re-add a few zksync lite transactions
+    with rotki.data.db.user_write() as write_cursor:
+        _add_zksynclitetxs(write_cursor)
+        _assert_zksynclite_txs_num(write_cursor, tx_num=2, swap_num=1)
+
+    # and check removing only zksync_lite by argument works
+    response = requests.delete(
+        api_url_for(
+            rotkehlchen_api_server,
+            'blockchaintransactionsresource',
+        ),
+        json={'chain': 'zksync_lite'},
+    )
+    assert_simple_ok_response(response)
+    with rotki.data.db.conn.read_ctx() as cursor:
+        _assert_zksynclite_txs_num(cursor, tx_num=0, swap_num=0)
+
+
+def test_purge_module_data(rotkehlchen_api_server):
+    rotki = rotkehlchen_api_server.rest_api.rotkehlchen
+
+    def populate_data():
+        with rotki.data.db.user_write() as write_cursor:
+            write_cursor.execute(
+                'INSERT INTO multisettings(name, value) VALUES(?, ?)',
+                ('loopring_0xfoo_account_id', '42'),
+            )
+            write_cursor.execute(
+                'INSERT OR IGNORE INTO eth2_validators(validator_index, '
+                'public_key, ownership_proportion) VALUES(?, ?, ?)',
+                (42, '0xfoo', '1.0'),
+            )
+            write_cursor.execute(
+                'INSERT INTO eth2_daily_staking_details(validator_index, timestamp, pnl) '
+                'VALUES(?, ?, ?)',
+                (42, 1727172416, '42'),
+            )
+            write_cursor.execute(
+                'INSERT INTO cowswap_orders(identifier, order_type, raw_fee_amount) '
+                'VALUES(?, ?, ?)',
+                ('foo', 'valid_type', '42'),
+            )
+            write_cursor.execute(
+                'INSERT OR REPLACE INTO key_value_cache(name, value) VALUES(?, ?)',
+                (DBCacheStatic.LAST_GNOSISPAY_QUERY_TS.value, '42'),
+            )
+            write_cursor.execute(
+                'INSERT OR REPLACE INTO gnosispay_data(tx_hash, timestamp, merchant_name, '
+                'merchant_city, country, mcc, transaction_symbol, transaction_amount, '
+                'billing_symbol, billing_amount, reversal_symbol, reversal_amount) '
+                'VALUES(?, ?, ?, ?, ? ,?, ?, ?, ?, ?, ?, ?)',
+                (make_evm_tx_hash(), 1727172416, 'foo', 'foo', 'ES', 4242, 'EUR', '1', None, None, None, None),  # noqa: E501
+            )
+
+    def check_data(name, before):
+        with rotki.data.db.conn.read_ctx() as cursor:
+            if not name or name == 'loopring':
+                assert cursor.execute('SELECT COUNT(*) FROM multisettings').fetchone()[0] == (221 if before else 220)  # noqa: E501
+            if not name or name == 'eth2':
+                assert cursor.execute('SELECT COUNT(*) FROM eth2_daily_staking_details').fetchone()[0] == (1 if before else 0)  # noqa: E501
+            if not name or name == 'cowswap':
+                assert cursor.execute('SELECT COUNT(*) FROM cowswap_orders').fetchone()[0] == (1 if before else 0)  # noqa: E501
+            if not name or name == 'gnosis_pay':
+                assert cursor.execute('SELECT COUNT(*) FROM gnosispay_data').fetchone()[0] == (1 if before else 0)  # noqa: E501
+                assert cursor.execute('SELECT COUNT(*) FROM key_value_cache').fetchone()[0] == (1 if before else 0)  # noqa: E501
+
+    populate_data()
+    check_data(name=None, before=True)
+    valid_names = typing.get_args(ModuleName) + typing.get_args(OnlyPurgableModuleName)
+    for name in valid_names:
+        response = requests.delete(
+            api_url_for(
+                rotkehlchen_api_server,
+                'namedethereummoduledataresource',
+                module_name=name,
+            ),
+        )
+        assert_simple_ok_response(response)
+        check_data(name=name, before=False)
+
+    # now recheck that no module name purges all
+    populate_data()
+    check_data(name=None, before=True)
+    response = requests.delete(
+        api_url_for(
+            rotkehlchen_api_server,
+            'ethereummoduledataresource',
+        ),
+    )
+    assert_simple_ok_response(response)
+    check_data(name=None, before=False)

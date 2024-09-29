@@ -9,20 +9,31 @@ const { t } = useI18n();
 </script>
 
 <template>
-  <Card class="mt-8" flat>
-    <template #title>{{ t('asset_update.manual.title') }}</template>
-    <template #subtitle>{{ t('asset_update.manual.subtitle') }}</template>
-    <div v-if="skipped" class="text-body-1">
-      <i18n path="asset_update.manual.skipped">
-        <template #skipped>
-          <BadgeDisplay class="ml-2">{{ skipped }}</BadgeDisplay>
-        </template>
-      </i18n>
-    </div>
-    <template #buttons>
-      <RuiButton color="primary" :loading="loading" @click="emit('check')">
+  <RuiCard>
+    <template #header>
+      {{ t('asset_update.manual.title') }}
+    </template>
+    <template #subheader>
+      {{ t('asset_update.manual.subtitle') }}
+    </template>
+    <i18n-t
+      v-if="skipped"
+      keypath="asset_update.manual.skipped"
+    >
+      <template #skipped>
+        <BadgeDisplay class="ml-2">
+          {{ skipped }}
+        </BadgeDisplay>
+      </template>
+    </i18n-t>
+    <template #footer>
+      <RuiButton
+        color="primary"
+        :loading="loading"
+        @click="emit('check')"
+      >
         {{ t('asset_update.manual.check') }}
       </RuiButton>
     </template>
-  </Card>
+  </RuiCard>
 </template>

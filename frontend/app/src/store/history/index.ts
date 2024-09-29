@@ -1,51 +1,107 @@
-import { type TradeLocation } from '@/types/history/trade/location';
-import { type EvmUndecodedTransactionsData } from '@/types/websocket-messages';
+import { TaskType } from '@/types/task-type';
+import type { EvmUnDecodedTransactionsData, ProtocolCacheUpdatesData } from '@/types/websocket-messages';
 
 export const useHistoryStore = defineStore('history', () => {
-  const { notify } = useNotificationsStore();
-  const { t } = useI18n();
-  const associatedLocations: Ref<TradeLocation[]> = ref([]);
-  const { fetchAssociatedLocations: fetchAssociatedLocationsApi } =
-    useHistoryApi();
+  const associatedLocations = ref<string[]>([]);
+  const undecodedTransactionsStatus = ref<Record<string, EvmUnDecodedTransactionsData>>({});
+  const protocolCacheUpdateStatus = ref<Record<string, ProtocolCacheUpdatesData>>({});
 
-  const evmUndecodedTransactionsStatus: Ref<
-    Record<string, EvmUndecodedTransactionsData>
-  > = ref({});
+  const receivingProtocolCacheStatus = ref<boolean>(false);
 
-  const setEvmUndecodedTransactions = (data: EvmUndecodedTransactionsData) => {
-    set(evmUndecodedTransactionsStatus, {
-      ...get(evmUndecodedTransactionsStatus),
-      [data.evmChain]: data
+  const decodingStatus = computed<EvmUnDecodedTransactionsData[]>(() =>
+    Object.values(get(undecodedTransactionsStatus)).filter(status => status.total > 0),
+  );
+
+  const protocolCacheStatus = computed<ProtocolCacheUpdatesData[]>(() =>
+    Object.values(get(protocolCacheUpdateStatus)).filter(status => status.total > 0),
+  );
+
+  const setUndecodedTransactionsStatus = (data: EvmUnDecodedTransactionsData): void => {
+    set(receivingProtocolCacheStatus, false);
+    set(undecodedTransactionsStatus, {
+      ...get(undecodedTransactionsStatus),
+      [data.chain]: data,
     });
   };
 
-  const resetEvmUndecodedTransactionsStatus = () => {
-    set(evmUndecodedTransactionsStatus, {});
+  const updateUndecodedTransactionsStatus = (data: Record<string, EvmUnDecodedTransactionsData>): void => {
+    set(undecodedTransactionsStatus, {
+      ...get(undecodedTransactionsStatus),
+      ...data,
+    });
   };
 
-  const fetchAssociatedLocations = async () => {
+  const { isTaskRunning } = useTaskStore();
+  const refreshProtocolCacheTaskRunning = isTaskRunning(TaskType.REFRESH_GENERAL_CACHE);
+
+  const setProtocolCacheStatus = (data: ProtocolCacheUpdatesData): void => {
+    set(receivingProtocolCacheStatus, true);
+    const old = get(protocolCacheUpdateStatus);
+    const filtered: Record<string, ProtocolCacheUpdatesData> = {};
+    const currentKey = `${data.chain}#${data.protocol}`;
+    for (const key in old) {
+      if (key !== currentKey) {
+        filtered[key] = {
+          ...old[key],
+          processed: old[key].total,
+        };
+      }
+    }
+    set(protocolCacheUpdateStatus, {
+      [currentKey]: data,
+      ...filtered,
+    });
+  };
+
+  const resetUndecodedTransactionsStatus = (): void => {
+    set(undecodedTransactionsStatus, {});
+  };
+
+  const resetProtocolCacheUpdatesStatus = (): void => {
+    set(protocolCacheUpdateStatus, {});
+  };
+
+  const { fetchAssociatedLocations: fetchAssociatedLocationsApi } = useHistoryApi();
+  const { notify } = useNotificationsStore();
+  const { t } = useI18n();
+
+  const getUndecodedTransactionStatus = (): EvmUnDecodedTransactionsData[] =>
+    Object.values(get(undecodedTransactionsStatus));
+
+  const fetchAssociatedLocations = async (): Promise<void> => {
     try {
       set(associatedLocations, await fetchAssociatedLocationsApi());
-    } catch (e: any) {
-      logger.error(e);
-      const message = e?.message ?? e ?? '';
+    }
+    catch (error: any) {
+      logger.error(error);
+      const message = error?.message ?? error ?? '';
       notify({
-        title: t(
-          'actions.history.fetch_associated_locations.error.title'
-        ).toString(),
-        message: t('actions.history.fetch_associated_locations.error.message', {
-          message
-        }).toString(),
-        display: true
+        title: t('actions.history.fetch_associated_locations.error.title'),
+        message: t('actions.history.fetch_associated_locations.error.message', { message }),
+        display: true,
       });
     }
   };
 
+  watch(refreshProtocolCacheTaskRunning, (curr, prev) => {
+    if (!curr && prev) {
+      set(receivingProtocolCacheStatus, false);
+      resetProtocolCacheUpdatesStatus();
+    }
+  });
+
   return {
     associatedLocations,
+    decodingStatus,
+    protocolCacheStatus,
+    undecodedTransactionsStatus,
+    receivingProtocolCacheStatus,
+    setUndecodedTransactionsStatus,
+    getUndecodedTransactionStatus,
+    updateUndecodedTransactionsStatus,
+    resetUndecodedTransactionsStatus,
     fetchAssociatedLocations,
-    evmUndecodedTransactionsStatus,
-    setEvmUndecodedTransactions,
-    resetEvmUndecodedTransactionsStatus
+    setProtocolCacheStatus,
+    resetProtocolCacheUpdatesStatus,
   };
 });

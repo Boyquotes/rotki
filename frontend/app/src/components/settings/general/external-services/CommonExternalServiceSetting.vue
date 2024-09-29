@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import useVuelidate from '@vuelidate/core';
 import { helpers, minValue, required } from '@vuelidate/validators';
+import { toMessages } from '@/utils/validation';
 
 const props = withDefaults(
   defineProps<{
@@ -14,8 +15,8 @@ const props = withDefaults(
   {
     min: 1,
     label: '',
-    hint: ''
-  }
+    hint: '',
+  },
 );
 
 const { min, setting, requiredMessage, minValueMessage } = toRefs(props);
@@ -25,15 +26,15 @@ const inputValue = ref<string>('');
 const rules = {
   inputValue: {
     required: helpers.withMessage(get(requiredMessage), required),
-    min: helpers.withMessage(get(minValueMessage)(get(min)), minValue(get(min)))
-  }
+    min: helpers.withMessage(get(minValueMessage)(get(min)), minValue(get(min))),
+  },
 };
 
 const { [get(setting)]: storeValue } = storeToRefs(useGeneralSettingsStore());
 
-const resetValue = () => {
+function resetValue() {
   set(inputValue, get(storeValue).toString());
-};
+}
 
 const v$ = useVuelidate(rules, { inputValue }, { $autoDirty: true });
 const { callIfValid } = useValidation(v$);
@@ -57,17 +58,17 @@ onMounted(() => {
       @updated="restart()"
       @finished="resetValue()"
     >
-      <VTextField
+      <RuiTextField
         v-model="inputValue"
-        outlined
+        variant="outlined"
+        color="primary"
         :label="label"
         :hint="hint"
-        persistent-hint
         type="number"
         :min="min"
         :success-messages="success"
-        :error-messages="error || v$.inputValue.$errors.map(e => e.$message)"
-        @change="callIfValid($event, update)"
+        :error-messages="error || toMessages(v$.inputValue)"
+        @update:model-value="callIfValid($event, update)"
       />
     </SettingsOption>
   </div>

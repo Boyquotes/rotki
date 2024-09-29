@@ -1,16 +1,19 @@
 import logging
-from abc import ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 from enum import auto
 from typing import TYPE_CHECKING, Any, TypedDict, TypeVar
 
-from rotkehlchen.accounting.constants import EVENT_CATEGORY_MAPPINGS
+from rotkehlchen.accounting.constants import DEFAULT, EVENT_CATEGORY_MAPPINGS, EXCHANGE
 from rotkehlchen.accounting.mixins.event import AccountingEventMixin, AccountingEventType
 from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.accounting.structures.types import ActionType
+from rotkehlchen.accounting.types import EventAccountingRuleStatus
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.chain.ethereum.constants import SHAPPELA_TIMESTAMP
 from rotkehlchen.constants.assets import A_ETH2
 from rotkehlchen.errors.serialization import DeserializationError
+from rotkehlchen.exchanges.constants import ALL_SUPPORTED_EXCHANGES
+from rotkehlchen.fval import FVal
 from rotkehlchen.history.events.structures.types import (
     EventDirection,
     HistoryEventSubType,
@@ -81,7 +84,7 @@ class HistoryBaseEntryData(TypedDict):
 T = TypeVar('T', bound='HistoryBaseEntry')
 
 
-class HistoryBaseEntry(AccountingEventMixin, metaclass=ABCMeta):
+class HistoryBaseEntry(AccountingEventMixin, ABC):
     """
     Intended to be the base class for all types of event. All trades, deposits,
     swaps etc. are going to be made up of multiple such entries.
@@ -228,7 +231,7 @@ class HistoryBaseEntry(AccountingEventMixin, metaclass=ABCMeta):
 
     def serialize(self) -> dict[str, Any]:
         """Serialize the event alone for api"""
-        return {
+        serialized_data = {
             'identifier': self.identifier,
             'entry_type': self.entry_type.serialize(),
             'event_identifier': self.event_identifier,
@@ -242,21 +245,56 @@ class HistoryBaseEntry(AccountingEventMixin, metaclass=ABCMeta):
             'location_label': self.location_label,
             'notes': self.notes,
         }
+        if self.location == Location.KRAKEN and not self.notes:
+            if self.event_type == HistoryEventType.TRADE:
+                if self.event_subtype == HistoryEventSubType.SPEND:
+                    serialized_data['notes'] = f'Swap {self.balance.amount} {self.asset.resolve_to_asset_with_symbol().symbol} in Kraken'  # noqa: E501
+                elif self.event_subtype == HistoryEventSubType.RECEIVE:
+                    serialized_data['notes'] = f'Receive {self.balance.amount} {self.asset.resolve_to_asset_with_symbol().symbol} as a result of a Kraken swap'  # noqa: E501
+                elif self.event_subtype == HistoryEventSubType.FEE:
+                    serialized_data['notes'] = f'Spend {self.balance.amount} {self.asset.resolve_to_asset_with_symbol().symbol} as Kraken trading fee'  # noqa: E501
 
-    def serialize_for_csv(self) -> dict[str, Any]:
-        """Serialize event data for CSV export"""
+            elif self.event_type == HistoryEventType.STAKING:
+                if self.event_subtype == HistoryEventSubType.REWARD:
+                    serialized_data['notes'] = f'Gain {self.balance.amount} {self.asset.resolve_to_asset_with_symbol().symbol} from Kraken staking'  # noqa: E501
+                elif self.event_subtype == HistoryEventSubType.FEE:
+                    serialized_data['notes'] = f'Spend {self.balance.amount} {self.asset.resolve_to_asset_with_symbol().symbol} as Kraken staking fee'  # noqa: E501
+
+            elif self.event_type == HistoryEventType.WITHDRAWAL:
+                if self.event_subtype == HistoryEventSubType.REMOVE_ASSET:
+                    serialized_data['notes'] = f'Withdraw {self.balance.amount} {self.asset.resolve_to_asset_with_symbol().symbol} from Kraken'  # noqa: E501
+                elif self.event_subtype == HistoryEventSubType.FEE:
+                    serialized_data['notes'] = f'Spend {self.balance.amount} {self.asset.resolve_to_asset_with_symbol().symbol} as Kraken withdrawal fee'  # noqa: E501
+
+            elif self.event_type == HistoryEventType.DEPOSIT and self.event_subtype == HistoryEventSubType.DEPOSIT_ASSET:  # noqa: E501
+                serialized_data['notes'] = f'Deposit {self.balance.amount} {self.asset.resolve_to_asset_with_symbol().symbol} to Kraken'  # noqa: E501
+
+        return serialized_data
+
+    def serialize_for_csv(self, fiat_value: FVal) -> dict[str, Any]:
+        """Serialize event data for CSV export.
+
+        This method serializes event data, adding 'amount' and 'fiat_value'
+        right after the 'asset' in the serialized dictionary. Note that
+        'fiat_value' is not in USD but in the user-selected currency.
+        """
         entry = self.serialize()
         balance = entry.pop('balance')
-        entry['balance_amount'] = balance['amount']
-        entry['balance_usd_value'] = balance['usd_value']
-        return entry
+        new_dict = {}
+        for key, value in entry.items():
+            new_dict[key] = value
+            if key == 'asset':
+                new_dict['amount'] = balance['amount']
+                new_dict['fiat_value'] = fiat_value
+
+        return new_dict
 
     def serialize_for_api(
             self,
             customized_event_ids: list[int],
             ignored_ids_mapping: dict[ActionType, set[str]],
             hidden_event_ids: list[int],
-            missing_accounting_rule: bool,
+            event_accounting_rule_status: EventAccountingRuleStatus,
             grouped_events_num: int | None = None,
     ) -> dict[str, Any]:
         """Serialize event and extra flags for api"""
@@ -269,8 +307,10 @@ class HistoryBaseEntry(AccountingEventMixin, metaclass=ABCMeta):
             result['hidden'] = True
         if grouped_events_num is not None:
             result['grouped_events_num'] = grouped_events_num
-        if missing_accounting_rule is True and self.maybe_get_direction() != EventDirection.NEUTRAL:  # noqa: E501
-            result['missing_accounting_rule'] = True
+        if result['entry']['notes'] and not self.notes:
+            result['default_notes'] = True
+
+        result['event_accounting_rule_status'] = event_accounting_rule_status.serialize()
 
         return result
 
@@ -281,7 +321,13 @@ class HistoryBaseEntry(AccountingEventMixin, metaclass=ABCMeta):
         If the combination of type/subtype is invalid return `None`.
         """
         try:
-            return EVENT_CATEGORY_MAPPINGS[self.event_type][self.event_subtype].direction
+            category_mapping = EVENT_CATEGORY_MAPPINGS[self.event_type][self.event_subtype]
+            if EXCHANGE in category_mapping and self.location in ALL_SUPPORTED_EXCHANGES:
+                return category_mapping[EXCHANGE].direction
+
+            # else
+            return category_mapping[DEFAULT].direction
+
         except KeyError:
             return None
 
@@ -446,29 +492,36 @@ class HistoryEvent(HistoryBaseEntry):
             events_iterator: "peekable['AccountingEventMixin']",  # pylint: disable=unused-argument
     ) -> int:
         if self.location == Location.KRAKEN:
-            if (  # LEF: Why the heck do we have this here? Perhaps to ignore all the ledger events that comprise the trades  # noqa: E501
-                self.event_type != HistoryEventType.STAKING or
-                self.event_subtype != HistoryEventSubType.REWARD
+            if self.event_type in (  # ignore trades and asset movements to avoid duplicates
+                HistoryEventType.TRADE,
+                HistoryEventType.DEPOSIT,
+                HistoryEventType.WITHDRAWAL,
             ):
                 return 1
 
-            timestamp = self.get_timestamp_in_sec()
-            # This omits every acquisition event of `ETH2` if `eth_staking_taxable_after_withdrawal_enabled`  # noqa: E501
-            # setting is set to `True` until ETH2 withdrawals were enabled
-            if self.asset == A_ETH2 and accounting.settings.eth_staking_taxable_after_withdrawal_enabled is True and timestamp < SHAPPELA_TIMESTAMP:  # noqa: E501
+            if self.event_type == HistoryEventType.STAKING:
+                if self.event_subtype != HistoryEventSubType.REWARD:
+                    return 1  # ignore asset movements between spot and staking
+
+                timestamp = self.get_timestamp_in_sec()
+                # This omits every acquisition event of `ETH2` if `eth_staking_taxable_after_withdrawal_enabled`  # noqa: E501
+                # setting is set to `True` until ETH2 withdrawals were enabled
+                if self.asset == A_ETH2 and accounting.settings.eth_staking_taxable_after_withdrawal_enabled is True and timestamp < SHAPPELA_TIMESTAMP:  # noqa: E501
+                    return 1
+
+                # otherwise it's kraken staking
+                accounting.add_in_event(
+                    event_type=AccountingEventType.STAKING,
+                    notes=f'Kraken {self.asset.resolve_to_asset_with_symbol().symbol} staking',
+                    location=self.location,
+                    timestamp=timestamp,
+                    asset=self.asset,
+                    amount=self.balance.amount,
+                    taxable=True,
+                )
                 return 1
 
-            # otherwise it's kraken staking
-            accounting.add_in_event(
-                event_type=AccountingEventType.STAKING,
-                notes=f'Kraken {self.asset.resolve_to_asset_with_symbol().symbol} staking',
-                location=self.location,
-                timestamp=timestamp,
-                asset=self.asset,
-                amount=self.balance.amount,
-                taxable=True,
-            )
-            return 1
+            # else let the common logic process the events
 
         return accounting.events_accountant.process(event=self, events_iterator=events_iterator)
 

@@ -1,4 +1,4 @@
-import { type DialogType } from '@/types/dialogs';
+import type { DialogType } from '@/types/dialogs';
 
 interface ConfirmationMessage {
   title: string;
@@ -17,55 +17,53 @@ type Func = VoidFunc | AwaitableFunc;
 
 const defaultFunc: Func = () => {};
 
-const defaultMessage = (): ConfirmationMessage => ({
-  title: '',
-  message: '',
-  type: 'warning',
-  singleAction: false
-});
+function defaultMessage(): ConfirmationMessage {
+  return {
+    title: '',
+    message: '',
+    type: 'warning',
+    singleAction: false,
+  };
+}
 
 export const useConfirmStore = defineStore('confirm', () => {
   const visible = ref(false);
-  const confirmation: Ref<ConfirmationMessage> = ref(defaultMessage());
-  const onConfirm: Ref<Func> = ref(defaultFunc);
-  const onDismiss: Ref<Func> = ref(defaultFunc);
+  const confirmation = ref<ConfirmationMessage>(defaultMessage());
+  const onConfirm = ref<Func>(defaultFunc);
+  const onDismiss = ref<Func>(defaultFunc);
 
   const { start, stop } = useTimeoutFn(
     () => {
       set(confirmation, defaultMessage());
     },
     3000,
-    { immediate: false }
+    { immediate: false },
   );
 
-  const show = (
-    message: ConfirmationMessage,
-    onConfirmFunc: Func,
-    onDismissFunc?: Func
-  ) => {
+  const show = (message: ConfirmationMessage, onConfirmFunc: Func, onDismissFunc?: Func): void => {
     set(confirmation, message);
     set(onConfirm, onConfirmFunc);
-    if (onDismissFunc) {
+    if (onDismissFunc)
       set(onDismiss, onDismissFunc);
-    }
+
     set(visible, true);
     stop();
   };
 
-  const reset = () => {
+  const reset = (): void => {
     set(visible, false);
     set(onConfirm, defaultFunc);
     set(onDismiss, defaultFunc);
     start();
   };
 
-  const dismiss = async () => {
+  const dismiss = async (): Promise<void> => {
     const method = get(onDismiss);
     reset();
     await method();
   };
 
-  const confirm = async () => {
+  const confirm = async (): Promise<void> => {
     const method = get(onConfirm);
     reset();
     await method();
@@ -76,10 +74,9 @@ export const useConfirmStore = defineStore('confirm', () => {
     confirmation,
     confirm,
     show,
-    dismiss
+    dismiss,
   };
 });
 
-if (import.meta.hot) {
+if (import.meta.hot)
   import.meta.hot.accept(acceptHMRUpdate(useConfirmStore, import.meta.hot));
-}

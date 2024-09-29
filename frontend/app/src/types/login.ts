@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { type Exchange } from '@/types/exchanges';
-import { type UserSettingsModel } from '@/types/user';
+import type { Exchange } from '@/types/exchanges';
+import type { UserSettingsModel } from '@/types/user';
 
 export type SyncApproval = 'yes' | 'no' | 'unknown';
 
@@ -21,15 +21,13 @@ export interface InitialSettings {
   readonly submitUsageAnalytics: boolean;
 }
 
-export const AccountSession = z.record(
-  z.enum(['loggedin', 'loggedout'] as const)
-);
+export const AccountSession = z.record(z.enum(['loggedin', 'loggedout'] as const));
 
 export type AccountSession = z.infer<typeof AccountSession>;
 
 export const SyncConflictPayload = z.object({
   localLastModified: z.number(),
-  remoteLastModified: z.number()
+  remoteLastModified: z.number(),
 });
 
 export type SyncConflictPayload = z.infer<typeof SyncConflictPayload>;

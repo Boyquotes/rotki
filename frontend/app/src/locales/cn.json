@@ -21,19 +21,17 @@
     "user_agent": "用户代理:"
   },
   "account_balance_table": {
-    "liabilities": "负债",
-    "loopring": "Loopring"
+    "liabilities": "负债"
   },
   "account_balances": {
     "confirm_delete": {
-      "description_address": "你确定要删除{count}个地址",
+      "description_address": "你确定要删除{address}个地址",
       "description_xpub": "你确定要删除{address}",
       "title": "账号删除"
     },
     "data_table": {
       "loading": "rotki 正在查询区块链，请稍候..."
     },
-    "delete_tooltip": "删除选定的账户",
     "detect_tokens": {
       "tooltip": {
         "last_detected": "上次检测到: {time}",
@@ -43,11 +41,7 @@
     },
     "edit_tooltip": "编辑账户",
     "headers": {
-      "num_of_detected_tokens": "检测到的token数量",
-      "ownership": "所有权",
-      "usd_value": "{symbol} 值",
-      "usd_value_eth": "账户资产的总{symbol}价值",
-      "validator": "验证器索引|公钥"
+      "usd_value": "{symbol} 值"
     },
     "refresh_tooltip": "刷新 {blockchain} 余额忽略任何缓存条目"
   },
@@ -64,7 +58,6 @@
       "blockchain": "选择区块链 | 选择区块链",
       "btc": {
         "derivation_path": "推导路径",
-        "derivation_path_hint": "可选",
         "xpub": "XPUB"
       },
       "multiple": "添加多个地址"
@@ -73,14 +66,6 @@
       "address_non_empty": "地址不能为空",
       "xpub_non_empty": "XPUB 字段不能为空"
     }
-  },
-  "account_group_header": {
-    "copy_tooltip": "将 xpub 复制到剪贴板",
-    "delete_tooltip": "删除条目及其下的所有帐户",
-    "derivation_path": "推导路径",
-    "edit_tooltip": "编辑 xpub 的标签和标记",
-    "standalone": "独立",
-    "xpub": "xpub:"
   },
   "account_management": {
     "about_tooltip": "显示应用程序的关于模式",
@@ -241,14 +226,10 @@
       },
       "blockchain_accounts_add": {
         "error": {
-          "description": "无法添加 {addresses} 个新的 {blockchain} 账户： {error}",
-          "empty_addresses_description": "地址 {address} 未添加，因为它是合约或在任何受支持的 EVM 链中没有任何活动",
-          "failed_list_description": "无法添加 {addresses} 个新的 {blockchain} 账户。请再次检查这些账户是否有效：\n {list}",
-          "title": "添加 {blockchain} 账户"
+          "failed_list_description": "无法添加 {addresses} 个新的 {blockchain} 账户。请再次检查这些账户是否有效：\n {list}"
         },
         "no_new": {
-          "description": "所选地址已被 rotki 跟踪",
-          "title": "添加 {blockchain} 账户"
+          "description": "所选地址已被 rotki 跟踪"
         },
         "task": {
           "description": "添加 {address}",
@@ -364,15 +345,6 @@
         },
         "task": {
           "title": "查询Balancer余额"
-        }
-      },
-      "balancer_events": {
-        "error": {
-          "description": "无法查询 Balancer 事件： {message}",
-          "title": "查询Balancer事件"
-        },
-        "task": {
-          "title": "查询Balancer事件"
         }
       },
       "balances": {
@@ -511,15 +483,6 @@
         "task": {
           "title": "查询 yearn.finance 金库 {version} 余额"
         }
-      },
-      "yearn_vaults_history": {
-        "error": {
-          "description": "无法检索 yearn.finance Vaults {version} 历史：{error}",
-          "title": "yearn.finance 金库 {version} 历史"
-        },
-        "task": {
-          "title": "查询 yearn.finance Vaults {version} 历史"
-        }
       }
     },
     "delete_eth2_validator": {
@@ -573,7 +536,7 @@
     },
     "history_events_export": {
       "message": {
-        "failure": "历史事件导出失败",
+        "failure": "历史事件导出失败: {description}",
         "success": "历史事件成功导出为CSV文件"
       },
       "title": "历史事件导出"
@@ -814,22 +777,22 @@
     },
     "transactions_redecode": {
       "error": {
-        "description": "无法从交易中检索事件：{error}",
-        "title": "从交易中检索事件"
+        "description": "解码事务事件失败： {error}",
+        "title": "解码来自事务的事件"
       },
       "task": {
-        "description": "检索交易事件",
-        "title": "Evm 交易事件检索"
+        "description": "为事务的事务事件解码： {tx} ({chain})",
+        "title": "解码事务事件"
       }
     },
-    "transactions_redecode_missing": {
+    "transactions_redecode_by_chain": {
       "error": {
-        "description": "无法从地址 {address} ({evmChain}) 的交易中检索丢失的事件：{error}",
-        "title": "从交易中检索丢失的事件"
+        "description": "解码 {chain} 事件失败： {error}",
+        "title": "从事务中解码事件"
       },
       "task": {
-        "description": "检索地址的交易事件：{address} ({evmChain})",
-        "title": "Evm 事务丢失事件检索"
+        "description": "为 {chain} 事件解码事务",
+        "title": "解码交易事件"
       }
     },
     "unignore": {
@@ -896,8 +859,7 @@
       "no_suggestions_available": "没有可用的建议",
       "validation": {
         "address": "地址栏不能为空",
-        "name": "name字段不能为空",
-        "valid": "请输入有效的ETH地址"
+        "name": "name字段不能为空"
       }
     },
     "hint": {
@@ -925,7 +887,9 @@
     "headers": {
       "source": "来源"
     },
-    "title": "空投"
+    "title": "空投",
+    "unknown_info": "这些地址可以进行空投，但我们还无法分析其是否已被认领。",
+    "unknown_tooltip": "地址符合空投条件，但我们还无法分析它是否已被认领。"
   },
   "alias_names": {
     "error": {
@@ -976,7 +940,7 @@
     "name_non_empty": "资产名称不能为空",
     "optional": "可选字段",
     "oracle_disable": "禁用/启用从价格 oracle 获取价格。如果 oracle 未禁用且未指定值,rotki 将尝试使用资产符号获取价格。",
-    "replaced": "此图标将在保存时替换为 {name}。",
+    "replaced": "点击\"保存\"后，该图标将被应用。",
     "type_non_empty": "资产类型不能为空",
     "types": {
       "error": "我们无法加载资产类型：{message}"
@@ -1000,6 +964,31 @@
   "asset_management": {
     "add_error": "无法添加资产：{message}",
     "add_title": "添加新资产",
+    "cex_mapping": {
+      "add_error": "无法添加映射： {message}",
+      "add_mapping": "添加映射",
+      "add_title": "添加新映射",
+      "all_exchanges": "所有交易所",
+      "confirm_delete": {
+        "message": "您确定要删除 {location} 中符号 {asset} 的资产映射吗？",
+        "title": "删除交易所资产映射"
+      },
+      "delete_error": "无法删除映射： {message}",
+      "edit_error": "无法编辑映射： {message}",
+      "edit_title": "编辑映射",
+      "exchange": "交换",
+      "filter_by_exchange": "按交易所筛选",
+      "form": {
+        "asset_non_empty": "确认的资产字段不能为空",
+        "location_non_empty": "位置字段不能为空",
+        "location_symbol_non_empty": "资产符号字段不能为空"
+      },
+      "location_symbol": "资产符号",
+      "filter_by_location_symbol": "按资产符号筛选",
+      "recognized_as": "确认为",
+      "save_for_all": "为所有交易所保存此映射",
+      "subtitle": "您可以将中央交易所的资产符号与 rotki 识别的资产联系起来。这是 rotki 处理交易所资产所必需的。"
+    },
     "confirm_delete": {
       "message": "您确定要从资产数据库中删除{asset}吗？",
       "title": "删除资产"
@@ -1028,7 +1017,6 @@
     },
     "newly_detected": {
       "accept_selected": "接受选择的代币",
-      "ignore_selected": "忽略选定的代币",
       "seen_during": "看到期间",
       "select_deselect_all_tokens": "选择/取消选择所有的代币",
       "subtitle": "检查新检测到的令牌列表并将任何垃圾邮件资产添加到忽略的代币列表"
@@ -1036,6 +1024,7 @@
     "only_show_ignored": "只显示忽略的资产 ({length}) | 只显示忽略的资产",
     "only_show_owned": "只显示自有资产",
     "only_show_unignored": "只显示未忽略的资产",
+    "only_show_whitelisted": "只显示白名单资产",
     "selected": "{count} 个资产被选中",
     "show_all": "显示全部",
     "underlying_tokens": "底层代币"
@@ -1095,6 +1084,19 @@
     "amount": "总拥有量",
     "backup": {
       "missing_directory": "请选择目录"
+    },
+    "custom_price": {
+      "delete": {
+        "error": {
+          "message": "无法删除 {asset} 的最新价格",
+          "title": "删除自定义最新价格"
+        },
+        "message": "您确定要删除 {asset} 的自定义价格吗？",
+        "tooltip": "删除自定义价格"
+      },
+      "edit": {
+        "tooltip": "编辑或设置自定义价格"
+      }
     },
     "filter": {
       "name": "按资产名称过滤",
@@ -1276,31 +1278,10 @@
   },
   "blockchain_balances": {
     "add_account": "添加账户",
-    "balances": {
-      "arbitrum_one": "Arbitrum One 余额",
-      "avax": "Avalanche 余额",
-      "base": "Base 余额",
-      "bch": "Bitcoin Cash 余额",
-      "btc": "Bitcoin 余额",
-      "dot": "Polkadot 余额",
-      "eth": "Ethereum 余额",
-      "eth2": "ETH staking 余额",
-      "ksm": "Kusama 余额",
-      "loopring": "Loopring 余额",
-      "optimism": "Optimism 余额",
-      "polygon_pos": "Polygon PoS 余额",
-      "gnosis": "Gnosis 余额"
-    },
     "form_dialog": {
       "add_title": "添加区块链账户",
       "edit_subtitle": "修改账户信息",
       "edit_title": "编辑区块链账户"
-    },
-    "metamask_import": {
-      "error": {
-        "description": "从Metamask添加地址无法完成:{error}",
-        "title": "Metamask 地址导入"
-      }
     },
     "per_asset": {
       "title": "每项资产的区块链余额"
@@ -1378,19 +1359,22 @@
     "title": "关闭订单"
   },
   "collapsed_pending_tasks": {
-    "title": "{count} 个待处理任务 | {count} 个待处理任务"
+    "title": "{count} 个待处理任务 | {count} 个待处理任务",
+    "cancel_task": "取消任务",
+    "cancel_task_info": "此操作将使正在运行的进程 ({title}) 处于未完成状态，您确定要取消吗？"
   },
   "common": {
+    "entry_type": "输入类型",
     "account": "账户",
     "actions": {
-      "accept": "接受",
       "back": "返回",
       "cancel": "取消",
       "clear_selection": "清除选择",
       "close": "关闭",
       "confirm": "确认",
       "continue": "继续",
-      "copy": "复制到剪贴板",
+      "copy": "复制",
+      "copy_to_clipboard": "复制到剪贴板",
       "create": "创建",
       "delete": "删除",
       "dismiss": "驳回",
@@ -1409,6 +1393,7 @@
       "pull": "拉",
       "push": "推",
       "save": "保存",
+      "save_continue": "保存并继续",
       "search": "搜索",
       "skip": "跳过",
       "terminate": "终止",
@@ -1424,13 +1409,20 @@
     "balance": "余额",
     "category": "类别",
     "claimed": "声称",
+    "counterparty": "交易对手",
     "datetime": "日期/时间",
     "deposits": "存款",
     "description": "描述",
     "details": "细节",
     "events": "事件",
     "here": "这儿",
+    "filter": {
+      "date_hint": "format {format} HH:mm:ss(时间/秒可选)",
+      "end_date": "按期间结束日期筛选",
+      "start_date": "按期间的开始日期过滤"
+    },
     "ignored_in_accounting": "在会计中忽略",
+    "important_notice": "重要通知:",
     "location": "位置",
     "multi_chain": "多链",
     "name": "姓名",
@@ -1438,6 +1430,7 @@
     "no_premium": "未检测到高级订阅。",
     "notes": "备注",
     "of": "of",
+    "optional": "可选",
     "price": "价格",
     "price_in_symbol": "{symbol} 价格",
     "priority": "优先级",
@@ -1453,7 +1446,9 @@
     "unclaimed": "无人认领",
     "validator_index": "验证器索引",
     "value_in_symbol": "{symbol} 值",
-    "visit_website": "要获得高级订阅，请访问我们的 {0}"
+    "visit_website": "要获得高级订阅，请访问我们的 {0}.",
+    "unknown": "未知",
+    "all": "全部"
   },
   "compound_lending": {
     "header": "复合贷款 ({asset})",
@@ -1464,11 +1459,17 @@
       "local": "本地",
       "remote": "远程"
     },
-    "all_buttons_description": "对于所有冲突",
+    "action_hint": {
+      "top": "已检测到本地更改。您有两个选项：",
+      "bottom": "您还可以选择单独管理冲突。"
+    },
     "hint": "{conflicts} 个资产条目无法自动更新。{remaining} 个剩余条目需要用户输入。",
-    "keep_local": "保持本地化",
-    "keep_remote": "保持远程",
-    "subtitle": "已检测到以下资产的本地更改。选择是要保留本地版本还是用远程版本覆盖它。",
+    "resolve_all_hint": "所有冲突都将通过使用 {source} 数据来解决。",
+    "keep_local": "保留所有本地内容",
+    "keep_remote": "保留所有远程",
+    "keep_local_tooltip": "不会更新任何受影响的资产。可能需要手动更新。",
+    "keep_remote_tooltip": "更新所有资产。无需采取进一步行动。",
+    "subtitle": "{conflicts} 个资产条目无法自动更新。{remaining} 个剩余条目需要用户输入。",
     "table": {
       "headers": {
         "keep": "保持",
@@ -1476,7 +1477,8 @@
         "remote": "远程"
       }
     },
-    "title": "检测到冲突"
+    "title": "检测到冲突",
+    "manage": "管理冲突"
   },
   "connection_failure": {
     "default": "连接到默认",
@@ -1527,7 +1529,6 @@
     },
     "premium": {
       "button_premium_approve": "是的，启用高级版",
-      "premium_link_text": "这里。",
       "premium_question": "您已经是 rotki 高级用户并想要启用高级功能吗？\n如果您想在创建帐户时从另一台设备同步您的 rotki 数据库，则需要进行此操作。您可以在 {premiumLink} 购买高级版"
     },
     "steps": {
@@ -1643,7 +1644,6 @@
             },
             "nft": "NFT",
             "nft_hint": "接受格式： \"_nft_{'ETH address'}_{'collection number'}\"",
-            "optional": "可选",
             "preview": {
               "from": "从",
               "title": "此位置值将被更新",
@@ -1706,16 +1706,17 @@
   "data_management": {
     "purge_data": {
       "confirm": {
-        "message": "您确定要清除 {source} 的缓存数据吗？",
+        "message": "您确定要清除 {source} ({value}) 的缓存数据吗？({value}) 的缓存数据？",
+        "message_all": "您确定要清除所有 {source} 的缓存数据吗？",
         "title": "确认缓存数据清除"
-      },
-      "evm_transaction_purge_confirm": {
-        "message": "您确定要从 EVM 交易中清除缓存数据吗？此操作将删除交易和收据，并且重新查询所有内容将需要很长时间。"
       },
       "error": "清除 {source} 的缓存数据失败：{message}",
       "subtitle": "允许您清除 rotki 缓存的数据",
       "success": "数据删除成功",
-      "title": "清除數据"
+      "title": "清除數据",
+      "transaction_purge_confirm": {
+        "message": "您确定要清除这些交易数据吗？此操作会删除交易和收据，而且重新查询所有内容需要很长时间。"
+      }
     },
     "purge_images_cache": {
       "confirm": {
@@ -1743,7 +1744,8 @@
       },
       "error": "清除 {source} 的缓存失败：{message}",
       "label": {
-        "general_cache": "通用缓存 (Curve, MakerDAO, Yearn)"
+        "general_cache": "通用缓存 (Curve, MakerDAO, Yearn, Velodrome, Aerodrome, 和 Gearbox)",
+        "general_cache_short": "通用缓存 (Curve, MakerDAO, 等等)"
       },
       "select_cache": "选择要刷新的缓存",
       "subtitle": "允许您刷新 rotki 缓存的数据",
@@ -1755,7 +1757,8 @@
   },
   "data_table": {
     "items_no": "项目 #",
-    "rows_per_page": "每页行数"
+    "rows_per_page": "每页行数",
+    "no_data": "无数据"
   },
   "database_backups": {
     "action": {
@@ -1860,11 +1863,6 @@
   },
   "defi_wizard": {
     "steps": {
-      "select_accounts": {
-        "hint": "选择将为每个子模块检索数据的帐户。如果没有选择地址，将为所有可用地址检索数据",
-        "subtitle": "选择账户",
-        "title": "选择账户"
-      },
       "select_modules": {
         "hint": "如果没有指定模块，查询支持的模块将被禁用。",
         "subtitle": "选择您要激活的模块。",
@@ -1884,10 +1882,7 @@
     "filter": {
       "action": "按动作过滤",
       "asset": "按资产过滤",
-      "date_hint": "format {format} HH:mm:ss(时间/秒可选)",
-      "end_date": "按期间结束日期筛选",
-      "location": "按位置过滤",
-      "start_date": "按期间的开始日期过滤"
+      "location": "按位置过滤"
     }
   },
   "deposits_withdrawals": {
@@ -1931,7 +1926,7 @@
   "eth2_input": {
     "ownership": {
       "hint": "*可选：默认为 100%",
-      "validation": "该值应为 0-100%"
+      "validation": "该值应> 0%且<= 100%"
     },
     "ownership_percentage": "所有权百分比",
     "public_key": "公钥"
@@ -1939,13 +1934,13 @@
   "eth2_page": {
     "no_premium": "ETH 質押是",
     "toggle": {
-      "depositor": "存款人",
+      "withdrawal": "提币地址",
       "hint": "在 ETH 抵押驗證器和 ETH1 地址之間切換過濾和顯示模式",
       "key": "验证器"
     }
   },
   "eth2_validator_filter": {
-    "label": "选择存款人地址"
+    "label": "选择提款地址"
   },
   "eth2_validator_limit_row": {
     "label": "信标链验证者"
@@ -2041,7 +2036,6 @@
     "inputs": {
       "api_key": "API Key",
       "api_secret": "API Secret",
-      "ftx_subaccount": "[可选] FTX 子账户名称",
       "kraken_account": "选择您的 Kraken 账户类型",
       "passphrase": "Passphrase"
     },
@@ -2107,6 +2101,7 @@
       "hint": "输入您的 {chain} Etherscan API 密钥",
       "title": "Etherscan"
     },
+    "get_api_key": "您可以申请 an API key {link}",
     "loopring": {
       "delete_tooltip": "删除您的 Loopring API key",
       "description": "用于查询路印协议中的余额。此API密钥只能查询生成此密钥的账户。",
@@ -2119,7 +2114,6 @@
       "delete_tooltip": "删除你的 OpenSea API key",
       "description": "用于查询OpenSea的NFT信息和余额。",
       "hint": "输入您的 OpenSea API key",
-      "link": "您可以申请 an API key {link}",
       "title": "Opensea"
     },
     "set": {
@@ -2142,8 +2136,7 @@
     },
     "buy_quote": "与",
     "date": {
-      "hint": "交易发生的时间",
-      "label": "时间"
+      "hint": "交易发生的时间"
     },
     "fee": {
       "hint": "[可选]如果发生任何交易则收取费用",
@@ -2176,7 +2169,7 @@
     "summary": {
       "buy": "{label}: 用 {quote} 以每 {base} {rate} {quote} 的价格购买 {amount} {base}",
       "label": "总结",
-      "sell": "{label}: 以 {quote} 的价格卖出 {amount} {base} 每 {base} 的 {rate} {quote}"
+      "sell": "{label}：以每 {base} 的 {rate} {quote} 价格以 {quote} 价格出售 {amount} {base}"
     },
     "trade_type": {
       "buy": "买",
@@ -2194,19 +2187,15 @@
     }
   },
   "file_upload": {
-    "change_file": "更改文件",
     "date_input_format": {
       "hint": "如果文件中的日期格式为：{format}，请使用此选项",
       "placeholder": "输入自定义日期格式",
       "switch_label": "使用自定义日期格式来解析你的文件"
     },
-    "drop_area": "放下文件或",
     "import_complete": "导入成功完成。",
     "loading": "加载中",
     "many_files_selected": "必须选择一个文件",
     "only_files": "只允许 {fileFilter} 个文件",
-    "select_file": "选择文件",
-    "selected_file": "选择的文件：{name}",
     "task": {
       "title": "正在为来源导入 csv:{source}"
     }
@@ -2341,12 +2330,24 @@
     "nft_setting": {
       "label": {
         "include_nfts": "在图表和总净值中包含 NFT",
-        "include_nfts_hint": "默认情况下图表和仪表板包含所有 NFT 的值"
+        "include_nfts_hint": "默认情况下，图表和仪表盘包括所有 NFT 的值",
+        "render_setting": {
+          "allow_all": "允许所有图像",
+          "only_allow_whitelisted": "只允许来自白名单域名的图片"
+        },
+        "whitelist_domains": "白名单域名",
+        "whitelisted_domains": "白名单域",
+        "whitelisted_domains_hint": "输入单个或多个逗号分隔的域。按右侧的保存按钮保存更改",
+        "whitelisted_domain_entries": "无条目 | {count} 唯一条目 | {count} 唯一条目"
       },
       "subtitle": {
         "include_nfts": "在图表和总量中包含 NFT"
       },
-      "title": "NFT setting"
+      "title": "NFT setting",
+      "messages": {
+        "error": "设置 NFT 图像渲染允许域时出错",
+        "success": "成功保存 NFT 图像渲染的允许域"
+      }
     },
     "rpc_node_setting": {
       "title": "RPC节点设置"
@@ -2521,8 +2522,9 @@
   },
   "import_data": {
     "binance": {
-      "line_one": "导入:存款、取款、交易、ETH Staking、小资产交易所 BNB、ETH Staking 奖励、Launchpool 利息、POS 储蓄利息、POS 储蓄购买、POS 储蓄赎回。",
-      "line_two": "由于 binance 的 csv 格式，有可能不会导入所有数据。如果发生这种情况，您将收到警告。",
+      "line_one": "我们处理的列包括 User_ID, UTC_Time, Account, Operation, Coin, Change 和 Remark。",
+      "line_two": "您可以从 {link} 获取 CSV 文件。",
+      "line_three": "由于 Binance 的 CSV 格式，有可能无法导入所有数据。如果出现这种情况，您将收到警告。",
       "name": "币安"
     },
     "bisq": {
@@ -2545,6 +2547,11 @@
       "line_one": "[Experimental]如果您发现导入的数据有问题，请告诉我们，以便我们相应地调整代码。",
       "line_two": "钱包历史文件中的金额假定为比特币。如果您希望其他货币支持此功能，请联系。",
       "name": "BitMEX"
+    },
+    "bittrex": {
+      "import": "从 Bittrex 导入 {0}",
+      "import_types": "交易、存款和取款",
+      "name": "Bittrex"
     },
     "bitstamp": {
       "import": "从 Bitstamp 导入 {0}",
@@ -2593,7 +2600,6 @@
     "note": "从 {0} 的 CSV 导出中导入数据的重要注意事项。",
     "notice": "这些平台可能会经常以向后不兼容的方式更改其格式。 因此，此导入可能会停止工作。 如果发生这种情况{link}，我们将看看我们能做些什么。",
     "notice_link": "用 rotki 打开一个问题",
-    "notice_warning": "重要通知:",
     "select_source": {
       "title": "选择来源"
     },
@@ -2611,23 +2617,26 @@
       "line_one": "[Experimental] 如果您发现导入的数据有问题，请告诉我们，以便我们相应地调整代码。",
       "line_two": "Uphold 让您导出一个交易文件。它可以在活动列表右上角的活动下找到。",
       "name": "Uphold"
+    },
+    "kucoin": {
+      "import": "从 Kucoin 导入 {0}",
+      "import_types": "行业",
+      "line_one": "我们支持导入各行业的 csv 文件类型。",
+      "name": "Kucoin"
     }
   },
   "input_mode_select": {
+    "import_from_wallet": {
+      "label": "从浏览器钱包导入地址",
+      "missing": "我们无法在该浏览器中检测到任何钱包。",
+      "missing_tooltip": {
+        "wallet_is_not_installed": "该浏览器没有安装任何钱包。您可以到浏览器的扩展商店安装一个。",
+        "wallet_is_not_enabled": "钱包的扩展已禁用。您可以根据自己的浏览器，在 “扩展/附加组件 ”菜单中启用它。",
+        "title": "以下是常见的原因:"
+      }
+    },
     "manual_add": {
       "label": "手册"
-    },
-    "metamask_import": {
-      "label": "MetaMask",
-      "metamask": "*按下保存后，系统会提示您从 MetaMask 导入地址。",
-      "missing": "* 从 MetaMask 导入地址被禁用。无法检测到 MetaMask。",
-      "missing_tooltip": {
-        "copy_url": "复制本页网址",
-        "metamask_is_not_enabled": "MetaMask 尚未启用。您可以在菜单扩展/附加组件中启用它，具体取决于您的浏览器。",
-        "metamask_is_not_installed": "此浏览器未安装 MetaMask。您可以下载 MetaMask {link}。",
-        "metamask_is_not_supported_by_browser": "确保您使用列出的受支持浏览器{link}打开此页面。如果不是，请{copy}并在受支持的浏览器上手动打开它。",
-        "title": "以下是常见原因："
-      }
     },
     "xpub_add": {
       "label": "XPUB"
@@ -2819,8 +2828,7 @@
       "valid_username": "設定檔名稱必須僅包含字母數字字元且不能包含空格"
     },
     "welcome_description": "欢迎使用保护您隐私的开源投资组合管理器。",
-    "welcome_title": "欢迎来到 rotki",
-    "welcome_update_message": "解锁您的帐户以探索我们所做的更改。"
+    "welcome_title": "欢迎来到 rotki"
   },
   "macos_unsupported": {
     "header": "不支持的 macOS 版本",
@@ -2884,9 +2892,6 @@
     }
   },
   "manual_balances_table": {
-    "columns": {
-      "label": "标签"
-    },
     "delete_dialog": {
       "message": "您确定要删除此条目吗？",
       "title": "删除手动跟踪余额"
@@ -2912,6 +2917,7 @@
       "label": "目标",
       "non_empty": "目标资产不能为空"
     },
+    "target_hint": "标识符：{identifier}",
     "title": "合并资产"
   },
   "message": {
@@ -2942,16 +2948,15 @@
       "enable_all": "启用全部"
     },
     "filter": "搜索模块",
+    "select_accounts_hint": "选择将为每个子模块检索数据的帐户。如果没有选择地址，将为所有可用地址检索数据",
     "table": {
-      "enabled": "已启用"
+      "enabled": "已启用",
+      "select_accounts": "选择账户"
     }
   },
   "module_settings": {
-    "active_modules": "活动模块",
     "active_modules_description": "仅查询所选模块的数据。如果未选择任何模块，将禁用查询所有支持的模块。",
     "hint": "请记住，激活模块后，您需要注销并重新登录才能使激活生效",
-    "select_accounts": "选择的账户",
-    "select_accounts_description": "如果没有为协议选择账户，将查询该协议的所有账户数据。",
     "title": "模块设置"
   },
   "navigation_menu": {
@@ -2997,7 +3002,7 @@
     "manage_assets": "管理资产",
     "manage_assets_sub": {
       "custom_assets": "自定义资产",
-      "managed_assets": "托管资产",
+      "assets": "资产",
       "newly_detected": "新检测到的令牌"
     },
     "manage_prices": "管理价格",
@@ -3005,7 +3010,7 @@
       "historic_prices": "历史价格",
       "latest_prices": "最新价格"
     },
-    "nfts": "NFTs",
+    "nfts": "NFTs Gallery",
     "profit_loss_report": "盈亏报告",
     "settings": "设置",
     "settings_sub": {
@@ -3054,23 +3059,8 @@
       "custom_price": "自定义价格",
       "price_in_asset": "资产价格"
     },
-    "delete": {
-      "error": {
-        "message": "无法删除 {asset} 的最新价格",
-        "title": "删除自定义最新价格"
-      },
-      "message": "您确定要删除 {asset} 的自定义价格吗？",
-      "title": "删除自定义价格"
-    },
-    "edit": {
-      "title": "编辑或设置资产价格"
-    },
     "ignore": "忽略 NFT",
     "refresh": "刷新余额",
-    "row": {
-      "delete": "删除自定义价格",
-      "edit": "编辑或设置自定义价格"
-    },
     "title": "不可替代余额"
   },
   "notes_menu": {
@@ -3099,11 +3089,6 @@
     },
     "tooltip": "注释"
   },
-  "notification": {
-    "copy": "复制",
-    "copy_tooltip": "将消息复制到剪贴板",
-    "dismiss_tooltip": "关闭通知"
-  },
   "notification_indicator": {
     "tooltip": "通知"
   },
@@ -3115,15 +3100,13 @@
     "backend": {
       "title": "后端"
     },
-    "db_upload_result": {
-      "action": "强力推",
-      "message": "我们无法完成上传，因为{reason}",
-      "title": "数据库同步失败"
-    },
     "missing_api_key": {
       "action": "回车键",
-      "message": "您没有配置 {location} {service} API 密钥。 rotki {location} {service} 查询仍然有效，但会很慢。如果你没有使用自己的{location}节点，建议去{url}，创建一个API密钥，然后在rotki的外部服务凭证设置中输入它",
-      "title": "{location} {service} API 密钥"
+      "get_key": "获取 API 密钥",
+      "etherscan": {
+        "message": "由于您没有配置 {location} {service} 的 API 密钥，{location}链的 Rotki 查询速度较慢。配置了 API 密钥。请使用 @.quote:notification_messages.missing_api_key.get_key 或 @.quote:notification_messages.missing_api_key.action 在应用程序中添加密钥。",
+        "title": "{location} {service} API 密钥"
+      }
     },
     "new_detected_token": {
       "action": "查看更多",
@@ -3152,7 +3135,6 @@
   },
   "notification_sidebar": {
     "clear_tooltip": "清除所有通知",
-    "close_tooltip": "关闭通知区域",
     "confirmation": {
       "message": "此操作将清除所有活动通知。你想继续吗？",
       "title": "清除活动通知"
@@ -3211,9 +3193,6 @@
         "borrowing": "负债"
       }
     }
-  },
-  "pagination": {
-    "of": "of {length}"
   },
   "percentage_display": {
     "symbol": "%"
@@ -3583,13 +3562,13 @@
       "taxfree_profit_loss": "Tax Free P/L"
     },
     "debug": {
-      "export_data": "导出数据",
+      "export_data": "导出调试数据",
       "export_message": {
         "failure": "导出PnL报告调试数据失败",
         "success": "PnL报告调试数据导出成功",
         "title": "导出PnL报告调试数据"
       },
-      "import_data": "导入数据",
+      "import_data": "导入调试数据",
       "import_data_dialog": {
         "title": "导入PnL报告调试数据"
       },
@@ -3605,24 +3584,34 @@
       "message": "从 {start} 到 {end} 生成了盈亏报告。",
       "title": "已生成盈亏报告"
     },
-    "title": "保存的历史报告"
+    "title": "生成的报告"
   },
   "progress_screen": {
     "progress": "{progress} %"
   },
   "purge_selector": {
-    "all_decentralized_exchanges": "所有去中心化交易所",
-    "all_exchanges": "所有中心化交易所",
-    "all_modules": "所有模块",
-    "evm_transactions": "EVM交易",
-    "evm_chain_to_clear": {
-      "label": "EVM链清零",
-      "hint": "清空此字段将删除所有链的交易数据"
+    "centralized_exchanges": "中心化交易所",
+    "centralized_exchange_to_clear": {
+      "label": "集中交易所清零",
+      "hint": "清空该字段以删除所有中心化交易所的数据"
     },
-    "exchange": "交换：{name}",
+    "chain_to_clear": {
+      "label": "链要清除",
+      "hint": "清空该字段以删除所有链的交易数据"
+    },
+    "decentralized_exchanges": "去中心化交易所",
+    "decentralized_exchange_to_clear": {
+      "label": "去中心化交易所去清算",
+      "hint": "清空此字段以删除所有去中心化交易所的数据"
+    },
+    "defi_modules": "DeFi 模块",
+    "defi_module_to_clear": {
+      "label": "待清除的 DeFi 模块",
+      "hint": "清空此字段以删除所有 defi 模块的数据"
+    },
     "label": "选择数据源",
-    "module": "模块：{name}",
-    "tooltip": "清除所选源的缓存数据"
+    "tooltip": "清除所选源的缓存数据",
+    "transactions": "交易"
   },
   "queried_address_dialog": {
     "add": "添加地址",
@@ -3632,12 +3621,8 @@
     "title": "查询地址"
   },
   "reports_table": {
-    "delete": {
-      "tooltip": "删除报告"
-    },
-    "load": {
-      "tooltip": "加载报告"
-    }
+    "delete": "删除报告",
+    "load": "加载报告"
   },
   "rounding_settings": {
     "amount_rounding": "金额舍入",
@@ -3750,6 +3735,10 @@
       "message_download_relogin": "执行拉取后，需要手动重新登录。",
       "message_upload": "通过强制推送，任何先前驻留在 rotki 服务器中的同步数据都将被覆盖。没有办法恢复任何被覆盖的数据，或恢复此操作。执行此操作时请小心，因为它可能会导致意外数据 损失。通过继续，您承认您了解使用此操作的危险。",
       "title": "强制推 | 强制拉"
+    },
+    "db_upload_result": {
+      "message": "我们无法完成上传，因为{reason}",
+      "title": "数据库同步尝试不成功"
     }
   },
   "table_filter": {
@@ -3758,11 +3747,9 @@
       "example": "type != evm event"
     },
     "hint": {
-      "description": "* 输入过滤器，然后按回车键，例如。",
+      "description": "输入过滤器，然后按回车键，例如。",
       "example": "开始 = 26/05/2022"
     },
-    "hint_filter": "组合过滤器将同时应用",
-    "no_suggestions": "没有找到{search}的建议",
     "saved_filters": {
       "actions": {
         "add": "将当前过滤器保存到列表",
@@ -3777,6 +3764,7 @@
         "title": "未能保存过滤器"
       }
     },
+    "start_typing": "输入 {search} 过滤器的值",
     "title": "可用过滤器",
     "unsupported_filter": "不支持的过滤器："
   },
@@ -3826,7 +3814,18 @@
     "actions": {
       "add_event": "添加新事件",
       "redecode_events": "重新解码事件",
-      "reset_customized_events": "重置自定义事件"
+      "delete_transaction": "删除交易和事件"
+    },
+    "dialog": {
+      "add_tx": "按 tx 哈希值添加交易",
+      "delete": {
+        "message": "您确定要删除该事务及其事件吗？您必须清除所有事务或按事务哈希值添加才能恢复它们。",
+        "title": "删除事务和事件",
+        "error": {
+          "message": "失败：{message}",
+          "title": "删除 EVM 交易"
+        }
+      }
     },
     "events": {
       "actions": {
@@ -3844,8 +3843,11 @@
           "title": "无法删除事件"
         },
         "reset": {
-          "message": "您确定要重置这些事件吗？此操作将删除所有自定义事件，并重新解码它们。",
-          "title": "重置事件"
+          "message": "该事务中有自定义事件",
+          "options": {
+            "keep_custom_events": "不要删除我的自定义事件",
+            "remove_custom_events": "移除自定义事件并重新解码事务"
+          }
         }
       },
       "customized_event": "自定义事件",
@@ -3858,9 +3860,7 @@
         }
       },
       "export": {
-        "confirmation_message": "您确定要导出此文档并应用所选的过滤器吗？",
-        "csv_export_error": "导出CSV时发生错误",
-        "download_failed": "无法下载CSV文件"
+        "confirmation_message": "您确定要导出此文档并应用所选的过滤器吗？"
       },
       "form": {
         "amount": {
@@ -3873,12 +3873,8 @@
             "non_empty": "资产字段不能为空"
           }
         },
-        "counterparty": {
-          "label": "交易对手"
-        },
         "datetime": {
-          "hint": "事件发生的日期和时间",
-          "label": "日期和时间"
+          "hint": "事件发生的日期和时间"
         },
         "event_subtype": {
           "label": "事件子类型",
@@ -3963,9 +3959,9 @@
       "date_range": "在 {start} 和 {end} 之间查询 {address} 的 {status}",
       "done_date_range": "完成查询 {address} 在 {start} 和 {end} 之间的所有交易",
       "done_end_date": "完成查询 {address} 的所有交易直到 {end}",
-      "done_group": "已完成对 {length} 个地址的所有交易信息的查询",
+      "done_group": "完成查询 {count} 地址的所有交易信息 | 完成查询 {count} 地址的所有交易信息",
       "end_date": "查询 {address} 的 {status} 直到 {end}",
-      "group": "查询 {length} 个地址的 evm 交易信息",
+      "group": "查询 {count} 地址的 evm 事务信息 | 查询 {count} 地址的 evm 事务信息",
       "latest_period_date_range": "最近成功查询的时间段在 {start} 和 {end} 之间",
       "latest_period_end_date": "最近成功查询的时间段到 {end}",
       "statuses": {
@@ -3973,7 +3969,23 @@
         "querying_internal_transactions": "evm 内部交易",
         "querying_transactions": "evm 交易"
       },
-      "title": "evm交易查询状态"
+      "title": "Evm 交易查询状态"
+    },
+    "query_status_events": {
+      "date_range": "查询 {start} 和 {end} 之间 {name} 的事件",
+      "done_date_range": "完成查询{start}和{end}之间{name}的所有事件",
+      "done_end_date": "查询完 {name} 的所有事件，直到 {end} 结束",
+      "done_group": "完成查询 {count} 位置的所有事件 | 完成查询 {count} 位置的所有事件",
+      "end_date": "查询 {name} 至 {end} 的事件",
+      "group": "查询 {count} 位置的事件 | 查询 {count} 位置的事件",
+      "latest_period_date_range": "最近一次成功查询的时间段介于 {start} 和 {end} 之间",
+      "latest_period_end_date": "最近一次成功查询的时间段截至 {end}。",
+      "title": "历史事件 查询状态"
+    },
+    "query_all": {
+      "done_group": "完成查询所有事件和事务",
+      "group": "查询事件和事务",
+      "modal_title": "查询状态"
     },
     "refresh_tooltip": "获取最新事件",
     "title": "历史事件",

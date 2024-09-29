@@ -1,71 +1,51 @@
 <script setup lang="ts">
+import { Routes } from '@/router/routes';
+
 const { isMini, showDrawer } = storeToRefs(useAreaVisibilityStore());
 const { appVersion } = storeToRefs(useMainStore());
-const { appBarColor } = useTheme();
 
-const remoteDrawerImage =
-  'https://raw.githubusercontent.com/rotki/data/main/assets/icons/drawer_logo.png';
+const { isXlAndDown } = useBreakpoint();
+
+const route = useRoute();
+watch(route, () => {
+  if (get(showDrawer) && get(isXlAndDown))
+    set(showDrawer, false);
+});
 </script>
 
 <template>
-  <VNavigationDrawer
+  <RuiNavigationDrawer
     v-model="showDrawer"
     width="300"
-    class="app__navigation-drawer"
-    fixed
-    :mini-variant="isMini"
-    :color="appBarColor"
-    clipped
-    app
+    :content-class="{
+      'flex flex-col border-r border-rui-grey-300 dark:border-rui-grey-800': true,
+      '!top-0 !max-h-full': isXlAndDown,
+    }"
+    :mini-variant="!isXlAndDown"
+    :overlay="isXlAndDown"
   >
-    <div class="app__logo" :class="{ 'app__logo--mini': isMini }">
-      <RuiLogo :text="!isMini" :custom-src="remoteDrawerImage" />
+    <div class="flex-1 overflow-y-auto overflow-x-hidden pb-2">
+      <div
+        class="flex py-6"
+        :class="{
+          'px-4': !isMini,
+          'px-0 [&>div]:h-8 justify-center': isMini,
+        }"
+      >
+        <RouterLink :to="Routes.DASHBOARD">
+          <RotkiLogo
+            :text="!isMini"
+            :size="isMini ? 1.625 : 3"
+          />
+        </RouterLink>
+      </div>
+      <NavigationMenu :is-mini="isMini" />
     </div>
-    <NavigationMenu :is-mini="isMini" />
-    <VSpacer />
     <div
       v-if="!isMini"
-      class="my-2 text-center px-2 app__navigation-drawer__version"
+      class="p-2 text-center border-t border-default text-overline"
     >
-      <span class="text-overline">
-        <VDivider class="mx-3 my-1" />
-        {{ appVersion }}
-      </span>
+      {{ appVersion }}
     </div>
-  </VNavigationDrawer>
+  </RuiNavigationDrawer>
 </template>
-
-<style scoped lang="scss">
-.app {
-  &__logo {
-    padding: 1.5rem 1rem;
-
-    &--mini {
-      padding: 1rem 0.5rem;
-      margin-bottom: 1rem;
-
-      > div {
-        height: 32px;
-        display: flex;
-        justify-content: center;
-      }
-    }
-  }
-
-  &__navigation-drawer {
-    padding-bottom: 48px;
-
-    &__version {
-      position: fixed;
-      bottom: 0;
-      width: 100%;
-    }
-  }
-}
-
-.v-navigation-drawer {
-  &--is-mobile {
-    padding-top: 60px !important;
-  }
-}
-</style>

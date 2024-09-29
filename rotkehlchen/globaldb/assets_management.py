@@ -34,8 +34,7 @@ def import_assets_from_file(
     globaldb version
     """
     try:
-        with open(path, encoding='utf8') as f:
-            data = ExportedAssetsSchema().loads(f.read())
+        data = ExportedAssetsSchema().loads(Path(path).read_text(encoding='utf8'))
     except UnicodeDecodeError as e:
         raise InputError(f'Provided file at {path} could not be decoded as utf-8 properly') from e
 
@@ -58,7 +57,7 @@ def import_assets_from_file(
             continue
 
         try:
-            GlobalDBHandler().add_asset(asset)
+            GlobalDBHandler.add_asset(asset)
         except InputError as e:
             log.error(
                 f'Failed to import asset {asset=}. {e!s}',

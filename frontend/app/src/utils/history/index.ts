@@ -1,25 +1,22 @@
-import { type EntryMeta, type EntryWithMeta } from '@/types/history/meta';
-import { type EvmChainAndTxHash } from '@/types/history/events';
-import { type Collection } from '@/types/collection';
+import { snakeCase } from 'lodash-es';
+import type { EntryMeta, EntryWithMeta } from '@/types/history/meta';
+import type { EvmChainAndTxHash } from '@/types/history/events';
+import type { Collection } from '@/types/collection';
 
-export function mapCollectionEntriesWithMeta<T>(
-  collection: Collection<EntryWithMeta<T>>
-): Collection<T & EntryMeta> {
+export function mapCollectionEntriesWithMeta<T>(collection: Collection<EntryWithMeta<T>>): Collection<T & EntryMeta> {
   const entries = collection.data.map(data => transformEntryWithMeta<T>(data));
   return {
     ...collection,
-    data: entries
+    data: entries,
   };
 }
 
-export function transformEntryWithMeta<T>(
-  data: EntryWithMeta<T>
-): T & EntryMeta {
+export function transformEntryWithMeta<T>(data: EntryWithMeta<T>): T & EntryMeta {
   const { entry, ...entriesMeta } = data;
 
   return {
     ...entry,
-    ...entriesMeta
+    ...entriesMeta,
   };
 }
 
@@ -27,16 +24,13 @@ export function filterAddressesFromWords(words: string[]): string[] {
   return words.filter(uniqueStrings).filter(isValidEthAddress);
 }
 
-export const getEthAddressesFromText = (notes: string): string[] =>
-  filterAddressesFromWords(notes.split(/\s|\\n/));
+export function getEthAddressesFromText(notes: string): string[] {
+  return filterAddressesFromWords(notes.split(/\s|\\n/));
+}
 
-export const toEvmChainAndTxHash = ({
-  location,
-  txHash
-}: {
-  location: string;
-  txHash?: string;
-}): EvmChainAndTxHash => ({
-  evmChain: location,
-  txHash: txHash || ''
-});
+export function toEvmChainAndTxHash({ location, txHash }: { location: string; txHash?: string }): EvmChainAndTxHash {
+  return {
+    evmChain: snakeCase(location),
+    txHash: txHash || '',
+  };
+}

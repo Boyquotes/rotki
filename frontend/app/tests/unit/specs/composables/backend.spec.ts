@@ -1,221 +1,344 @@
 import { mount } from '@vue/test-utils';
+import flushPromises from 'flush-promises';
+import { createTestingPinia } from '@pinia/testing';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/composables/electron-interop', () => ({
   useInterop: vi.fn().mockReturnValue({
     isPackaged: true,
     restartBackend: vi.fn(),
-    config: vi.fn().mockReturnValue({
-      logDirectory: '/Users/home/rotki/logs'
-    })
-  })
+    config: vi.fn(),
+  }),
 }));
 
 vi.mock('@/utils/account-management', () => ({
   getBackendUrl: vi.fn().mockReturnValue({
     sessionOnly: true,
-    url: ''
+    url: '',
   }),
-  deleteBackendUrl: vi.fn()
-}));
-
-vi.mock('@/store/main', () => ({
-  useMainStore: vi.fn().mockReturnValue({
-    connected: false,
-    setConnected: vi.fn(),
-    connect: vi.fn()
-  })
+  deleteBackendUrl: vi.fn(),
 }));
 
 const BACKEND_OPTIONS = 'BACKEND_OPTIONS';
 
 describe('composables::backend', () => {
   beforeAll(() => {
-    const pinia = createPinia();
+    const pinia = createTestingPinia();
     setActivePinia(pinia);
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.removeItem(BACKEND_OPTIONS);
   });
 
-  test('should use default config', async () => {
-    const loaded = vi.fn();
-    let backendManagement: ReturnType<typeof useBackendManagement> | null =
-      null;
-
-    const wrapper = mount({
-      setup() {
-        backendManagement = useBackendManagement(loaded);
-      }
+  describe('with file config', () => {
+    beforeEach(() => {
+      vi.mocked(useInterop().config).mockResolvedValue({
+        logDirectory: '/Users/home/rotki/logs',
+      });
     });
 
-    await wrapper.vm.$nextTick();
-    await wrapper.vm.$nextTick();
+    it('should use default config', async () => {
+      const loaded = vi.fn();
+      let backendManagement: ReturnType<typeof useBackendManagement> | null = null;
 
-    expect(backendManagement).not.toBeNull();
-    const { options, defaultLogDirectory, fileConfig } = backendManagement!;
+      mount({
+        template: '<div/>',
+        setup() {
+          backendManagement = useBackendManagement(loaded);
+        },
+      });
 
-    expect(get(options)).toStrictEqual({
-      loglevel: 'debug',
-      logDirectory: '/Users/home/rotki/logs'
-    });
-    expect(get(fileConfig)).toStrictEqual({
-      logDirectory: '/Users/home/rotki/logs'
-    });
+      await nextTick();
+      await flushPromises();
 
-    expect(get(defaultLogDirectory)).toBe('/Users/home/rotki/logs');
-    expect(loaded).toHaveBeenCalledOnce();
-  });
+      expect(backendManagement).not.toBeNull();
+      const { options, defaultLogDirectory, fileConfig } = backendManagement!;
 
-  test('should get saved data in localStorage', async () => {
-    const loaded = vi.fn();
-    const savedOptions = {
-      loglevel: 'critical',
-      maxSizeInMbAllLogs: 10,
-      sqliteInstructions: 100,
-      maxLogfilesNum: 1000
-    };
-    localStorage.setItem(BACKEND_OPTIONS, JSON.stringify(savedOptions));
+      expect(get(options)).toStrictEqual({
+        loglevel: 'debug',
+        logDirectory: '/Users/home/rotki/logs',
+      });
+      expect(get(fileConfig)).toStrictEqual({
+        logDirectory: '/Users/home/rotki/logs',
+      });
 
-    let backendManagement: ReturnType<typeof useBackendManagement> | null =
-      null;
-
-    const wrapper = mount({
-      setup() {
-        backendManagement = useBackendManagement(loaded);
-      }
+      expect(get(defaultLogDirectory)).toBe('/Users/home/rotki/logs');
+      expect(loaded).toHaveBeenCalledOnce();
     });
 
-    await wrapper.vm.$nextTick();
-    await wrapper.vm.$nextTick();
+    it('should get saved data in localStorage', async () => {
+      const loaded = vi.fn();
+      const savedOptions = {
+        loglevel: 'critical',
+        maxSizeInMbAllLogs: 10,
+        sqliteInstructions: 100,
+        maxLogfilesNum: 1000,
+      };
+      localStorage.setItem(BACKEND_OPTIONS, JSON.stringify(savedOptions));
 
-    expect(backendManagement).not.toBeNull();
-    const { options } = backendManagement!;
+      let backendManagement: ReturnType<typeof useBackendManagement> | null = null;
 
-    expect(get(options)).toStrictEqual({
-      logDirectory: '/Users/home/rotki/logs',
-      loglevel: 'critical',
-      maxLogfilesNum: 1000,
-      maxSizeInMbAllLogs: 10,
-      sqliteInstructions: 100
+      mount({
+        template: '<div/>',
+        setup() {
+          backendManagement = useBackendManagement(loaded);
+        },
+      });
+
+      await nextTick();
+      await flushPromises();
+
+      expect(backendManagement).not.toBeNull();
+      const { options } = backendManagement!;
+
+      expect(get(options)).toStrictEqual({
+        logDirectory: '/Users/home/rotki/logs',
+        loglevel: 'critical',
+        maxLogfilesNum: 1000,
+        maxSizeInMbAllLogs: 10,
+        sqliteInstructions: 100,
+      });
+
+      expect(loaded).toHaveBeenCalledOnce();
     });
 
-    expect(loaded).toHaveBeenCalledOnce();
-  });
+    it('should restart backend session', async () => {
+      let backendManagement: ReturnType<typeof useBackendManagement> | undefined;
 
-  test('should save options', async () => {
-    const { saveOptions } = useBackendManagement();
-    const newOptions = {
-      logDirectory: 'new_log_directory',
-      dataDirectory: 'new_data_directory'
-    };
+      mount({
+        template: '<div/>',
+        setup() {
+          backendManagement = useBackendManagement();
+        },
+      });
 
-    await saveOptions(newOptions);
+      await nextTick();
+      await flushPromises();
 
-    expect(
-      JSON.parse(localStorage.getItem(BACKEND_OPTIONS) || '')
-    ).toStrictEqual(newOptions);
+      assert(backendManagement);
 
-    expect(useInterop().restartBackend).toBeCalledWith(newOptions);
-  });
+      const { resetSessionBackend } = backendManagement;
 
-  test('should reset options', async () => {
-    const { resetOptions } = useBackendManagement();
+      await resetSessionBackend();
 
-    await resetOptions();
-
-    expect(
-      JSON.parse(localStorage.getItem(BACKEND_OPTIONS) || '')
-    ).toStrictEqual({});
-
-    expect(useInterop().restartBackend).toBeCalledWith({});
-  });
-
-  test('should restart backend session', async () => {
-    const { resetSessionBackend } = useBackendManagement();
-
-    await resetSessionBackend();
-
-    expect(useInterop().restartBackend).toBeCalledWith({
-      logDirectory: '/Users/home/rotki/logs'
+      expect(useInterop().restartBackend).toBeCalledWith({
+        logDirectory: '/Users/home/rotki/logs',
+        loglevel: 'debug',
+      });
     });
   });
 
-  test('should not restart backend session', async () => {
-    vi.mocked(getBackendUrl).mockReturnValue({
-      sessionOnly: false,
-      url: ''
-    });
-    const { resetSessionBackend } = useBackendManagement();
-
-    await resetSessionBackend();
-
-    expect(useInterop().restartBackend).not.toBeCalled();
-  });
-
-  test('should restart backend if the url is not set', async () => {
-    const url = '';
-    const { backendChanged } = useBackendManagement();
-
-    await backendChanged(url);
-
-    expect(useInterop().restartBackend).toBeCalled();
-    expect(useMainStore().connect).toHaveBeenCalledWith(url);
-  });
-
-  test('should not backend if the url is set', async () => {
-    const url = 'test_backend_url';
-    const { backendChanged } = useBackendManagement();
-
-    await backendChanged(url);
-
-    expect(useInterop().restartBackend).not.toBeCalled();
-    expect(useMainStore().connect).toHaveBeenCalledWith(url);
-  });
-
-  test('should not do anything on setupBackend, if connected=true', async () => {
-    const { connected } = storeToRefs(useMainStore());
-    set(connected, true);
-
-    const { setupBackend } = useBackendManagement();
-
-    await setupBackend();
-
-    expect(useInterop().restartBackend).not.toBeCalled();
-  });
-
-  test('should restart backend, if connected=false and url is not set', async () => {
-    const store = useMainStore();
-    const { connected } = storeToRefs(store);
-    const { connect } = store;
-    set(connected, false);
-
-    const { setupBackend } = useBackendManagement();
-
-    await setupBackend();
-
-    expect(useInterop().restartBackend).toBeCalled();
-    expect(connect).toHaveBeenCalledWith();
-  });
-
-  test('should not restart backend, if connected=false and url is set', async () => {
-    const store = useMainStore();
-    const { connected } = storeToRefs(store);
-    const { connect } = store;
-    set(connected, false);
-
-    const url = 'test_backend_url';
-
-    vi.mocked(getBackendUrl).mockReturnValue({
-      sessionOnly: false,
-      url
+  describe('without file config', () => {
+    beforeEach(() => {
+      vi.mocked(useInterop().config).mockResolvedValue({});
     });
 
-    const { setupBackend } = useBackendManagement();
+    it('should save options', async () => {
+      let backendManagement: ReturnType<typeof useBackendManagement> | undefined;
 
-    await setupBackend();
+      mount({
+        template: '<div/>',
+        setup() {
+          backendManagement = useBackendManagement();
+        },
+      });
 
-    expect(useInterop().restartBackend).not.toBeCalled();
-    expect(connect).toHaveBeenCalledWith(url);
+      await nextTick();
+      await flushPromises();
+
+      assert(backendManagement);
+      const { saveOptions } = backendManagement;
+      const newOptions = {
+        logDirectory: 'new_log_directory',
+        dataDirectory: 'new_data_directory',
+      };
+
+      await saveOptions(newOptions);
+
+      const storageOptions = JSON.parse(localStorage.getItem(BACKEND_OPTIONS) || '');
+      expect(storageOptions).toMatchObject(expect.objectContaining(newOptions));
+
+      expect(useInterop().restartBackend).toBeCalledWith(expect.objectContaining(newOptions));
+    });
+
+    it('should reset options', async () => {
+      vi.mocked(useInterop().config).mockResolvedValue({});
+      let backendManagement: ReturnType<typeof useBackendManagement> | undefined;
+
+      mount({
+        template: '<div/>',
+        setup() {
+          backendManagement = useBackendManagement();
+        },
+      });
+
+      await nextTick();
+      await flushPromises();
+
+      assert(backendManagement);
+      const { resetOptions } = backendManagement;
+
+      await resetOptions();
+
+      expect(JSON.parse(localStorage.getItem(BACKEND_OPTIONS) || '')).toStrictEqual({});
+
+      expect(useInterop().restartBackend).toBeCalledWith({});
+    });
+
+    it('should not restart backend session', async () => {
+      vi.mocked(getBackendUrl).mockReturnValue({
+        sessionOnly: false,
+        url: '',
+      });
+      let backendManagement: ReturnType<typeof useBackendManagement> | undefined;
+
+      mount({
+        template: '<div/>',
+        setup() {
+          backendManagement = useBackendManagement();
+        },
+      });
+
+      await nextTick();
+      await flushPromises();
+
+      assert(backendManagement);
+      const { resetSessionBackend } = backendManagement;
+
+      await resetSessionBackend();
+
+      expect(useInterop().restartBackend).not.toBeCalled();
+    });
+
+    it('should restart backend if the url is not set', async () => {
+      const url = '';
+      let backendManagement: ReturnType<typeof useBackendManagement> | undefined;
+
+      mount({
+        template: '<div/>',
+        setup() {
+          backendManagement = useBackendManagement();
+        },
+      });
+
+      await nextTick();
+      await flushPromises();
+
+      assert(backendManagement);
+      const { backendChanged } = backendManagement;
+
+      await backendChanged(url);
+
+      expect(useInterop().restartBackend).toBeCalled();
+      expect(useMainStore().connect).toHaveBeenCalledWith(url);
+    });
+
+    it('should not backend if the url is set', async () => {
+      const url = 'test_backend_url';
+      let backendManagement: ReturnType<typeof useBackendManagement> | undefined;
+
+      mount({
+        template: '<div/>',
+        setup() {
+          backendManagement = useBackendManagement();
+        },
+      });
+
+      await nextTick();
+      await flushPromises();
+
+      assert(backendManagement);
+      const { backendChanged } = backendManagement;
+
+      await backendChanged(url);
+
+      expect(useInterop().restartBackend).not.toBeCalled();
+      expect(useMainStore().connect).toHaveBeenCalledWith(url);
+    });
+
+    it('should not do anything on setupBackend, if connected=true', async () => {
+      const store = useMainStore();
+      store.connected = true;
+
+      let backendManagement: ReturnType<typeof useBackendManagement> | undefined;
+
+      mount({
+        template: '<div/>',
+        setup() {
+          backendManagement = useBackendManagement();
+        },
+      });
+
+      await nextTick();
+      await flushPromises();
+
+      assert(backendManagement);
+
+      const { setupBackend } = backendManagement;
+
+      await setupBackend();
+
+      expect(useInterop().restartBackend).not.toBeCalled();
+    });
+
+    it('should restart backend, if connected=false and url is not set', async () => {
+      const store = useMainStore();
+      store.connected = false;
+
+      let backendManagement: ReturnType<typeof useBackendManagement> | undefined;
+
+      mount({
+        template: '<div/>',
+        setup() {
+          backendManagement = useBackendManagement();
+        },
+      });
+
+      await nextTick();
+      await flushPromises();
+
+      assert(backendManagement);
+      const { setupBackend } = backendManagement;
+
+      await setupBackend();
+
+      expect(useInterop().restartBackend).toBeCalled();
+      expect(store.connect).toHaveBeenCalledWith();
+    });
+
+    it('should not restart backend, if connected=false and url is set', async () => {
+      const store = useMainStore();
+      store.connected = false;
+
+      const url = 'test_backend_url';
+
+      vi.mocked(getBackendUrl).mockReturnValue({
+        sessionOnly: false,
+        url,
+      });
+
+      let backendManagement: ReturnType<typeof useBackendManagement> | undefined;
+
+      mount({
+        template: '<div/>',
+        setup() {
+          backendManagement = useBackendManagement();
+        },
+      });
+
+      await nextTick();
+      await flushPromises();
+
+      assert(backendManagement);
+
+      const { setupBackend } = backendManagement;
+
+      await setupBackend();
+
+      expect(useInterop().restartBackend).not.toBeCalled();
+      expect(store.connect).toHaveBeenCalledWith(url);
+    });
   });
 });

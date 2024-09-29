@@ -1,5 +1,3 @@
-import { type ActionResult } from '@rotki/common/lib/data';
-import { type AxiosResponse } from 'axios';
 import { snakeCaseTransformer } from '@/services/axios-tranformers';
 import { api } from '@/services/rotkehlchen-api';
 import {
@@ -7,7 +5,7 @@ import {
   paramsSerializer,
   validStatus,
   validWithParamsSessionAndExternalService,
-  validWithSessionStatus
+  validWithSessionStatus,
 } from '@/services/utils';
 import {
   type Exchange,
@@ -15,51 +13,49 @@ import {
   ExchangeSavingsCollectionResponse,
   type ExchangeSavingsRequestPayload,
   Exchanges,
-  type SupportedExchange
 } from '@/types/exchanges';
-import { type PendingTask } from '@/types/task';
+import type { AxiosResponse } from 'axios';
+import type { ActionResult } from '@rotki/common';
+import type { PendingTask } from '@/types/task';
 
-export const useExchangeApi = () => {
-  const queryRemoveExchange = async ({
-    location,
-    name
-  }: Exchange): Promise<boolean> => {
-    const response = await api.instance.delete<ActionResult<boolean>>(
-      '/exchanges',
-      {
-        data: {
-          name,
-          location
-        },
-        validateStatus: validStatus
-      }
-    );
+interface UseExchangeApiReturn {
+  queryRemoveExchange: ({ location, name }: Exchange) => Promise<boolean>;
+  queryExchangeBalances: (location: string, ignoreCache?: boolean) => Promise<PendingTask>;
+  querySetupExchange: (payload: ExchangePayload, edit: boolean) => Promise<boolean>;
+  getExchanges: () => Promise<Exchanges>;
+  queryBinanceMarkets: (location: string) => Promise<string[]>;
+  queryBinanceUserMarkets: (name: string, location: string) => Promise<string[]>;
+  deleteExchangeData: (name?: string) => Promise<boolean>;
+  getExchangeSavingsTask: (payload: ExchangeSavingsRequestPayload) => Promise<PendingTask>;
+  getExchangeSavings: (payload: ExchangeSavingsRequestPayload) => Promise<ExchangeSavingsCollectionResponse>;
+}
 
-    return handleResponse(response);
-  };
-
-  const queryExchangeBalances = async (
-    location: string,
-    ignoreCache = false
-  ): Promise<PendingTask> => {
-    const response = await api.instance.get<ActionResult<PendingTask>>(
-      `/exchanges/balances/${location}`,
-      {
-        params: snakeCaseTransformer({
-          asyncQuery: true,
-          ignoreCache: ignoreCache ? true : undefined
-        }),
-        validateStatus: validStatus
-      }
-    );
+export function useExchangeApi(): UseExchangeApiReturn {
+  const queryRemoveExchange = async ({ location, name }: Exchange): Promise<boolean> => {
+    const response = await api.instance.delete<ActionResult<boolean>>('/exchanges', {
+      data: {
+        name,
+        location,
+      },
+      validateStatus: validStatus,
+    });
 
     return handleResponse(response);
   };
 
-  const querySetupExchange = async (
-    payload: ExchangePayload,
-    edit: boolean
-  ): Promise<boolean> => {
+  const queryExchangeBalances = async (location: string, ignoreCache = false): Promise<PendingTask> => {
+    const response = await api.instance.get<ActionResult<PendingTask>>(`/exchanges/balances/${location}`, {
+      params: snakeCaseTransformer({
+        asyncQuery: true,
+        ignoreCache: ignoreCache ? true : undefined,
+      }),
+      validateStatus: validStatus,
+    });
+
+    return handleResponse(response);
+  };
+
+  const querySetupExchange = async (payload: ExchangePayload, edit: boolean): Promise<boolean> => {
     let response: AxiosResponse<ActionResult<boolean>>;
 
     if (!edit) {
@@ -67,16 +63,17 @@ export const useExchangeApi = () => {
         '/exchanges',
         snakeCaseTransformer(nonEmptyProperties(payload)),
         {
-          validateStatus: validStatus
-        }
+          validateStatus: validStatus,
+        },
       );
-    } else {
+    }
+    else {
       response = await api.instance.patch<ActionResult<boolean>>(
         '/exchanges',
         snakeCaseTransformer(nonEmptyProperties(payload)),
         {
-          validateStatus: validStatus
-        }
+          validateStatus: validStatus,
+        },
       );
     }
 
@@ -84,55 +81,41 @@ export const useExchangeApi = () => {
   };
 
   const getExchanges = async (): Promise<Exchanges> => {
-    const response = await api.instance.get<ActionResult<Exchanges>>(
-      '/exchanges',
-      {
-        validateStatus: validWithSessionStatus
-      }
-    );
+    const response = await api.instance.get<ActionResult<Exchanges>>('/exchanges', {
+      validateStatus: validWithSessionStatus,
+    });
 
     const data = handleResponse(response);
     return Exchanges.parse(data);
   };
 
   const queryBinanceMarkets = async (location: string): Promise<string[]> => {
-    const response = await api.instance.get<ActionResult<string[]>>(
-      '/exchanges/binance/pairs',
-      {
-        params: snakeCaseTransformer({
-          location
-        })
-      }
-    );
+    const response = await api.instance.get<ActionResult<string[]>>('/exchanges/binance/pairs', {
+      params: snakeCaseTransformer({
+        location,
+      }),
+    });
 
     return handleResponse(response);
   };
 
-  const queryBinanceUserMarkets = async (
-    name: string,
-    location: string
-  ): Promise<string[]> => {
-    const response = await api.instance.get<ActionResult<string[]>>(
-      `/exchanges/binance/pairs/${name}`,
-      {
-        params: snakeCaseTransformer({
-          location
-        })
-      }
-    );
+  const queryBinanceUserMarkets = async (name: string, location: string): Promise<string[]> => {
+    const response = await api.instance.get<ActionResult<string[]>>(`/exchanges/binance/pairs/${name}`, {
+      params: snakeCaseTransformer({
+        location,
+      }),
+    });
 
     return handleResponse(response);
   };
 
-  const deleteExchangeData = async (
-    name?: SupportedExchange
-  ): Promise<boolean> => {
+  const deleteExchangeData = async (name?: string): Promise<boolean> => {
     let url = `/exchanges/data`;
-    if (name) {
+    if (name)
       url += `/${name}`;
-    }
+
     const response = await api.instance.delete<ActionResult<boolean>>(url, {
-      validateStatus: validStatus
+      validateStatus: validStatus,
     });
 
     return handleResponse(response);
@@ -140,7 +123,7 @@ export const useExchangeApi = () => {
 
   const internalExchangeSavings = async <T>(
     payload: ExchangeSavingsRequestPayload,
-    asyncQuery: boolean
+    asyncQuery: boolean,
   ): Promise<T> => {
     const response = await api.instance.post<ActionResult<T>>(
       `/exchanges/${payload.location}/savings`,
@@ -148,32 +131,25 @@ export const useExchangeApi = () => {
         nonEmptyProperties({
           asyncQuery,
           ...payload,
-          orderByAttributes:
-            payload.orderByAttributes?.map(item => transformCase(item)) ?? []
-        })
+          orderByAttributes: payload.orderByAttributes?.map(item => transformCase(item)) ?? [],
+        }),
       ),
       {
         paramsSerializer,
-        validateStatus: validWithParamsSessionAndExternalService
-      }
+        validateStatus: validWithParamsSessionAndExternalService,
+      },
     );
 
     return handleResponse(response);
   };
 
-  const getExchangeSavingsTask = async (
-    payload: ExchangeSavingsRequestPayload
-  ): Promise<PendingTask> =>
+  const getExchangeSavingsTask = (payload: ExchangeSavingsRequestPayload): Promise<PendingTask> =>
     internalExchangeSavings<PendingTask>(payload, true);
 
   const getExchangeSavings = async (
-    payload: ExchangeSavingsRequestPayload
+    payload: ExchangeSavingsRequestPayload,
   ): Promise<ExchangeSavingsCollectionResponse> => {
-    const response =
-      await internalExchangeSavings<ExchangeSavingsCollectionResponse>(
-        payload,
-        false
-      );
+    const response = await internalExchangeSavings<ExchangeSavingsCollectionResponse>(payload, false);
 
     return ExchangeSavingsCollectionResponse.parse(response);
   };
@@ -187,6 +163,6 @@ export const useExchangeApi = () => {
     queryBinanceUserMarkets,
     deleteExchangeData,
     getExchangeSavingsTask,
-    getExchangeSavings
+    getExchangeSavings,
   };
-};
+}

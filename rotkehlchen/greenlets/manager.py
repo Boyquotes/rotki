@@ -29,6 +29,7 @@ class GreenletManager:
     def clear(self) -> None:
         """Clears all tracked greenlets. To be called when logging out or shutting down"""
         gevent.killall(self.greenlets)
+        self.greenlets.clear()
 
     def clear_finished(self) -> None:
         """Remove all finished tracked greenlets from the list"""
@@ -42,6 +43,7 @@ class GreenletManager:
             method: Callable,
             **kwargs: Any,
     ) -> gevent.Greenlet:
+        log.debug(f'Spawning task manager task "{task_name}"')
         if after_seconds is None:
             greenlet = gevent.spawn(method, **kwargs)
         else:

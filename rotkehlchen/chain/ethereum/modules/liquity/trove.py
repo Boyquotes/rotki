@@ -3,8 +3,6 @@ from collections import defaultdict
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple, TypedDict, cast
 
-from gevent.lock import Semaphore
-
 from rotkehlchen.accounting.structures.balance import AssetBalance, Balance, BalanceSheet
 from rotkehlchen.chain.ethereum.defi.defisaver_proxy import HasDSProxy
 from rotkehlchen.chain.ethereum.utils import token_normalized_value_decimals
@@ -18,14 +16,15 @@ from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.premium.premium import Premium
 from rotkehlchen.serialization.deserialize import deserialize_asset_amount
-from rotkehlchen.types import ChecksumEvmAddress
-from rotkehlchen.user_messages import MessagesAggregator
+from rotkehlchen.types import ChecksumEvmAddress, Price
+from rotkehlchen.utils.misc import from_wei
 
 if TYPE_CHECKING:
     from rotkehlchen.assets.asset import Asset
     from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
     from rotkehlchen.chain.evm.contracts import EvmContract
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.user_messages import MessagesAggregator
 
 MIN_COLL_RATE = '1.1'
 
@@ -57,6 +56,11 @@ class LiquityBalanceWithProxy(TypedDict):
     balances: dict[str, AssetBalance] | None
 
 
+class GetPositionsResult (TypedDict):
+    balances: dict[ChecksumEvmAddress, Trove]
+    total_collateral_ratio: FVal | None
+
+
 def default_balance_with_proxy_factory() -> LiquityBalanceWithProxy:
     return cast(LiquityBalanceWithProxy, {'proxies': None, 'balances': None})
 
@@ -68,7 +72,7 @@ class Liquity(HasDSProxy):
             ethereum_inquirer: 'EthereumInquirer',
             database: 'DBHandler',
             premium: Premium | None,
-            msg_aggregator: MessagesAggregator,
+            msg_aggregator: 'MessagesAggregator',
     ) -> None:
         super().__init__(
             ethereum_inquirer=ethereum_inquirer,
@@ -76,16 +80,32 @@ class Liquity(HasDSProxy):
             premium=premium,
             msg_aggregator=msg_aggregator,
         )
-        self.history_lock = Semaphore()
         self.trove_manager_contract = self.ethereum.contracts.contract(string_to_evm_address('0xA39739EF8b0231DbFA0DcdA07d7e29faAbCf4bb2'))  # noqa: E501
         self.stability_pool_contract = self.ethereum.contracts.contract(string_to_evm_address('0x66017D22b0f8556afDd19FC67041899Eb65a21bb'))  # noqa: E501
         self.staking_contract = self.ethereum.contracts.contract(string_to_evm_address('0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d'))  # noqa: E501
 
+    def _calculate_total_collateral_ratio(self, eth_price: Price) -> FVal | None:
+        """Query Liquity smart contract for Total Collateral Ratio (TCR).
+        If the TCR of the system falls below 150% the system enters recovery Mode"""
+        try:
+            total_collateral_ratio = self.trove_manager_contract.call(
+                node_inquirer=self.ethereum,
+                method_name='getTCR',
+                arguments=[FVal(eth_price * 10**18).to_int(exact=False)],
+            )
+
+        except RemoteError as e:
+            log.error(f'Failed to query liquity contract for protocol collateral ratio: {e}')
+            return None
+
+        return from_wei(FVal(total_collateral_ratio) * 100)
+
     def get_positions(
             self,
             given_addresses: Sequence[ChecksumEvmAddress],
-    ) -> dict[ChecksumEvmAddress, Trove]:
-        """Query liquity contract to detect open troves"""
+    ) -> GetPositionsResult:
+        """Query liquity contract to detect open troves and
+        query total collateral ratio of the protocol"""
         addresses = list(given_addresses)  # turn to a mutable list copy to add proxies
         proxied_addresses = self.ethereum.proxies_inquirer.get_accounts_having_proxy()
         proxies_to_address = {v: k for k, v in proxied_addresses.items()}
@@ -101,8 +121,8 @@ class Liquity(HasDSProxy):
         )
 
         data: dict[ChecksumEvmAddress, Trove] = {}
-        eth_price = Inquirer().find_usd_price(A_ETH)
-        lusd_price = Inquirer().find_usd_price(A_LUSD)
+        eth_price = Inquirer.find_usd_price(A_ETH)
+        lusd_price = Inquirer.find_usd_price(A_LUSD)
         for idx, output in enumerate(outputs):
             status, result = output
             if status is True:
@@ -159,7 +179,11 @@ class Liquity(HasDSProxy):
                         f'Ignoring Liquity trove information. '
                         f'Failed to decode contract information. {e!s}.',
                     )
-        return data
+        final_result = GetPositionsResult(
+            balances=data,
+            total_collateral_ratio=self._calculate_total_collateral_ratio(eth_price),
+        )
+        return final_result
 
     def _query_deposits_and_rewards(
             self,
@@ -222,7 +246,7 @@ class Liquity(HasDSProxy):
                     break
 
             # get price information for the asset and deserialize the amount
-            asset_price = Inquirer().find_usd_price(asset)
+            asset_price = Inquirer.find_usd_price(asset)
             amount = deserialize_asset_amount(
                 token_normalized_value_decimals(gain_info, 18),
             )

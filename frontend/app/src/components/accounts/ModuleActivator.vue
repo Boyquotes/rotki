@@ -1,33 +1,34 @@
 <script setup lang="ts">
-import { type Ref } from 'vue';
 import { type Module, SUPPORTED_MODULES } from '@/types/modules';
+import type { CamelCase } from '@/types/common';
 
 const emit = defineEmits(['update:selection']);
 
-const enabledModules: Ref<Module[]> = ref([]);
+const enabledModules = ref<Module[]>([]);
 const { activeModules } = storeToRefs(useGeneralSettingsStore());
 const queriedAddressesStore = useQueriedAddressesStore();
 const { queriedAddresses } = storeToRefs(queriedAddressesStore);
 
-const updateSelection = (modules: string[]) => {
+function updateSelection(modules: string[]) {
   emit('update:selection', modules);
-};
+}
 
-const hasAddresses = (module: Module) => {
-  const addresses = get(queriedAddresses)[module];
-  if (addresses) {
+function hasAddresses(module: Module) {
+  const index = transformCase(module, true) as CamelCase<Module>;
+  const addresses = get(queriedAddresses)[index];
+  if (addresses)
     return addresses.length > 0;
-  }
+
   return false;
-};
+}
 
 const visibleModules = computed(() =>
-  SUPPORTED_MODULES.filter(module => {
+  SUPPORTED_MODULES.filter((module) => {
     const identifier = module.identifier;
     const isActive = get(activeModules).includes(identifier);
     const activeWithQueried = isActive && hasAddresses(identifier);
     return activeWithQueried || !isActive;
-  })
+  }),
 );
 
 onMounted(async () => await queriedAddressesStore.fetchQueriedAddresses());
@@ -38,7 +39,10 @@ const loading = isAccountOperationRunning();
 </script>
 
 <template>
-  <div v-if="visibleModules.length > 0" class="flex flex-col items-start gap-4">
+  <div
+    v-if="visibleModules.length > 0"
+    class="flex flex-col items-start gap-4"
+  >
     <div>
       <div class="text-body-1 font-bold text-rui-text">
         {{ t('module_activator.title') }}
@@ -55,29 +59,32 @@ const loading = isAccountOperationRunning();
       :disabled="loading"
       @change="updateSelection($event)"
     >
-      <template #default>
-        <RuiButton
-          v-for="module in visibleModules"
-          :key="module.identifier"
-          icon
-          type="button"
-          :disabled="loading"
-          :value="module.identifier"
+      <RuiButton
+        v-for="module in visibleModules"
+        :key="module.identifier"
+        icon
+        type="button"
+        :disabled="loading"
+        :model-value="module.identifier"
+      >
+        <RuiTooltip
+          class="flex"
+          :popper="{ placement: 'top' }"
+          :open-delay="400"
         >
-          <RuiTooltip
-            class="flex"
-            :popper="{ placement: 'top' }"
-            open-delay="400"
-          >
-            <template #activator>
-              <VImg height="24px" width="24px" contain :src="module.icon" />
-            </template>
-            <span>{{ module.name }}</span>
-          </RuiTooltip>
-        </RuiButton>
-      </template>
+          <template #activator>
+            <AppImage
+              height="24px"
+              width="24px"
+              contain
+              :src="module.icon"
+            />
+          </template>
+          <span>{{ module.name }}</span>
+        </RuiTooltip>
+      </RuiButton>
     </RuiButtonGroup>
-    <div class="text-caption text--secondary">
+    <div class="text-caption text-rui-text-secondary">
       {{ t('module_activator.hint') }}
     </div>
   </div>

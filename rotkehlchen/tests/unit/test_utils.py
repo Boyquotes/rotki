@@ -1,5 +1,6 @@
 import json
-from datetime import datetime, timezone
+import sys
+from datetime import datetime
 from json.decoder import JSONDecodeError
 from unittest.mock import patch
 
@@ -7,6 +8,7 @@ import pytest
 from eth_typing import HexAddress, HexStr
 from eth_utils import to_checksum_address
 from hexbytes import HexBytes
+from packaging.version import Version
 
 from rotkehlchen.chain.ethereum.utils import generate_address_via_create2
 from rotkehlchen.errors.serialization import ConversionError
@@ -19,6 +21,7 @@ from rotkehlchen.utils.misc import (
     combine_dicts,
     combine_stat_dicts,
     convert_to_int,
+    is_production,
     iso8601ts_to_timestamp,
     pairwise,
     pairwise_longest,
@@ -64,9 +67,7 @@ def test_iso8601ts_to_timestamp():
     timezone_ts_str = '1997-07-16T22:30'
     timezone_ts_at_utc = 869092200
     assert iso8601ts_to_timestamp(timezone_ts_str + 'Z') == timezone_ts_at_utc
-    utc_now = datetime.now(timezone.utc)  # Get current time in UTC
-    local_now = utc_now.astimezone()  # Get current time in local timezone
-    utc_offset = local_now.utcoffset().total_seconds()  # Calculate the UTC offset in seconds
+    utc_offset = datetime.fromtimestamp(timezone_ts_at_utc).astimezone().utcoffset().total_seconds()  # noqa: E501
     assert iso8601ts_to_timestamp(timezone_ts_str) == timezone_ts_at_utc - utc_offset
     assert iso8601ts_to_timestamp('1997-07-16T22:30+01:00') == 869088600
     assert iso8601ts_to_timestamp('1997-07-16T22:30:45+01:00') == 869088645
@@ -120,6 +121,8 @@ def test_check_if_version_up_to_date():
         'rotkehlchen.utils.version_check.get_system_spec',
         side_effect=mock_system_spec,
     )
+    result = get_current_version()  # check calling without Github arg works
+    assert result.our_version is not None
 
     github = Github()
     with patch_our_version, patch_github:
@@ -134,7 +137,8 @@ def test_check_if_version_up_to_date():
         result = get_current_version(github=github)
     assert result
     assert result[0]
-    assert result.latest_version == 'v99.99.99'
+    assert result.latest_version == Version('v99.99.99')  # check v prefix does not matter
+    assert result.latest_version == Version('99.99.99')
     assert result.download_url == 'https://foo'
 
     # Also test that bad responses are handled gracefully
@@ -167,6 +171,32 @@ def test_check_if_version_up_to_date():
         assert result.our_version
         assert not result.latest_version
         assert not result.latest_version
+
+
+def test_is_production():
+    """Test the dev version check in is_production"""
+    version_str = 'v1.32.0'
+
+    def mock_system_spec():
+        nonlocal version_str
+        return {'rotkehlchen': version_str}
+
+    patch_our_version = patch(
+        'rotkehlchen.utils.version_check.get_system_spec',
+        side_effect=mock_system_spec,
+    )
+    sys.frozen = True
+    with patch_our_version:
+        assert is_production() is True
+
+    version_str = '1.32.1.dev8+g3c097f01e.d20240217'
+    with patch_our_version:
+        assert is_production() is False  # version is non production
+
+    delattr(sys, 'frozen')
+    version_str = 'v1.32.0'
+    with patch_our_version:
+        assert is_production() is False  # even if full tag, when not frozen not production
 
 
 class Foo(CacheableMixIn):
@@ -373,7 +403,7 @@ def test_jsonloads_list():
     assert 'Returned json is not a list' in str(e.value)
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 def test_retrieve_old_erc20_token_info(ethereum_inquirer):
     info = ethereum_inquirer.get_erc20_contract_info('0x2C4Bd064b998838076fa341A83d007FC2FA50957')
     assert info['symbol'] == 'UNI-V1'

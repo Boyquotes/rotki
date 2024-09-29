@@ -5,56 +5,38 @@ const panel = computed<number>(() => (get(expanded) ? 0 : -1));
 </script>
 
 <template>
-  <Card :class="{ 'pb-6': expanded }">
-    <template #title>
-      <div class="flex items-center">
-        <div class="mr-2">
-          <RuiButton variant="text" icon @click="expanded = !expanded">
-            <RuiIcon
-              :name="expanded ? 'checkbox-indeterminate-line' : 'add-box-line'"
-            />
+  <RuiCard :class="{ '[&>div:last-child]:!py-0': !expanded }">
+    <template #custom-header>
+      <div class="flex justify-between items-center flex-wrap p-4 gap-2">
+        <CardTitle>
+          <RuiButton
+            variant="text"
+            icon
+            @click="expanded = !expanded"
+          >
+            <RuiIcon :name="expanded ? 'checkbox-indeterminate-line' : 'add-box-line'" />
           </RuiButton>
-        </div>
-        <div class="flex items-center gap-x-2">
           <slot name="title" />
+        </CardTitle>
+
+        <div class="flex items-center gap-2 grow justify-end">
+          <slot
+            v-if="expanded"
+            name="details"
+          />
+          <slot
+            v-else
+            name="shortDetails"
+          />
         </div>
       </div>
     </template>
-    <template #details>
-      <slot v-if="expanded" name="details" />
-      <slot v-else name="shortDetails" />
-    </template>
-    <template #default>
-      <VExpansionPanels :value="panel">
-        <VExpansionPanel>
-          <VExpansionPanelContent>
-            <slot />
-          </VExpansionPanelContent>
-        </VExpansionPanel>
-      </VExpansionPanels>
-    </template>
-  </Card>
+    <RuiAccordions :model-value="panel">
+      <RuiAccordion eager>
+        <template #default>
+          <slot />
+        </template>
+      </RuiAccordion>
+    </RuiAccordions>
+  </RuiCard>
 </template>
-
-<style scoped lang="scss">
-:deep(.v-expansion-panel) {
-  &::before {
-    box-shadow: none;
-  }
-
-  .v-expansion-panel {
-    &-content {
-      &__wrap {
-        padding: 0 !important;
-      }
-    }
-  }
-}
-
-/* stylelint-disable selector-class-pattern,selector-nested-pattern */
-
-:deep(.v-card__text) {
-  padding-bottom: 0 !important;
-}
-/* stylelint-enable selector-class-pattern,selector-nested-pattern */
-</style>

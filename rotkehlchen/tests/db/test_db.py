@@ -13,6 +13,7 @@ from rotkehlchen.accounting.structures.types import ActionType
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.balances.manual import ManuallyTrackedBalance
 from rotkehlchen.chain.accounts import BlockchainAccountData, BlockchainAccounts
+from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants import ONE, YEAR_IN_SECONDS, ZERO
 from rotkehlchen.constants.assets import (
     A_1INCH,
@@ -26,6 +27,8 @@ from rotkehlchen.constants.assets import (
 )
 from rotkehlchen.constants.misc import USERSDIR_NAME
 from rotkehlchen.data_handler import DataHandler
+from rotkehlchen.db.addressbook import DBAddressbook
+from rotkehlchen.db.cache import DBCacheDynamic, DBCacheStatic
 from rotkehlchen.db.dbhandler import DBHandler
 from rotkehlchen.db.filtering import AssetMovementsFilterQuery, TradesFilterQuery
 from rotkehlchen.db.misc import detect_sqlcipher_version
@@ -34,10 +37,15 @@ from rotkehlchen.db.schema import DB_CREATE_ETH2_DAILY_STAKING_DETAILS
 from rotkehlchen.db.settings import (
     DEFAULT_ACCOUNT_FOR_ASSETS_MOVEMENTS,
     DEFAULT_ACTIVE_MODULES,
+    DEFAULT_ASK_USER_UPON_SIZE_DISCREPANCY,
+    DEFAULT_AUTO_CREATE_CALENDAR_REMINDERS,
+    DEFAULT_AUTO_DELETE_CALENDAR_ENTRIES,
+    DEFAULT_AUTO_DETECT_TOKENS,
     DEFAULT_BALANCE_SAVE_FREQUENCY,
     DEFAULT_BTC_DERIVATION_GAP_LIMIT,
     DEFAULT_CALCULATE_PAST_COST_BASIS,
     DEFAULT_CONNECT_TIMEOUT,
+    DEFAULT_CSV_EXPORT_DELIMITER,
     DEFAULT_CURRENT_PRICE_ORACLES,
     DEFAULT_DATE_DISPLAY_FORMAT,
     DEFAULT_DISPLAY_DATE_IN_LOCALTIME,
@@ -49,6 +57,8 @@ from rotkehlchen.db.settings import (
     DEFAULT_INFER_ZERO_TIMED_BALANCES,
     DEFAULT_LAST_DATA_MIGRATION,
     DEFAULT_MAIN_CURRENCY,
+    DEFAULT_ORACLE_PENALTY_DURATION,
+    DEFAULT_ORACLE_PENALTY_THRESHOLD_COUNT,
     DEFAULT_PNL_CSV_HAVE_SUMMARY,
     DEFAULT_PNL_CSV_WITH_FORMULAS,
     DEFAULT_QUERY_RETRY_LIMIT,
@@ -78,14 +88,17 @@ from rotkehlchen.tests.utils.constants import (
     A_XMR,
     DEFAULT_TESTS_MAIN_CURRENCY,
 )
+from rotkehlchen.tests.utils.factories import make_api_key, make_api_secret, make_evm_tx_hash
 from rotkehlchen.tests.utils.rotkehlchen import add_starting_balances, add_starting_nfts
 from rotkehlchen.types import (
     DEFAULT_ADDRESS_NAME_PRIORITY,
+    AddressbookEntry,
     ApiKey,
     ApiSecret,
     AssetAmount,
     AssetMovementCategory,
     CostBasisMethod,
+    ExchangeLocationID,
     ExternalService,
     ExternalServiceApiCredentials,
     Fee,
@@ -100,7 +113,6 @@ from rotkehlchen.utils.misc import ts_now
 
 TABLES_AT_INIT = [
     'assets',
-    'yearn_vaults_events',
     'timed_balances',
     'timed_location_data',
     'asset_movement_category',
@@ -109,6 +121,7 @@ TABLES_AT_INIT = [
     'user_credentials',
     'user_credentials_mappings',
     'blockchain_accounts',
+    'calendar',
     'evm_accounts_details',
     'multisettings',
     'trades',
@@ -135,7 +148,6 @@ TABLES_AT_INIT = [
     'eth2_validators',
     'ignored_actions',
     'action_type',
-    'balancer_events',
     'nfts',
     'history_events',
     'history_events_mappings',
@@ -149,6 +161,13 @@ TABLES_AT_INIT = [
     'accounting_rules',
     'linked_rules_properties',
     'unresolved_remote_conflicts',
+    'key_value_cache',
+    'zksynclite_tx_type',
+    'zksynclite_transactions',
+    'zksynclite_swaps',
+    'calendar_reminders',
+    'cowswap_orders',
+    'gnosispay_data',
 ]
 
 
@@ -180,33 +199,28 @@ def test_data_init_and_password(data_dir, username, sql_vm_instructions_cb):
     assert set(results) == set(TABLES_AT_INIT)
 
     # finally logging in with wrong password should also fail
+    data.logout()
     del data
     data = DataHandler(data_dir, msg_aggregator, sql_vm_instructions_cb)
     with pytest.raises(AuthenticationError):
         data.unlock(username, '1234', create_new=False, resume_from_backup=False)
+    data.logout()
 
 
-def test_add_remove_exchange(user_data_dir, sql_vm_instructions_cb):
-    """Tests that adding and removing an exchange in the DB works.
-
-    Also unknown exchanges should fail
+@pytest.mark.parametrize('db_settings', [
+    {'non_syncing_exchanges': [ExchangeLocationID(name='Coinbase', location=Location.COINBASE)]}])
+def test_add_remove_exchange(database: DBHandler) -> None:
     """
-    msg_aggregator = MessagesAggregator()
-    db = DBHandler(
-        user_data_dir=user_data_dir,
-        password='123',
-        msg_aggregator=msg_aggregator,
-        initial_settings=None,
-        sql_vm_instructions_cb=sql_vm_instructions_cb,
-        resume_from_backup=False,
-    )
+    Tests that adding and removing an exchange in the DB works. It also test that
+    deleting an exchange also removes it from the non_syncing_exchanges setting
 
-    # Test that an unknown exchange fails
-    with pytest.raises(InputError):
-        db.add_exchange('foo', Location.EXTERNAL, 'api_key', 'api_secret')
+    Also unknown exchanges should fail.
+    """
+    with pytest.raises(InputError):  # Test that an unknown exchange fails
+        database.add_exchange('foo', Location.EXTERNAL, ApiKey('api_key'), ApiSecret(b'api_secret'))  # noqa: E501
 
-    with db.conn.read_ctx() as cursor:
-        credentials = db.get_exchange_credentials(cursor)
+    with database.conn.read_ctx() as cursor:
+        credentials = database.get_exchange_credentials(cursor)
         assert len(credentials) == 0
 
         kraken_api_key1 = ApiKey('kraken_api_key')
@@ -217,11 +231,15 @@ def test_add_remove_exchange(user_data_dir, sql_vm_instructions_cb):
         binance_api_secret = ApiSecret(b'binance_api_secret')
 
         # add mock kraken and binance
-        db.add_exchange('kraken1', Location.KRAKEN, kraken_api_key1, kraken_api_secret1)
-        db.add_exchange('kraken2', Location.KRAKEN, kraken_api_key2, kraken_api_secret2)
-        db.add_exchange('binance', Location.BINANCE, binance_api_key, binance_api_secret)
+        database.add_exchange('kraken1', Location.KRAKEN, kraken_api_key1, kraken_api_secret1)
+        database.add_exchange('kraken2', Location.KRAKEN, kraken_api_key2, kraken_api_secret2)
+        database.add_exchange('binance', Location.BINANCE, binance_api_key, binance_api_secret)
         # and check the credentials can be retrieved
-        credentials = db.get_exchange_credentials(cursor)
+        credentials = database.get_exchange_credentials(cursor)
+
+        # check that we have the coinbase exchange in the list of exchanges to not sync
+        settings = database.get_settings(cursor=cursor)
+        assert settings.non_syncing_exchanges[0].location == Location.COINBASE
 
     assert len(credentials) == 2
     assert len(credentials[Location.KRAKEN]) == 2
@@ -240,9 +258,9 @@ def test_add_remove_exchange(user_data_dir, sql_vm_instructions_cb):
     assert binance.api_secret == binance_api_secret
 
     # remove an exchange and see it works
-    with db.user_write() as cursor:
-        db.remove_exchange(cursor, 'kraken1', Location.KRAKEN)
-        credentials = db.get_exchange_credentials(cursor)
+    with database.user_write() as cursor:
+        database.remove_exchange(cursor, 'kraken1', Location.KRAKEN)
+        credentials = database.get_exchange_credentials(cursor)
     assert len(credentials) == 2
     assert len(credentials[Location.KRAKEN]) == 1
     kraken2 = credentials[Location.KRAKEN][0]
@@ -256,15 +274,34 @@ def test_add_remove_exchange(user_data_dir, sql_vm_instructions_cb):
     assert binance.api_secret == binance_api_secret
 
     # remove last exchange of a location and see nothing is returned
-    with db.user_write() as cursor:
-        db.remove_exchange(cursor, 'kraken2', Location.KRAKEN)
-        credentials = db.get_exchange_credentials(cursor)
+    with database.user_write() as cursor:
+        database.remove_exchange(cursor, 'kraken2', Location.KRAKEN)
+        credentials = database.get_exchange_credentials(cursor)
     assert len(credentials) == 1
     assert len(credentials[Location.BINANCE]) == 1
     binance = credentials[Location.BINANCE][0]
     assert binance.name == 'binance'
     assert binance.api_key == binance_api_key
     assert binance.api_secret == binance_api_secret
+
+    # check that deleting an exchange also removes it from the list of ignored for sync
+    database.add_exchange('Coinbase', Location.COINBASE, make_api_key(), make_api_secret())
+    database.add_exchange('Coinbase 2', Location.COINBASE, make_api_key(), make_api_secret())
+
+    with database.user_write() as write_cursor:
+        database.remove_exchange(
+            write_cursor=write_cursor,
+            name='Coinbase',
+            location=Location.COINBASE,
+        )
+
+    with database.conn.read_ctx() as cursor:
+        settings = database.get_settings(cursor=cursor)
+        assert len(settings.non_syncing_exchanges) == 0
+        updated_credentials = database.get_exchange_credentials(cursor)
+
+    assert len(updated_credentials[Location.BINANCE]) == 1
+    assert updated_credentials[Location.COINBASE][0].name == 'Coinbase 2'
 
 
 def test_export_import_db(data_dir: Path, username: str, sql_vm_instructions_cb: int) -> None:
@@ -273,7 +310,7 @@ def test_export_import_db(data_dir: Path, username: str, sql_vm_instructions_cb:
     data = DataHandler(data_dir, msg_aggregator, sql_vm_instructions_cb)
     data.unlock(username, '123', create_new=True, resume_from_backup=False)
     starting_balance = ManuallyTrackedBalance(
-        id=-1,
+        identifier=-1,
         asset=A_EUR,
         label='foo',
         amount=FVal(10),
@@ -290,6 +327,7 @@ def test_export_import_db(data_dir: Path, username: str, sql_vm_instructions_cb:
     with data.db.user_write() as cursor:
         balances = data.db.get_manually_tracked_balances(cursor)
     assert balances == [starting_balance]
+    data.logout()
 
 
 def test_writing_fetching_data(data_dir, username, sql_vm_instructions_cb):
@@ -332,6 +370,20 @@ def test_writing_fetching_data(data_dir, username, sql_vm_instructions_cb):
             blockchain=SupportedBlockchain.POLYGON_POS,
             tokens=[A_POLYGON_POS_MATIC],
         )
+        random_tx_hash_in_cache = make_evm_tx_hash()
+        data.db.set_dynamic_cache(
+            write_cursor=write_cursor,
+            name=DBCacheDynamic.EXTRA_INTERNAL_TX,
+            value=string_to_evm_address('0xd36029d76af6fE4A356528e4Dc66B2C18123597D'),
+            tx_hash=random_tx_hash_in_cache.hex(),  # pylint: disable=no-member
+            receiver=string_to_evm_address('0xd36029d76af6fE4A356528e4Dc66B2C18123597D'),
+        )
+        assert data.db.get_dynamic_cache(  # ensure it's properly set
+            cursor=write_cursor,
+            name=DBCacheDynamic.EXTRA_INTERNAL_TX,
+            tx_hash=random_tx_hash_in_cache.hex(),  # pylint: disable=no-member
+            receiver=string_to_evm_address('0xd36029d76af6fE4A356528e4Dc66B2C18123597D'),
+        ) == string_to_evm_address('0xd36029d76af6fE4A356528e4Dc66B2C18123597D')
 
     with data.db.conn.read_ctx() as cursor:
         accounts = data.db.get_blockchain_accounts(cursor)
@@ -370,6 +422,12 @@ def test_writing_fetching_data(data_dir, username, sql_vm_instructions_cb):
             '0x80B369799104a47e98A553f3329812a44A7FaCDc',
             '0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12',
         }
+        assert data.db.get_dynamic_cache(
+            cursor=write_cursor,
+            name=DBCacheDynamic.EXTRA_INTERNAL_TX,
+            tx_hash=random_tx_hash_in_cache.hex(),  # pylint: disable=no-member
+            receiver=string_to_evm_address('0xd36029d76af6fE4A356528e4Dc66B2C18123597D'),
+        ) is None
         # Remove only the polygon account
         data.db.remove_single_blockchain_accounts(
             write_cursor,
@@ -388,33 +446,39 @@ def test_writing_fetching_data(data_dir, username, sql_vm_instructions_cb):
             cursor=write_cursor,
             address='0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12',
             blockchain=SupportedBlockchain.POLYGON_POS,
+            token_exceptions=set(),
         ) == (None, None)
         eth_tokens, _ = data.db.get_tokens_for_address(
             cursor=write_cursor,
             address='0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12',
             blockchain=SupportedBlockchain.ETHEREUM,
+            token_exceptions=set(),
         )
         assert set(eth_tokens) == {A_DAI, A_USDC}
 
     with data.db.conn.read_ctx() as cursor:
         ignored_assets_before = data.db.get_ignored_asset_ids(cursor)
 
-    result, _ = data.add_ignored_assets([A_DAO])
-    assert result
-    result, _ = data.add_ignored_assets([A_DOGE])
-    assert result
-    result, _ = data.add_ignored_assets([A_DOGE])
-    assert result is None
+    success, already = data.add_ignored_assets([A_DAO])
+    assert success == {A_DAO}
+    assert len(already) == 0
+    success, already = data.add_ignored_assets([A_DOGE])
+    assert success == {A_DOGE}
+    assert len(already) == 0
+    success, already = data.add_ignored_assets([A_DOGE])
+    assert already == {A_DOGE}
+    assert len(success) == 0
 
     with data.db.conn.read_ctx() as cursor:
         ignored_asset_ids = data.db.get_ignored_asset_ids(cursor)
         assert ignored_asset_ids - ignored_assets_before == {A_DAO.identifier, A_DOGE.identifier}
         # Test removing asset that is not in the list
-        result, msg = data.remove_ignored_assets([A_RDN])
-        assert 'not in ignored assets' in msg
-        assert result is None
-        result, _ = data.remove_ignored_assets([A_DOGE])
-        assert result
+        success, already = data.remove_ignored_assets([A_RDN])
+        assert already == {A_RDN}
+        assert len(success) == 0
+        success, already = data.remove_ignored_assets([A_DOGE])
+        assert success == {A_DOGE}
+        assert len(already) == 0
         assert data.db.get_ignored_asset_ids(cursor) - ignored_assets_before == {A_DAO.identifier}
 
         # With nothing inserted in settings make sure default values are returned
@@ -427,16 +491,15 @@ def test_writing_fetching_data(data_dir, username, sql_vm_instructions_cb):
         'have_premium': False,
         'ksm_rpc_endpoint': 'http://localhost:9933',
         'dot_rpc_endpoint': '',
+        'beacon_rpc_endpoint': '',
         'ui_floating_precision': DEFAULT_UI_FLOATING_PRECISION,
         'version': ROTKEHLCHEN_DB_VERSION,
         'include_crypto2crypto': DEFAULT_INCLUDE_CRYPTO2CRYPTO,
         'include_gas_costs': DEFAULT_INCLUDE_GAS_COSTS,
         'taxfree_after_period': YEAR_IN_SECONDS,
         'balance_save_frequency': DEFAULT_BALANCE_SAVE_FREQUENCY,
-        'last_balance_save': 0,
         'main_currency': DEFAULT_MAIN_CURRENCY.identifier,
         'date_display_format': DEFAULT_DATE_DISPLAY_FORMAT,
-        'last_data_upload_ts': 0,
         'premium_should_sync': False,
         'submit_usage_analytics': True,
         'last_write_ts': 0,
@@ -463,6 +526,13 @@ def test_writing_fetching_data(data_dir, username, sql_vm_instructions_cb):
         'query_retry_limit': DEFAULT_QUERY_RETRY_LIMIT,
         'connect_timeout': DEFAULT_CONNECT_TIMEOUT,
         'read_timeout': DEFAULT_READ_TIMEOUT,
+        'oracle_penalty_threshold_count': DEFAULT_ORACLE_PENALTY_THRESHOLD_COUNT,
+        'oracle_penalty_duration': DEFAULT_ORACLE_PENALTY_DURATION,
+        'auto_delete_calendar_entries': DEFAULT_AUTO_DELETE_CALENDAR_ENTRIES,
+        'auto_create_calendar_reminders': DEFAULT_AUTO_CREATE_CALENDAR_REMINDERS,
+        'ask_user_upon_size_discrepancy': DEFAULT_ASK_USER_UPON_SIZE_DISCREPANCY,
+        'auto_detect_tokens': DEFAULT_AUTO_DETECT_TOKENS,
+        'csv_export_delimiter': DEFAULT_CSV_EXPORT_DELIMITER,
     }
     assert len(expected_dict) == len(dataclasses.fields(DBSettings)), 'One or more settings are missing'  # noqa: E501
 
@@ -472,6 +542,7 @@ def test_writing_fetching_data(data_dir, username, sql_vm_instructions_cb):
         assert field.name in expected_dict
         if field.name != 'last_write_ts':
             assert getattr(result, field.name) == expected_dict[field.name]
+    data.logout()
 
 
 def test_settings_entry_types(database):
@@ -501,8 +572,6 @@ def test_settings_entry_types(database):
     assert res.taxfree_after_period == 1
     assert isinstance(res.balance_save_frequency, int)
     assert res.balance_save_frequency == 24
-    assert isinstance(res.last_balance_save, int)
-    assert res.last_balance_save == 0
     assert isinstance(res.main_currency, Asset)
     assert res.main_currency == DEFAULT_TESTS_MAIN_CURRENCY
     assert isinstance(res.date_display_format, str)
@@ -513,6 +582,29 @@ def test_settings_entry_types(database):
     assert res.active_modules == DEFAULT_ACTIVE_MODULES
     assert isinstance(res.frontend_settings, str)
     assert res.frontend_settings == ''
+    assert isinstance(res.oracle_penalty_threshold_count, int)
+    assert res.oracle_penalty_threshold_count == DEFAULT_ORACLE_PENALTY_THRESHOLD_COUNT
+    assert isinstance(res.oracle_penalty_duration, int)
+    assert res.oracle_penalty_duration == DEFAULT_ORACLE_PENALTY_DURATION
+
+
+def test_key_value_cache_entry_types(database):
+    with database.user_write() as cursor:
+        for db_cache in (
+            DBCacheStatic.LAST_BALANCE_SAVE,
+            DBCacheStatic.LAST_DATA_UPLOAD_TS,
+            DBCacheStatic.LAST_EVM_ACCOUNTS_DETECT_TS,
+        ):
+            database.set_static_cache(write_cursor=cursor, name=db_cache, value=123)
+        cache = database.get_cache_for_api(cursor)
+        default_value = database.get_static_cache(cursor=cursor, name=DBCacheStatic.LAST_DATA_UPDATES_TS)  # noqa: E501
+    assert isinstance(cache[DBCacheStatic.LAST_BALANCE_SAVE.value], int)
+    assert isinstance(cache[DBCacheStatic.LAST_DATA_UPLOAD_TS.value], int)
+    assert (
+        cache[DBCacheStatic.LAST_BALANCE_SAVE.value] ==
+        cache[DBCacheStatic.LAST_DATA_UPLOAD_TS.value] == 123
+    )
+    assert default_value is None
 
 
 def test_balance_save_frequency_check(data_dir, username, sql_vm_instructions_cb):
@@ -533,6 +625,7 @@ def test_balance_save_frequency_check(data_dir, username, sql_vm_instructions_cb
 
         last_save_ts = data.db.get_last_balance_save_time(cursor)
         assert last_save_ts == data_save_ts
+    data.logout()
 
 
 def test_sqlcipher_detect_version():
@@ -679,6 +772,7 @@ def test_query_timed_balances(data_dir, username, sql_vm_instructions_cb):
     assert result[0].category == BalanceType.LIABILITY
     assert result[0].amount == FVal('1')
     assert result[0].usd_value == FVal('9.98')
+    data.logout()
 
 
 def test_query_collection_timed_balances(data_dir, username, sql_vm_instructions_cb):
@@ -734,6 +828,7 @@ def test_query_collection_timed_balances(data_dir, username, sql_vm_instructions
         amount=FVal(40),
         usd_value=FVal(40),
     )]
+    data.logout()
 
 
 def test_timed_balances_inferred_zero_balances(data_dir, username, sql_vm_instructions_cb):
@@ -748,14 +843,14 @@ def test_timed_balances_inferred_zero_balances(data_dir, username, sql_vm_instru
     liability = BalanceType.LIABILITY.serialize_for_db()
 
     timed_balance_entries = [
-        (1514841100, 'ETH', '2', '0', asset),  #
-        (1514851200, 'ETH', '2', '0', liability),  # 0
+        (1514841100, 'ETH', '2', '0', asset),
+        (1514851200, 'ETH', '2', '0', liability),
         (1514937600, 'BTC', '1', '0', asset),
         (1514937700, 'BTC', '1', '0', asset),
-        (1514937800, 'BTC', '1', '0', asset),  # 0
-        (1514937900, 'ETH', '3', '0', asset),  #
-        (1514938000, 'BTC', '3', '0', asset),  # 0
-        (1514938100, 'BTC', '1', '0', asset),  # 0
+        (1514937800, 'BTC', '1', '0', asset),
+        (1514937900, 'ETH', '3', '0', asset),
+        (1514938000, 'BTC', '3', '0', asset),
+        (1514938100, 'BTC', '1', '0', asset),
     ]
 
     with data.db.user_write() as write_cursor:
@@ -791,16 +886,16 @@ def test_timed_balances_inferred_zero_balances(data_dir, username, sql_vm_instru
         timed_balance_entries = [
             (1514841100, 'BTC', '1', '0', asset),
             (1514841100, 'ETC', '10', '0', asset),
-            (1514842100, 'ETH', '2', '0', asset),  #
+            (1514842100, 'ETH', '2', '0', asset),
             (1514842100, 'BTC', '1', '0', asset),
-            (1514843100, 'ETH', '2', '0', asset),  #
-            (1514844100, 'BTC', '2', '0', asset),  # 0
+            (1514843100, 'ETH', '2', '0', asset),
+            (1514844100, 'BTC', '2', '0', asset),
             (1514845100, 'BTC', '2', '0', asset),
-            (1514846100, 'BTC', '2', '0', asset),  # 0
-            (1514847100, 'ETH', '2', '0', asset),  #
-            (1514848100, 'BTC', '1', '0', asset),  # 0
+            (1514846100, 'BTC', '2', '0', asset),
+            (1514847100, 'ETH', '2', '0', asset),
+            (1514848100, 'BTC', '1', '0', asset),
             (1514848100, 'LTC', '5', '0', asset),
-            (1514849100, 'BTC', '1', '0', asset),  # 0
+            (1514849100, 'BTC', '1', '0', asset),
         ]
 
         write_cursor.executemany(
@@ -830,18 +925,18 @@ def test_timed_balances_inferred_zero_balances(data_dir, username, sql_vm_instru
         data.db.set_settings(write_cursor, settings=ModifiableDBSettings(ssf_graph_multiplier=2))
 
         timed_balance_entries = [
-            (1659748923, 'ETH', '2', '0', asset),  #
+            (1659748923, 'ETH', '2', '0', asset),
             (1659748923, 'ETH2', '10', '0', asset),
             # 312 timestamps with 0 balances will be added here due to the ssf_graph_multiplier
-            (1686821381, 'ETH', '2', '0', asset),  #
+            (1686821381, 'ETH', '2', '0', asset),
             (1686821381, 'BTC', '1', '0', asset),
             (1686821381, 'LTC', '5', '0', asset),
             (1686822381, 'LTC', '5', '0', asset),  # inferred 0
             (1686823381, 'LTC', '5', '0', asset),
             (1686824381, 'LTC', '5', '0', asset),  # inferred 0
-            (1686825013, 'ETH', '2', '0', asset),  #
-            (1686825081, 'ETH', '2', '0', asset),  #
-            (1686827028, 'ETH', '2', '0', asset),  #
+            (1686825013, 'ETH', '2', '0', asset),
+            (1686825081, 'ETH', '2', '0', asset),
+            (1686827028, 'ETH', '2', '0', asset),
         ]
 
         write_cursor.executemany(
@@ -856,6 +951,7 @@ def test_timed_balances_inferred_zero_balances(data_dir, username, sql_vm_instru
             balance_type=BalanceType.ASSET,
         )
     assert len(all_data) == 319  # 5 from db + 312 ssf_graph_multiplier zeros + 2 inferred zeros  # noqa: E501
+    data.logout()
 
 
 def test_query_owned_assets(data_dir, username, sql_vm_instructions_cb):
@@ -957,6 +1053,7 @@ def test_query_owned_assets(data_dir, username, sql_vm_instructions_cb):
     assert all(isinstance(x, Asset) for x in assets_list)
     warnings = data.db.msg_aggregator.consume_warnings()
     assert len(warnings) == 0
+    data.logout()
 
 
 def test_get_latest_location_value_distribution(data_dir, username, sql_vm_instructions_cb):
@@ -978,6 +1075,7 @@ def test_get_latest_location_value_distribution(data_dir, username, sql_vm_instr
     assert distribution[3].usd_value == '10000'
     assert distribution[4].location == 'J'  # blockchain location serialized for DB enum
     assert distribution[4].usd_value == '200000'
+    data.logout()
 
 
 def test_get_latest_asset_value_distribution(data_dir, username, sql_vm_instructions_cb):
@@ -999,12 +1097,14 @@ def test_get_latest_asset_value_distribution(data_dir, username, sql_vm_instruct
     assert FVal(assets[2].usd_value) > FVal(assets[3].usd_value)
 
     # test that ignored assets are not ignored in the value distribution by location
-    result, _ = data.add_ignored_assets([A_BTC])
-    assert result
+    success, already = data.add_ignored_assets([A_BTC])
+    assert success == {A_BTC}
+    assert len(already) == 0
     assets = data.db.get_latest_asset_value_distribution()
     assert len(assets) == 3
     assert FVal(assets[0].usd_value) > FVal(assets[1].usd_value)
     assert FVal(assets[1].usd_value) > FVal(assets[2].usd_value)
+    data.logout()
 
 
 def test_get_netvalue_data(data_dir, username, sql_vm_instructions_cb):
@@ -1022,6 +1122,7 @@ def test_get_netvalue_data(data_dir, username, sql_vm_instructions_cb):
     assert values[0] == '1500'
     assert values[1] == '4500'
     assert values[2] == '10700.5'
+    data.logout()
 
 
 def test_get_netvalue_data_from_date(data_dir, username, sql_vm_instructions_cb):
@@ -1035,6 +1136,7 @@ def test_get_netvalue_data_from_date(data_dir, username, sql_vm_instructions_cb)
     assert times[0] == 1491607800
     assert len(values) == 1
     assert values[0] == '10700.5'
+    data.logout()
 
 
 def test_get_netvalue_without_nfts(data_dir, username, sql_vm_instructions_cb):
@@ -1063,9 +1165,10 @@ def test_get_netvalue_without_nfts(data_dir, username, sql_vm_instructions_cb):
     assert values[0] == '2000'
     assert values[2] == '3000'
     assert values[3] == '4500'
+    data.logout()
 
 
-def test_add_trades(data_dir, username, caplog, sql_vm_instructions_cb):
+def test_add_trades(data_dir, username, sql_vm_instructions_cb):
     """Test that adding and retrieving trades from the DB works fine.
 
     Also duplicates should be ignored and an error returned
@@ -1125,12 +1228,12 @@ def test_add_trades(data_dir, username, caplog, sql_vm_instructions_cb):
         assert returned_trades == [trade1, trade2]
 
         # Add the last 2 trades. Since trade2 already exists in the DB it should be
-        # ignored and a warning should be logged
+        # ignored
         data.db.add_trades(cursor, [trade2, trade3])
-        assert 'Did not add "buy trade with id a1ed19c8284940b4e59bdac941db2fd3c0ed004ddb10fdd3b9ef0a3a9b2c97bc' in caplog.text  # noqa: E501
         returned_trades = data.db.get_trades(cursor, filter_query=TradesFilterQuery.make(), has_premium=True)  # noqa: E501
 
     assert returned_trades == [trade1, trade2, trade3]
+    data.logout()
 
 
 def test_add_margin_positions(data_dir, username, caplog, sql_vm_instructions_cb):
@@ -1195,9 +1298,10 @@ def test_add_margin_positions(data_dir, username, caplog, sql_vm_instructions_cb
         ) in caplog.text
         returned_margins = data.db.get_margin_positions(cursor)
         assert returned_margins == [margin1, margin2, margin3]
+    data.logout()
 
 
-def test_add_asset_movements(data_dir, username, caplog, sql_vm_instructions_cb):
+def test_add_asset_movements(data_dir, username, sql_vm_instructions_cb):
     """Test that adding and retrieving asset movements from the DB works fine.
 
     Also duplicates should be ignored and an error returned
@@ -1231,7 +1335,7 @@ def test_add_asset_movements(data_dir, username, caplog, sql_vm_instructions_cb)
         link='',
     )
     movement3 = AssetMovement(
-        location=Location.BITTREX,
+        location=Location.KRAKEN,
         category=AssetMovementCategory.WITHDRAWAL,
         address='0xcoo',
         transaction_id='0xdoo',
@@ -1257,19 +1361,15 @@ def test_add_asset_movements(data_dir, username, caplog, sql_vm_instructions_cb)
         )
         assert returned_movements == [movement1, movement2]
 
-        # Add the last 2 movements. Since movement2 already exists in the DB it should be
-        # ignored and a warning should be logged
+        # Add the last 2 movements. Since movement2 already exists in the DB it should be ignored
         data.db.add_asset_movements(cursor, [movement2, movement3])
-        assert (
-            'Did not add "withdrawal of ETH with id 94405f38c7b86dd2e7943164d'
-            '67ff44a32d56cef25840b3f5568e23c037fae0a'
-        ) in caplog.text
         returned_movements = data.db.get_asset_movements(
             cursor=cursor,
             filter_query=AssetMovementsFilterQuery.make(),
             has_premium=True,
         )
     assert returned_movements == [movement1, movement2, movement3]
+    data.logout()
 
 
 @pytest.mark.parametrize('ethereum_accounts', [[]])
@@ -1328,6 +1428,7 @@ def test_can_unlock_db_with_disabled_taxfree_after_period(data_dir, username, sq
     with data.db.conn.read_ctx() as cursor:
         settings = data.db.get_settings(cursor)
     assert settings.taxfree_after_period is None
+    data.logout()
 
 
 def test_timed_balances_primary_key_works(user_data_dir, sql_vm_instructions_cb):
@@ -1385,6 +1486,7 @@ def test_timed_balances_primary_key_works(user_data_dir, sql_vm_instructions_cb)
         ]
         db.add_multiple_balances(cursor, balances)
     assert len(balances) == 2
+    db.logout()
 
 
 @pytest.mark.parametrize('db_settings', [{'treat_eth2_as_eth': True}])
@@ -1565,6 +1667,7 @@ def test_multiple_location_data_and_balances_same_timestamp(user_data_dir, sql_v
 
     locations = db.get_latest_location_value_distribution()
     assert len(locations) == 0
+    db.logout()
 
 
 def test_set_get_rotkehlchen_premium_credentials(data_dir, username, sql_vm_instructions_cb):
@@ -1591,6 +1694,7 @@ def test_set_get_rotkehlchen_premium_credentials(data_dir, username, sql_vm_inst
     assert returned_credentials == credentials
     assert returned_credentials.serialize_key() == api_key
     assert returned_credentials.serialize_secret() == secret
+    data.logout()
 
 
 def test_unlock_with_invalid_premium_data(data_dir, username, sql_vm_instructions_cb):
@@ -1621,6 +1725,7 @@ def test_unlock_with_invalid_premium_data(data_dir, username, sql_vm_instruction
     assert len(warnings) == 0
     assert len(errors) == 1
     assert 'Incorrect rotki API Key/Secret format found in the DB' in errors[0]
+    data.logout()
 
 
 @pytest.mark.parametrize('include_etherscan_key', [False])
@@ -1631,9 +1736,11 @@ def test_get_external_service_credentials(database):
         assert not database.get_external_service_credentials(service)
 
     # add entries for all services
-    database.add_external_service_credentials(
-        [ExternalServiceApiCredentials(s, f'{s.name.lower()}_key') for s in ExternalService],
-    )
+    with database.user_write() as write_cursor:
+        database.add_external_service_credentials(
+            write_cursor=write_cursor,
+            credentials=[ExternalServiceApiCredentials(s, f'{s.name.lower()}_key') for s in ExternalService],  # noqa: E501
+        )
 
     # now make sure that they are returned individually
     for service in ExternalService:
@@ -1672,6 +1779,7 @@ def test_remove_queried_address_on_account_remove(data_dir, username, sql_vm_ins
     with data.db.conn.read_ctx() as cursor:
         addresses = queried_addresses.get_queried_addresses_for_module(cursor, 'makerdao_vaults')
     assert addresses is None
+    data.logout()
 
 
 def test_int_overflow_at_tuple_insertion(database, caplog):
@@ -1682,7 +1790,7 @@ def test_int_overflow_at_tuple_insertion(database, caplog):
     caplog.set_level(logging.INFO)
     with database.user_write() as cursor:
         database.add_asset_movements(cursor, [AssetMovement(
-            location=Location.BITTREX,
+            location=Location.KRAKEN,
             category=AssetMovementCategory.DEPOSIT,
             timestamp=177778,
             address='0xfoo',
@@ -1762,7 +1870,7 @@ def test_values_are_present_in_db(database, enum_class, table_name):
 
     for enum_class_entry in enum_class:
         r = cursor.execute(query, (enum_class_entry.value,))
-        assert r.fetchone() == (1,)
+        assert r.fetchone() == (1,), f'The value {enum_class_entry.value} for {table_name} enum is not found in the db. Please add it in rotkehlchen/db/schema.py'  # noqa: E501
 
 
 def test_binance_pairs(user_data_dir, sql_vm_instructions_cb):
@@ -1788,6 +1896,7 @@ def test_binance_pairs(user_data_dir, sql_vm_instructions_cb):
         db.set_binance_pairs(write_cursor, 'binance', [], Location.BINANCE)
         query = db.get_binance_pairs('binance', Location.BINANCE)
     assert query == []
+    db.logout()
 
 
 def test_fresh_db_adds_version(user_data_dir, sql_vm_instructions_cb):
@@ -1810,6 +1919,7 @@ def test_fresh_db_adds_version(user_data_dir, sql_vm_instructions_cb):
     query = query.fetchall()
     assert len(query) != 0
     assert int(query[0][0]) == ROTKEHLCHEN_DB_VERSION
+    db.logout()
 
 
 def test_db_schema_sanity_check(database: 'DBHandler', caplog) -> None:
@@ -1858,3 +1968,45 @@ def test_db_add_skipped_external_event_twice(database: 'DBHandler') -> None:
                 extra_data=None,
             )
             assert write_cursor.execute('SELECT COUNT(*) FROM skipped_external_events').fetchone()[0] == 1  # noqa: E501
+
+
+@pytest.mark.parametrize('db_settings', [
+    {
+        'non_syncing_exchanges': [
+            ExchangeLocationID(name='Coinbase', location=Location.COINBASE),
+            ExchangeLocationID(name='Bittrex', location=Location.BITTREX),
+            ExchangeLocationID(name='Ftx', location=Location.FTX),
+        ],
+    },
+])
+def test_startup_check_settings(database: 'DBHandler') -> None:
+    """
+    Test that after first connection we remove locations from the non syncing exchanges setting
+    that are no longer available in the app
+    """
+    database._run_actions_after_first_connection()
+    with database.conn.read_ctx() as cursor:
+        settings: DBSettings = database.get_settings(cursor)
+
+    assert settings.non_syncing_exchanges == [
+        ExchangeLocationID(name='Coinbase', location=Location.COINBASE),
+    ]
+
+
+def test_address_book_primary_key(database: DBHandler):
+    """Test that adding the same address twice to the database having
+    the blockchain value as None fails because duplicates can't be added.
+
+    Regression test for https://github.com/rotki/rotki/issues/8350
+    """
+    db_addressbook = DBAddressbook(database)
+    address = string_to_evm_address('0xc37b40ABdB939635068d3c5f13E7faF686F03B65')
+    entries = [
+        AddressbookEntry(address=address, name='yabir.eth', blockchain=None),
+        AddressbookEntry(address=address, name='yabirgb.eth', blockchain=None),
+    ]
+    with (
+        database.user_write() as write_cursor,
+        pytest.raises(InputError),
+    ):
+        db_addressbook.add_addressbook_entries(write_cursor=write_cursor, entries=entries)

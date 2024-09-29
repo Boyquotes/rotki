@@ -1,39 +1,29 @@
 <script setup lang="ts">
-import { useListeners } from 'vue';
 import IMask, { type InputMask } from 'imask';
+
+defineOptions({
+  inheritAttrs: false,
+});
 
 const props = withDefaults(
   defineProps<{
     integer?: boolean;
-    value?: string;
+    hideDetails?: boolean;
   }>(),
   {
     integer: false,
-    value: ''
-  }
+    hideDetails: false,
+  },
 );
 
-const emit = defineEmits<{
-  (e: 'input', value: string): void;
-}>();
+const model = defineModel<string>({ required: true });
 
-const attrs = useAttrs();
-const slots = useSlots();
-const listeners = useListeners();
+const { integer } = toRefs(props);
+const { thousandSeparator, decimalSeparator } = storeToRefs(useFrontendSettingsStore());
 
-const filteredListeners = (listeners: any) => ({
-  ...listeners,
-  input: () => {}
-});
-
-const { integer, value } = toRefs(props);
-const { thousandSeparator, decimalSeparator } = storeToRefs(
-  useFrontendSettingsStore()
-);
-
-const textInput: Ref<any> = ref(null);
-const imask: Ref<InputMask<any> | null> = ref(null);
-const currentValue: Ref<string> = ref('');
+const textInput = ref<any>(null);
+const imask = ref<InputMask<any> | null>(null);
+const currentValue = ref<string>('');
 
 onMounted(() => {
   const inputWrapper = get(textInput)!;
@@ -43,10 +33,18 @@ onMounted(() => {
     mask: Number,
     thousandsSeparator: get(thousandSeparator),
     radix: get(decimalSeparator),
-    scale: get(integer) ? 0 : 100
+    scale: get(integer) ? 0 : 100,
   });
 
-  const propValue = get(value);
+  newImask.on('accept', () => {
+    const mask = get(imask);
+    if (mask) {
+      set(currentValue, mask?.value || '');
+      set(model, mask?.unmaskedValue || '');
+    }
+  });
+
+  const propValue = get(model);
   if (propValue) {
     newImask.unmaskedValue = propValue;
     set(currentValue, newImask.value);
@@ -55,7 +53,7 @@ onMounted(() => {
   set(imask, newImask);
 });
 
-watch(value, value => {
+watch(model, (value) => {
   const imaskVal = get(imask);
   if (imaskVal) {
     imaskVal.unmaskedValue = value;
@@ -63,58 +61,43 @@ watch(value, value => {
   }
 });
 
-watch(
-  () => get(imask)?.unmaskedValue,
-  unmasked => {
-    const value = get(imask)?.value || '';
-    set(currentValue, value);
-    emit('input', unmasked || '');
-  }
-);
-
-watch(
-  () => get(imask)?.value,
-  value => {
-    set(currentValue, value);
-    get(imask)?.updateValue();
-  }
-);
-
-const focus = () => {
+function focus() {
   const inputWrapper = get(textInput) as any;
-  if (inputWrapper) {
+  if (inputWrapper)
     inputWrapper.focus();
-  }
-};
+}
 
 defineExpose({
-  focus
+  focus,
 });
 
-const onFocus = () => {
+function onFocus() {
   const inputWrapper = get(textInput)!;
   const input = inputWrapper.$el.querySelector('input') as HTMLInputElement;
 
   nextTick(() => {
     input.value = get(currentValue);
   });
-};
+}
 </script>
 
 <template>
-  <VTextField
+  <RuiTextField
     ref="textInput"
-    :value="currentValue"
-    v-bind="attrs"
-    v-on="filteredListeners(listeners)"
+    color="primary"
+    :model-value="currentValue"
+    v-bind="$attrs"
+    :hide-details="hideDetails"
     @focus="onFocus()"
   >
-    <!-- Pass on all named slots -->
-    <slot v-for="slot in Object.keys(slots)" :slot="slot" :name="slot" />
-
-    <!-- Pass on all scoped slots -->
-    <template v-for="slot in Object.keys($scopedSlots)" #[slot]="scope">
-      <slot v-bind="scope" :name="slot" />
+    <template
+      v-for="(_, name) in $slots"
+      #[name]="scope"
+    >
+      <slot
+        v-bind="scope"
+        :name="name"
+      />
     </template>
-  </VTextField>
+  </RuiTextField>
 </template>

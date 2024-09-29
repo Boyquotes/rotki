@@ -1,59 +1,16 @@
-import json
-import warnings as test_warnings
 from http import HTTPStatus
 from unittest.mock import patch
 
 import pytest
-import requests
 
-from rotkehlchen.assets.converters import asset_from_bitpanda
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import A_ADA, A_BEST, A_ETH, A_EUR, A_LTC, A_USDT
-from rotkehlchen.errors.asset import UnknownAsset
-from rotkehlchen.errors.misc import RemoteError
 from rotkehlchen.exchanges.data_structures import AssetMovement, Trade, TradeType
 from rotkehlchen.fval import FVal
 from rotkehlchen.tests.utils.constants import A_AXS, A_TRY
 from rotkehlchen.tests.utils.mock import MockResponse
 from rotkehlchen.types import AssetMovementCategory, Location
 from rotkehlchen.utils.misc import ts_now
-from rotkehlchen.utils.serialization import jsonloads_list
-
-
-def test_bitpanda_exchange_assets_are_known():
-    """Since normal Bitpanda API has no endpoint listing supposrted assets
-    https://developers.bitpanda.com/platform/#bitpanda-public-api
-
-    Bitpanda PRO leasts some of the same assets but not all. So this test catches some,
-    but unfortunately not all assets
-    """
-    request_url = 'https://api.exchange.bitpanda.com/public/v1/currencies'
-    try:
-        response = requests.get(request_url)
-    except requests.exceptions.RequestException as e:
-        raise RemoteError(
-            f'Bitpanda get request at {request_url} connection error: {e!s}.',
-        ) from e
-
-    if response.status_code != 200:
-        raise RemoteError(
-            f'Bitpanda query responded with error status code: {response.status_code} '
-            f'and text: {response.text}',
-        )
-    try:
-        response_list = jsonloads_list(response.text)
-    except json.JSONDecodeError as e:
-        raise RemoteError(f'Bitpanda returned invalid JSON response: {response.text}') from e
-
-    for entry in response_list:
-        try:
-            asset_from_bitpanda(entry['code'])
-        except UnknownAsset as e:
-            test_warnings.warn(UserWarning(
-                f'Found unknown asset {e.identifier} in bitpanda. '
-                f'Support for it has to be added',
-            ))
-
 
 WALLETS_RESPONSE = """{"data":[
 {"type":"wallet","attributes":{"cryptocoin_id":"1","cryptocoin_symbol":"BTC","balance":"0.00000000","is_default":true,"name":"BTC Wallet","pending_transactions_count":0,"deleted":false,"is_index":false},"id":"b52800aa-61f6-4251-a970-e53a864ebeaa"},
@@ -264,6 +221,17 @@ def test_asset_movements(mock_bitpanda):
 
     expected_movements = [AssetMovement(
         location=Location.BITPANDA,
+        category=AssetMovementCategory.WITHDRAWAL,
+        address='0x54dca71a34f498e3053cba240895e51da5f89d24',
+        transaction_id='0xe45c1befc0968d2dab0374bc8d1aa3e193136dc769596d42e4d3274475bc7c60',
+        timestamp=1597072246,
+        asset=A_ETH,
+        amount=FVal('1.55165264'),
+        fee_asset=A_ETH,
+        fee=FVal('0.00762000'),
+        link='XXX',
+    ), AssetMovement(
+        location=Location.BITPANDA,
         category=AssetMovementCategory.DEPOSIT,
         address=None,
         transaction_id=None,
@@ -294,17 +262,6 @@ def test_asset_movements(mock_bitpanda):
         amount=FVal('6608.34105600'),
         fee_asset=A_USDT,
         fee=ZERO,
-        link='XXX',
-    ), AssetMovement(
-        location=Location.BITPANDA,
-        category=AssetMovementCategory.WITHDRAWAL,
-        address='0x54dca71a34f498e3053cba240895e51da5f89d24',
-        transaction_id='0xe45c1befc0968d2dab0374bc8d1aa3e193136dc769596d42e4d3274475bc7c60',
-        timestamp=1597072246,
-        asset=A_ETH,
-        amount=FVal('1.55165264'),
-        fee_asset=A_ETH,
-        fee=FVal('0.00762000'),
         link='XXX',
     )]
     assert expected_movements == movements

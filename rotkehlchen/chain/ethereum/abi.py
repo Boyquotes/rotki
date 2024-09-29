@@ -32,7 +32,7 @@ def decode_event_data_abi_str(
         abi_json: str,
 ) -> tuple[list, list]:
     """This is an adjustment of web3's event data decoding to work with our code
-    source: https://github.com/ethereum/web3.py/blob/ffe59daf10edc19ee5f05227b25bac8d090e8aa4/web3/_utils/events.py#L201
+    source: https://github.com/ethereum/web3.py/blob/8f853f5841fd62187bce0c9f17be75627104ca43/web3/_utils/events.py#L214
 
     Returns a tuple containing the decoded topic data and decoded log data.
 
@@ -51,7 +51,7 @@ def decode_event_data_abi(
         event_abi: dict[str, Any],
 ) -> tuple[list, list]:
     """This is an adjustment of web3's event data decoding to work with our code
-    source: https://github.com/ethereum/web3.py/blob/ffe59daf10edc19ee5f05227b25bac8d090e8aa4/web3/_utils/events.py#L201
+    source: https://github.com/ethereum/web3.py/blob/8f853f5841fd62187bce0c9f17be75627104ca43/web3/_utils/events.py#L214
 
     Returns a tuple containing the decoded topic data and decoded log data.
 
@@ -74,10 +74,9 @@ def decode_event_data_abi(
     log_topic_names = get_abi_input_names(ABIEvent({'inputs': log_topics_abi}))
 
     if len(topics) != len(log_topic_types):
-        raise DeserializationError('Expected {} log topics.  Got {}'.format(
-            len(log_topic_types),
-            len(topics),
-        ))
+        raise DeserializationError(
+            f'Expected {len(log_topic_types)} log topics.  Got {len(topics)}',
+        )
 
     # type ignored b/c event_abi is a Dict which is an ABIEvent
     log_data_abi = exclude_indexed_event_inputs(event_abi)  # type: ignore
@@ -94,16 +93,15 @@ def decode_event_data_abi(
             f"between event inputs: '{', '.join(duplicate_names)}'",
         )
 
-    decoded_log_data = WEB3.codec.decode_abi(log_data_types, tx_log.data)
+    decoded_log_data = WEB3.codec.decode(log_data_types, tx_log.data)
     normalized_log_data = map_abi_data(
         BASE_RETURN_NORMALIZERS,
         log_data_types,
         decoded_log_data,
     )
     decoded_topic_data = [
-        WEB3.codec.decode_single(topic_type, topic_data)
-        for topic_type, topic_data
-        in zip(log_topic_types, topics, strict=True)  # checked above
+        WEB3.codec.decode([topic_type], topic_data)[0]
+        for topic_type, topic_data in zip(log_topic_types, topics, strict=False)
     ]
     normalized_topic_data = map_abi_data(
         BASE_RETURN_NORMALIZERS,

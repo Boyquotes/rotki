@@ -9,6 +9,7 @@ import gevent
 import pytest
 
 from rotkehlchen.constants.assets import A_EUR
+from rotkehlchen.db.cache import DBCacheStatic
 from rotkehlchen.db.settings import ModifiableDBSettings
 from rotkehlchen.errors.api import (
     IncorrectApiKeyFormat,
@@ -34,9 +35,7 @@ if TYPE_CHECKING:
 
 @pytest.fixture(name='premium_remote_data')
 def fixture_load_remote_premium_data() -> bytes:
-    remote_db_path = Path(__file__).resolve().parent.parent / 'data' / 'remote_encrypted_db.bin'
-    with open(remote_db_path, 'rb') as f:
-        return f.read()
+    return (Path(__file__).resolve().parent.parent / 'data' / 'remote_encrypted_db.bin').read_bytes()  # noqa: E501
 
 
 @pytest.mark.parametrize('start_with_valid_premium', [True])
@@ -52,12 +51,17 @@ def test_upload_data_to_server(
 ) -> None:
     """Test our side of uploading data to the server"""
     with rotkehlchen_instance.data.db.conn.read_ctx() as cursor:
-        last_ts = rotkehlchen_instance.data.db.get_setting(cursor, name='last_data_upload_ts')
-        assert last_ts == 0
+        last_ts = rotkehlchen_instance.data.db.get_static_cache(
+            cursor=cursor, name=DBCacheStatic.LAST_DATA_UPLOAD_TS,
+        )
+        assert last_ts is None
 
     with rotkehlchen_instance.data.db.user_write() as write_cursor:
         # Write anything in the DB to set a non-zero last_write_ts
-        rotkehlchen_instance.data.db.set_settings(write_cursor, ModifiableDBSettings(main_currency=A_GBP.resolve_to_fiat_asset()))  # noqa: E501
+        rotkehlchen_instance.data.db.set_settings(
+            write_cursor,
+            ModifiableDBSettings(main_currency=A_GBP.resolve_to_fiat_asset()),
+        )
 
     with rotkehlchen_instance.data.db.conn.read_ctx() as cursor:
         last_write_ts = rotkehlchen_instance.data.db.get_setting(cursor, name='last_write_ts')
@@ -83,7 +87,7 @@ def test_upload_data_to_server(
         return MockResponse(200, '{"success": true}')
 
     assert rotkehlchen_instance.premium is not None
-    patched_put = patch.object(
+    patched_post = patch.object(
         rotkehlchen_instance.premium.session,
         'post',
         side_effect=mock_succesfull_upload_data_to_server,
@@ -98,27 +102,29 @@ def test_upload_data_to_server(
     )
 
     with rotkehlchen_instance.data.db.conn.read_ctx() as cursor:
-        assert rotkehlchen_instance.data.db.get_setting(cursor, name='last_data_upload_ts') == 0
+        assert rotkehlchen_instance.data.db.get_static_cache(cursor=cursor, name=DBCacheStatic.LAST_DATA_UPLOAD_TS) is None  # noqa: E501
 
     now = ts_now()
-    with patched_get, patched_put:
+    with patched_get, patched_post:
         tasks = rotkehlchen_instance.task_manager._maybe_schedule_db_upload()  # type: ignore[union-attr]  # task_manager can't be none here
         if tasks is not None:
             gevent.wait(tasks)
 
         if db_settings['premium_should_sync'] is False:
             with rotkehlchen_instance.data.db.conn.read_ctx() as cursor:
-                assert rotkehlchen_instance.data.db.get_setting(cursor, name='last_data_upload_ts') == 0  # noqa: E501
+                assert rotkehlchen_instance.data.db.get_static_cache(cursor=cursor, name=DBCacheStatic.LAST_DATA_UPLOAD_TS) is None  # noqa: E501
             assert rotkehlchen_instance.premium_sync_manager.last_data_upload_ts == 0
             return
 
         with rotkehlchen_instance.data.db.conn.read_ctx() as cursor:
-            last_ts = rotkehlchen_instance.data.db.get_setting(cursor, name='last_data_upload_ts')
-        msg = 'The last data upload timestamp should have been saved in the db as now'
-        assert last_ts >= now and last_ts - now < 50, msg
+            last_ts = rotkehlchen_instance.data.db.get_static_cache(cursor=cursor, name=DBCacheStatic.LAST_DATA_UPLOAD_TS)  # noqa: E501
+        db_msg = 'The last data upload timestamp should have been saved in the db as now'
+        memory_msg = 'The last data upload timestamp should also be in memory'
+        assert last_ts is not None, db_msg
+        assert rotkehlchen_instance.premium_sync_manager.last_data_upload_ts is not None, memory_msg  # noqa: E501
+        assert last_ts >= now and last_ts - now < 50, db_msg
         last_ts = rotkehlchen_instance.premium_sync_manager.last_data_upload_ts
-        msg = 'The last data upload timestamp should also be in memory'
-        assert last_ts >= now and last_ts - now < 50, msg
+        assert last_ts >= now and last_ts - now < 50, memory_msg
 
     # and now logout and login again and make sure that the last_data_upload_ts is correct
     rotkehlchen_instance.logout()
@@ -130,16 +136,18 @@ def test_upload_data_to_server(
     )
     assert last_ts == rotkehlchen_instance.premium_sync_manager.last_data_upload_ts
     with rotkehlchen_instance.data.db.conn.read_ctx() as cursor:
-        assert last_ts == rotkehlchen_instance.data.db.get_setting(cursor, name='last_data_upload_ts')  # noqa: E501
+        assert last_ts == rotkehlchen_instance.data.db.get_static_cache(cursor=cursor, name=DBCacheStatic.LAST_DATA_UPLOAD_TS)  # noqa: E501
 
 
 @pytest.mark.parametrize('start_with_valid_premium', [True])
 def test_upload_data_to_server_same_hash(rotkehlchen_instance):
     """Test that if the server has same data hash as we no upload happens"""
     with rotkehlchen_instance.data.db.conn.read_ctx() as cursor:
-        last_ts = rotkehlchen_instance.data.db.get_setting(cursor, name='last_data_upload_ts')
+        last_ts = rotkehlchen_instance.data.db.get_static_cache(
+            cursor=cursor, name=DBCacheStatic.LAST_DATA_UPLOAD_TS,
+        )
 
-    assert last_ts == 0
+    assert last_ts is None
     with rotkehlchen_instance.data.db.user_write() as write_cursor:
         # Write anything in the DB to set a non-zero last_write_ts
         rotkehlchen_instance.data.db.set_settings(write_cursor, ModifiableDBSettings(main_currency=A_EUR))  # noqa: E501
@@ -147,10 +155,10 @@ def test_upload_data_to_server_same_hash(rotkehlchen_instance):
     _, our_hash = rotkehlchen_instance.data.compress_and_encrypt_db()
     remote_hash = our_hash
 
-    patched_put = patch.object(
+    patched_post = patch.object(
         rotkehlchen_instance.premium.session,
-        'put',
-        return_value=None,
+        'post',
+        return_value=MockResponse(200, '{"success": true}'),
     )
     patched_get = create_patched_requests_get_for_premium(
         session=rotkehlchen_instance.premium.session,
@@ -161,27 +169,33 @@ def test_upload_data_to_server_same_hash(rotkehlchen_instance):
         saved_data='foo',
     )
 
-    with patched_get, patched_put as put_mock:
+    with patched_get, patched_post as post_mock:
         rotkehlchen_instance.premium_sync_manager.maybe_upload_data_to_server()
         # The upload mock should not have been called since the hash is the same
-        assert not put_mock.called
+        assert not post_mock.called
 
 
 @pytest.mark.parametrize('start_with_valid_premium', [True])
-def test_upload_data_to_server_smaller_db(rotkehlchen_instance):
+@pytest.mark.parametrize('db_settings', [
+    {'ask_user_upon_size_discrepancy': True},
+    {'ask_user_upon_size_discrepancy': False},
+])
+def test_upload_data_to_server_smaller_db(rotkehlchen_instance, db_settings: dict[str, bool]):
     """Test that if the server has bigger DB size no upload happens"""
     with rotkehlchen_instance.data.db.user_write() as cursor:
-        last_ts = rotkehlchen_instance.data.db.get_setting(cursor, name='last_data_upload_ts')
-        assert last_ts == 0
+        last_ts = rotkehlchen_instance.data.db.get_static_cache(
+            cursor=cursor, name=DBCacheStatic.LAST_DATA_UPLOAD_TS,
+        )
+        assert last_ts is None
         # Write anything in the DB to set a non-zero last_write_ts
-        rotkehlchen_instance.data.db.set_settings(cursor, ModifiableDBSettings(main_currency=A_EUR))  # noqa: E501
+        rotkehlchen_instance.data.db.set_settings(cursor, ModifiableDBSettings(main_currency=A_EUR.resolve_to_asset_with_oracles()))  # noqa: E501
     _, our_hash = rotkehlchen_instance.data.compress_and_encrypt_db()
     remote_hash = get_different_hash(our_hash)
 
-    patched_put = patch.object(
+    patched_post = patch.object(
         rotkehlchen_instance.premium.session,
-        'put',
-        return_value=None,
+        'post',
+        return_value=MockResponse(200, '{"success": true}'),
     )
     patched_get = create_patched_requests_get_for_premium(
         session=rotkehlchen_instance.premium.session,
@@ -189,13 +203,17 @@ def test_upload_data_to_server_smaller_db(rotkehlchen_instance):
         metadata_data_hash=remote_hash,
         # larger DB than ours
         metadata_data_size=9999999999,
-        saved_data='foo',
+        saved_data=b'foo',
     )
 
-    with patched_get, patched_put as put_mock:
+    with patched_get, patched_post as post_mock:
         rotkehlchen_instance.premium_sync_manager.maybe_upload_data_to_server()
-        # The upload mock should not have been called since the hash is the same
-        assert not put_mock.called
+        if db_settings['ask_user_upon_size_discrepancy'] is True:
+            # Ensure upload mock is not called when `ask_user_upon_size_discrepancy` is set
+            assert not post_mock.called
+        else:
+            # Ensure upload mock is called when `ask_user_upon_size_discrepancy` is unset
+            assert post_mock.called
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -256,9 +274,6 @@ def test_try_premium_at_start_new_account_pull_old_data(
 
     For a new account
     """
-    with open(Path(__file__).resolve().parent.parent / 'data' / 'remote_old_encrypted_db.bin', 'rb') as f:  # noqa: E501
-        remote_data = f.read()
-
     setup_starting_environment(
         rotkehlchen_instance=rotkehlchen_instance,
         username=username,
@@ -267,7 +282,7 @@ def test_try_premium_at_start_new_account_pull_old_data(
         same_hash_with_remote=False,
         newer_remote_db=True,
         db_can_sync_setting=False,
-        remote_data=remote_data,
+        remote_data=(Path(__file__).resolve().parent.parent / 'data' / 'remote_old_encrypted_db.bin').read_bytes(),  # noqa: E501
     )
     assert_db_got_replaced(rotkehlchen_instance=rotkehlchen_instance, username=username)
 
@@ -303,9 +318,6 @@ def test_try_premium_at_start_old_account_can_pull_old_data(
 
     For an old account
     """
-    with open(Path(__file__).resolve().parent.parent / 'data' / 'remote_encrypted_db.bin', 'rb') as f:  # noqa: E501
-        remote_data = f.read()
-
     setup_starting_environment(
         rotkehlchen_instance=rotkehlchen_instance,
         username=username,
@@ -314,7 +326,7 @@ def test_try_premium_at_start_old_account_can_pull_old_data(
         same_hash_with_remote=False,
         newer_remote_db=True,
         db_can_sync_setting=True,
-        remote_data=remote_data,
+        remote_data=(Path(__file__).resolve().parent.parent / 'data' / 'remote_encrypted_db.bin').read_bytes(),  # noqa: E501
     )
     assert_db_got_replaced(rotkehlchen_instance=rotkehlchen_instance, username=username)
 
@@ -494,17 +506,19 @@ def test_upload_data_to_server_db_already_in_use(rotkehlchen_instance):
     We emulate bigger size by just lowering sql_vm_instructions_cb to force a context switch
     """
     with rotkehlchen_instance.data.db.user_write() as cursor:
-        last_ts = rotkehlchen_instance.data.db.get_setting(cursor, name='last_data_upload_ts')
-        assert last_ts == 0
+        last_ts = rotkehlchen_instance.data.db.get_static_cache(
+            cursor=cursor, name=DBCacheStatic.LAST_DATA_UPLOAD_TS,
+        )
+        assert last_ts is None
         # Write anything in the DB to set a non-zero last_write_ts
         rotkehlchen_instance.data.db.set_settings(cursor, ModifiableDBSettings(main_currency=A_EUR))  # noqa: E501
     _, our_hash = rotkehlchen_instance.data.compress_and_encrypt_db()
     remote_hash = get_different_hash(our_hash)
 
-    patched_put = patch.object(
+    patched_post = patch.object(
         rotkehlchen_instance.premium.session,
-        'put',
-        return_value=None,
+        'post',
+        return_value=MockResponse(200, '{"success": true}'),
     )
     patched_get = create_patched_requests_get_for_premium(
         session=rotkehlchen_instance.premium.session,
@@ -515,7 +529,7 @@ def test_upload_data_to_server_db_already_in_use(rotkehlchen_instance):
         saved_data='foo',
     )
 
-    with patched_get, patched_put as put_mock:
+    with patched_get, patched_post as post_mock:
         a = gevent.spawn(rotkehlchen_instance.premium_sync_manager.maybe_upload_data_to_server)
         b = gevent.spawn(rotkehlchen_instance.premium_sync_manager.maybe_upload_data_to_server)
         greenlets = [a, b]
@@ -523,7 +537,7 @@ def test_upload_data_to_server_db_already_in_use(rotkehlchen_instance):
         for g in greenlets:
             assert g.exception is None, f'One of the greenlets had an exception: {g.exception}'
         # The upload mock should not have been called since the hash is the same
-        assert not put_mock.called
+        assert not post_mock.called
 
 
 @pytest.mark.parametrize('sql_vm_instructions_cb', [20])
@@ -555,18 +569,20 @@ def test_upload_data_to_server_db_locked(rotkehlchen_instance):
         assert len(result.fetchall()) == 1, 'the plaintext DB should not be attached here'
 
     with db.user_write() as cursor:
-        last_ts = rotkehlchen_instance.data.db.get_setting(cursor, name='last_data_upload_ts')
-        assert last_ts == 0
+        last_ts = rotkehlchen_instance.data.db.get_static_cache(
+            cursor=cursor, name=DBCacheStatic.LAST_DATA_UPLOAD_TS,
+        )
+        assert last_ts is None
         # Write anything in the DB to set a non-zero last_write_ts
         rotkehlchen_instance.data.db.set_settings(cursor, ModifiableDBSettings(main_currency=A_EUR))  # noqa: E501
 
     _, our_hash = rotkehlchen_instance.data.compress_and_encrypt_db()
     remote_hash = get_different_hash(our_hash)
 
-    patched_put = patch.object(
+    patched_post = patch.object(
         rotkehlchen_instance.premium.session,
-        'put',
-        return_value=None,
+        'post',
+        return_value=MockResponse(200, '{"success": true}'),
     )
     patched_get = create_patched_requests_get_for_premium(
         session=rotkehlchen_instance.premium.session,
@@ -578,14 +594,15 @@ def test_upload_data_to_server_db_locked(rotkehlchen_instance):
     )
 
     greenlets = []
-    with patched_get, patched_put as put_mock:
-        greenlets.append(gevent.spawn(rotkehlchen_instance.premium_sync_manager.maybe_upload_data_to_server))
-        greenlets.append(gevent.spawn(function_to_context_switch_to))
+    with patched_get, patched_post as post_mock:
+        greenlets.extend((
+            gevent.spawn(rotkehlchen_instance.premium_sync_manager.maybe_upload_data_to_server),
+            gevent.spawn(function_to_context_switch_to)))
         gevent.joinall(greenlets)
         for g in greenlets:
             assert g.exception is None, f'One of the greenlets had an exception: {g.exception}'
         # The upload mock should not have been called since the hash is the same
-        assert not put_mock.called
+        assert not post_mock.called
 
 
 @pytest.mark.parametrize('start_with_valid_premium', [True])
@@ -603,7 +620,7 @@ def test_error_db_too_big(rotkehlchen_instance: 'Rotkehlchen') -> None:
     assert rotkehlchen_instance.premium is not None
     _, our_hash = rotkehlchen_instance.data.compress_and_encrypt_db()
     remote_hash = get_different_hash(our_hash)
-    patched_put = patch.object(
+    patched_post = patch.object(
         rotkehlchen_instance.premium.session,
         'post',
         side_effect=mock_error_upload_data_to_server,
@@ -616,7 +633,7 @@ def test_error_db_too_big(rotkehlchen_instance: 'Rotkehlchen') -> None:
         metadata_data_size=2,
         saved_data=b'foo',
     )
-    with patched_get, patched_put:
+    with patched_get, patched_post:
         status, error = rotkehlchen_instance.premium_sync_manager.maybe_upload_data_to_server()
 
     assert status is False

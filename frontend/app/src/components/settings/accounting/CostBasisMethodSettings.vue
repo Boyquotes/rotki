@@ -1,42 +1,43 @@
 <script setup lang="ts">
-import { useListeners } from 'vue';
+import type { CostBasisMethod } from '@/types/user';
 
-const rootAttrs = useAttrs();
-const rootListeners = useListeners();
+defineOptions({
+  inheritAttrs: false,
+});
+
+defineProps<{
+  label: string;
+  successMessages: string[];
+  errorMessages: string[];
+}>();
+
+const modelValue = defineModel<CostBasisMethod>({ required: true });
+
 const { costBasisMethodData } = useCostBasisMethod();
 </script>
 
 <template>
-  <VSelect
-    v-bind="rootAttrs"
-    outlined
-    persistent-hint
-    item-value="identifier"
-    item-text="identifier"
-    :items="costBasisMethodData"
-    v-on="rootListeners"
+  <RuiMenuSelect
+    v-bind="$attrs"
+    v-model="modelValue"
+    :label="label"
+    :success-messages="successMessages"
+    :error-messages="errorMessages"
+    :options="costBasisMethodData"
+    variant="outlined"
+    key-attr="identifier"
   >
-    <template #item="{ item, attrs, on }">
-      <VListItem v-bind="attrs" v-on="on">
-        <VListItemContent>
-          <VListItemTitle :class="$style.title">
-            {{ item.identifier }}
-          </VListItemTitle>
-          <VListItemSubtitle>
-            {{ item.label }}
-          </VListItemSubtitle>
-        </VListItemContent>
-      </VListItem>
-    </template>
     <template #selection="{ item }">
-      <span :class="$style.title">{{ item.identifier }}</span>
+      <span class="font-medium uppercase">{{ item.identifier }}</span>
     </template>
-  </VSelect>
+    <template #item="{ item }">
+      <ListItem
+        no-padding
+        no-hover
+        class="!py-0"
+        :title="item.identifier.toUpperCase()"
+        :subtitle="item.label"
+      />
+    </template>
+  </RuiMenuSelect>
 </template>
-
-<style module lang="scss">
-.title {
-  text-transform: uppercase;
-  font-weight: 500;
-}
-</style>

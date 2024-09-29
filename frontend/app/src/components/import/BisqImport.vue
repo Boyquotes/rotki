@@ -5,13 +5,19 @@ const { t } = useI18n();
 <template>
   <ImportSource source="bisq_trades">
     <template #upload-title>
-      <i18n tag="span" path="import_data.bisq.import">
+      <i18n-t
+        tag="span"
+        keypath="import_data.bisq.import"
+      >
         <strong>{{ t('import_data.bisq.import_trade') }}</strong>
-      </i18n>
+      </i18n-t>
     </template>
-    <i18n tag="span" path="import_data.note">
+    <i18n-t
+      tag="span"
+      keypath="import_data.note"
+    >
       <strong>{{ t('import_data.bisq.name') }}</strong>
-    </i18n>
+    </i18n-t>
     <ul class="list-disc">
       <li>{{ t('import_data.bisq.line_one') }}</li>
     </ul>

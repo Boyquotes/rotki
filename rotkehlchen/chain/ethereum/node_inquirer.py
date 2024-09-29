@@ -3,12 +3,11 @@ from collections.abc import Sequence
 from contextlib import suppress
 from typing import TYPE_CHECKING, Literal, overload
 
-import requests
-from ens.abis import RESOLVER as ENS_RESOLVER_ABI
+from ens.abis import PUBLIC_RESOLVER_2 as ENS_RESOLVER_ABI
+from ens.constants import ENS_MAINNET_ADDR
 from ens.exceptions import InvalidName
-from ens.main import ENS_MAINNET_ADDR
 from ens.utils import is_none_or_zero_address, normal_name_to_hash, normalize_name
-from eth_typing import BlockNumber, HexStr
+from eth_typing import HexStr
 from web3 import Web3
 
 from rotkehlchen.chain.constants import DEFAULT_EVM_RPC_TIMEOUT
@@ -19,7 +18,6 @@ from rotkehlchen.chain.ethereum.constants import (
     ETHEREUM_ETHERSCAN_NODE,
     PRUNED_NODE_CHECK_TX_HASH,
 )
-from rotkehlchen.chain.ethereum.graph import Graph
 from rotkehlchen.chain.evm.contracts import EvmContracts
 from rotkehlchen.chain.evm.node_inquirer import (
     WEB3_LOGQUERY_BLOCK_RANGE,
@@ -27,7 +25,7 @@ from rotkehlchen.chain.evm.node_inquirer import (
 )
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants.assets import A_ETH
-from rotkehlchen.errors.misc import InputError, RemoteError, UnableToDecryptRemoteData
+from rotkehlchen.errors.misc import InputError, RemoteError
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.externalapis.blockscout import Blockscout
 from rotkehlchen.fval import FVal
@@ -42,11 +40,9 @@ from rotkehlchen.types import (
     Timestamp,
 )
 from rotkehlchen.utils.misc import get_chunks
-from rotkehlchen.utils.network import request_get_dict
 
 from .constants import ETH2_DEPOSIT_ADDRESS, ETHEREUM_ETHERSCAN_NODE_NAME, WeightedNode
 from .etherscan import EthereumEtherscan
-from .utils import ENS_RESOLVER_ABI_MULTICHAIN_ADDRESS
 
 if TYPE_CHECKING:
     from rotkehlchen.db.dbhandler import DBHandler
@@ -84,11 +80,15 @@ class EthereumInquirer(DSProxyInquirerWithCacheData):
             contract_scan=contracts.contract(string_to_evm_address('0x86F25b64e1Fe4C5162cDEeD5245575D32eC549db')),
             dsproxy_registry=contracts.contract(string_to_evm_address('0x4678f0a6958e4D2Bc4F1BAF7Bc52E8F3564f3fE4')),
             native_token=A_ETH.resolve_to_crypto_asset(),
+            blockscout=Blockscout(
+                blockchain=SupportedBlockchain.ETHEREUM,
+                database=database,
+                msg_aggregator=database.msg_aggregator,
+            ),
         )
         self.etherscan: EthereumEtherscan
-        self.blocks_subgraph = Graph('https://api.thegraph.com/subgraphs/name/blocklytics/ethereum-blocks')
         self.ens_reverse_records = self.contracts.contract(string_to_evm_address('0x3671aE578E63FdF66ad4F3E12CC0c0d71Ac7510C'))  # noqa: E501
-        self.blockscout = Blockscout(database=database, msg_aggregator=database.msg_aggregator)
+        self.blockscout: Blockscout  # for ethereum blockscout is never None since it's used for the withdrawals  # noqa: E501
 
     def ens_reverse_lookup(self, addresses: list[ChecksumEvmAddress]) -> dict[ChecksumEvmAddress, str | None]:  # noqa: E501
         """Performs a reverse ENS lookup on a list of addresses
@@ -181,14 +181,6 @@ class EthereumInquirer(DSProxyInquirerWithCacheData):
     ) -> ChecksumEvmAddress | HexStr | None:
         """Performs an ENS lookup and returns address if found else None
 
-        TODO: currently web3.py 5.15.0 does not support multichain ENS domains
-        (EIP-2304), therefore requesting a non-Ethereum address won't use the
-        web3 ens library and will require to extend the library resolver ABI.
-        An issue in their repo (#1839) reporting the lack of support has been
-        created. This function will require refactoring once they include
-        support for EIP-2304.
-        https://github.com/ethereum/web3.py/issues/1839
-
         May raise:
         - RemoteError if Etherscan is used and there is a problem querying it or
         parsing its response
@@ -202,7 +194,6 @@ class EthereumInquirer(DSProxyInquirerWithCacheData):
         ens_resolver_abi = ENS_RESOLVER_ABI.copy()
         arguments = [normal_name_to_hash(normal_name)]
         if blockchain != SupportedBlockchain.ETHEREUM:
-            ens_resolver_abi.extend(ENS_RESOLVER_ABI_MULTICHAIN_ADDRESS)
             arguments.append(blockchain.ens_coin_type())
 
         address = self._call_contract(
@@ -261,24 +252,6 @@ class EthereumInquirer(DSProxyInquirerWithCacheData):
 
     # -- Implementation of EvmNodeInquirer base methods --
 
-    def query_highest_block(self) -> BlockNumber:
-        log.debug('Querying blockcypher for ETH highest block', url=BLOCKCYPHER_URL)
-        eth_resp: dict[str, str] | None
-        try:
-            eth_resp = request_get_dict(BLOCKCYPHER_URL)
-        except (RemoteError, UnableToDecryptRemoteData, requests.exceptions.RequestException):
-            eth_resp = None
-
-        block_number: int | None
-        if eth_resp and 'height' in eth_resp:
-            block_number = int(eth_resp['height'])
-            log.debug('ETH highest block result', block=block_number)
-        else:
-            block_number = self.etherscan.get_latest_block_number()
-            log.debug('ETH highest block result', block=block_number)
-
-        return BlockNumber(block_number)
-
     def _get_pruned_check_tx_hash(self) -> EVMTxHash:
         return PRUNED_NODE_CHECK_TX_HASH
 
@@ -289,35 +262,9 @@ class EthereumInquirer(DSProxyInquirerWithCacheData):
             ARCHIVE_NODE_CHECK_EXPECTED_BALANCE,
         )
 
-    def _get_blocknumber_by_time_from_subgraph(self, ts: Timestamp) -> int:
-        """Queries Ethereum Blocks Subgraph for closest block at or before given timestamp"""
-        response = self.blocks_subgraph.query(
-            f"""
-            {{
-                blocks(
-                    first: 1, orderBy: timestamp, orderDirection: desc,
-                    where: {{timestamp_lte: "{ts}"}}
-                ) {{
-                    id
-                    number
-                    timestamp
-                }}
-            }}
-            """,
-        )
-        try:
-            result = int(response['blocks'][0]['number'])
-        except (IndexError, KeyError) as e:
-            raise RemoteError(
-                f'Got unexpected ethereum blocks subgraph response: {response}',
-            ) from e
-        else:
-            return result
-
     def get_blocknumber_by_time(
             self,
             ts: Timestamp,
-            etherscan: bool = True,
             closest: Literal['before', 'after'] = 'before',
     ) -> int:
         """Searches for the blocknumber of a specific timestamp
@@ -325,11 +272,10 @@ class EthereumInquirer(DSProxyInquirerWithCacheData):
         - If RemoteError raised or etherscan flag set to false
             -> queries blocks subgraph
         """
-        if etherscan:
-            with suppress(RemoteError):
-                return self.etherscan.get_blocknumber_by_time(ts, closest)
+        with suppress(RemoteError):
+            return self.etherscan.get_blocknumber_by_time(ts, closest)
 
-        return self._get_blocknumber_by_time_from_subgraph(ts)
+        return self.blockscout.get_blocknumber_by_time(ts, closest)
 
     # -- Implementation of EvmNodeInquirer optional methods --
 

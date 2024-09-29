@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { type ComputedRef, type Ref } from 'vue';
 import useVuelidate from '@vuelidate/core';
 import { helpers, required } from '@vuelidate/validators';
-import { type ProfitLossEvent } from '@/types/reports';
-import { type HistoricalPriceFormPayload } from '@/types/prices';
+import { toMessages } from '@/utils/validation';
+import type { ProfitLossEvent } from '@/types/reports';
+import type { HistoricalPriceFormPayload } from '@/types/prices';
 
 const props = defineProps<{
   event: ProfitLossEvent;
@@ -15,92 +15,98 @@ const { event, currency } = toRefs(props);
 const { getHistoricPrice } = useBalancePricesStore();
 const { addHistoricalPrice } = useAssetPricesApi();
 
-const fetchingPrice: Ref<boolean> = ref(false);
-const showDialog: Ref<boolean> = ref(false);
-const price: Ref<string> = ref('');
+const fetchingPrice = ref<boolean>(false);
+const showDialog = ref<boolean>(false);
+const price = ref<string>('');
 
-const openEditHistoricPriceDialog = async () => {
+async function openEditHistoricPriceDialog() {
   set(showDialog, true);
   set(fetchingPrice, true);
-  const { asset, timestamp } = get(event);
+  const { assetIdentifier, timestamp } = get(event);
   const historicPrice = await getHistoricPrice({
-    fromAsset: asset,
+    fromAsset: assetIdentifier,
     toAsset: get(currency),
-    timestamp
+    timestamp,
   });
   set(price, historicPrice.isPositive() ? historicPrice.toFixed() : '0');
   set(fetchingPrice, false);
-};
+}
 
-const datetime: ComputedRef<string> = computed(() =>
-  convertFromTimestamp(get(event).timestamp)
-);
+const datetime = computed<string>(() => convertFromTimestamp(get(event).timestamp));
 
 const { t } = useI18n();
 
 const rules = {
   price: {
-    required: helpers.withMessage(
-      t('price_form.price_non_empty').toString(),
-      required
-    )
-  }
+    required: helpers.withMessage(t('price_form.price_non_empty'), required),
+  },
 };
 
 const v$ = useVuelidate(
   rules,
   {
-    price
+    price,
   },
-  { $autoDirty: true }
+  { $autoDirty: true },
 );
 
 const { setMessage } = useMessageStore();
-const updatePrice = async () => {
+
+async function updatePrice() {
   const payload: HistoricalPriceFormPayload = {
-    fromAsset: get(event).asset,
+    fromAsset: get(event).assetIdentifier,
     toAsset: get(currency),
     timestamp: get(event).timestamp,
-    price: get(price)
+    price: get(price),
   };
 
   try {
     await addHistoricalPrice(payload);
     set(showDialog, false);
-  } catch (e: any) {
-    const values = { message: e.message };
+  }
+  catch (error: any) {
+    const values = { message: error.message };
     const title = t('price_management.add.error.title');
     const description = t('price_management.add.error.description', values);
     setMessage({
       title,
       description,
-      success: false
+      success: false,
     });
   }
-};
+}
 </script>
 
 <template>
   <div class="flex justify-end">
-    <VMenu transition="slide-y-transaction" max-width="250px" offset-y>
-      <template #activator="{ on }">
-        <RuiButton variant="text" class="!p-2" icon v-on="on">
+    <RuiMenu :popper="{ placement: 'bottom-end' }">
+      <template #activator="{ attrs }">
+        <RuiButton
+          variant="text"
+          class="!p-2"
+          icon
+          v-bind="attrs"
+        >
           <RuiIcon name="more-2-fill" />
         </RuiButton>
       </template>
-      <VList>
-        <VListItem link @click="openEditHistoricPriceDialog()">
-          <VListItemIcon class="mr-4">
+      <div class="py-2">
+        <RuiButton
+          variant="list"
+          @click="openEditHistoricPriceDialog()"
+        >
+          <template #prepend>
             <RuiIcon name="edit-line" />
-          </VListItemIcon>
-          <VListItemContent>
-            {{ t('profit_loss_events.edit_historic_price') }}
-          </VListItemContent>
-        </VListItem>
-      </VList>
-    </VMenu>
+          </template>
+          {{ t('profit_loss_events.edit_historic_price') }}
+        </RuiButton>
+      </div>
+    </RuiMenu>
 
-    <VDialog v-model="showDialog" max-width="450px">
+    <RuiDialog
+      v-model="showDialog"
+      max-width="450px"
+    >
       <RuiCard>
         <template #header>
           {{ t('profit_loss_events.edit_historic_price') }}
@@ -108,33 +114,32 @@ const updatePrice = async () => {
 
         <form class="flex flex-col gap-4">
           <AssetSelect
-            :value="event.asset"
+            :model-value="event.assetIdentifier"
             :label="t('price_form.from_asset')"
             hide-details
             disabled
             outlined
           />
           <AssetSelect
-            :value="currency"
+            :model-value="currency"
             :label="t('price_form.to_asset')"
             hide-details
             disabled
             outlined
           />
           <DateTimePicker
-            :value="datetime"
-            outlined
+            :model-value="datetime"
             disabled
             hide-details
             :label="t('common.datetime')"
           />
           <AmountInput
             v-model="price"
-            outlined
+            variant="outlined"
             :loading="fetchingPrice"
             :disabled="fetchingPrice"
             :label="t('common.price')"
-            :error-messages="v$.price.$errors.map(e => e.$message)"
+            :error-messages="toMessages(v$.price)"
           />
         </form>
 
@@ -144,14 +149,21 @@ const updatePrice = async () => {
 
         <template #footer>
           <div class="grow" />
-          <RuiButton variant="text" color="primary" @click="showDialog = false">
+          <RuiButton
+            variant="text"
+            color="primary"
+            @click="showDialog = false"
+          >
             {{ t('common.actions.cancel') }}
           </RuiButton>
-          <RuiButton color="primary" @click="updatePrice()">
+          <RuiButton
+            color="primary"
+            @click="updatePrice()"
+          >
             {{ t('price_form.update_price') }}
           </RuiButton>
         </template>
       </RuiCard>
-    </VDialog>
+    </RuiDialog>
   </div>
 </template>

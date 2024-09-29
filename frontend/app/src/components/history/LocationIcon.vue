@@ -11,8 +11,8 @@ const props = withDefaults(
     horizontal: false,
     icon: false,
     size: '24px',
-    noPadding: false
-  }
+    noPadding: false,
+  },
 );
 
 const emit = defineEmits<{ (e: 'click', location: string): void }>();
@@ -22,8 +22,6 @@ const { item } = toRefs(props);
 const { locationData } = useLocations();
 
 const location = locationData(item);
-
-const css = useCssModule();
 </script>
 
 <template>
@@ -33,33 +31,37 @@ const css = useCssModule();
     :class="{
       'flex-row gap-2': horizontal,
       'flex-col gap-1': !horizontal,
-      skeleton: !location,
-      [css.wrapper]: icon
+      'skeleton': !location,
+      [$style.wrapper]: icon,
     }"
     @click="emit('click', item)"
   >
     <template v-if="location">
-      <img
+      <AppImage
         v-if="location.image"
-        :width="size"
-        :height="size"
-        class="object-contain dark:p-[0.1rem] icon-bg max-w-full max-h-full"
-        :class="css.icon"
         :src="location.image"
         :alt="location.name"
-      />
-      <RuiIcon
-        v-else
-        color="secondary"
-        class="icon-bg dark:p-[0.1rem]"
+        contain
         :size="size"
-        :name="location.icon"
+        class="icon-bg"
       />
+      <div
+        v-else
+        class="icon-bg"
+      >
+        <RuiIcon
+          v-if="location.icon"
+          color="secondary"
+          :size="size"
+          :name="location.icon"
+        />
+      </div>
+
       <span
         v-if="!icon"
-        class="text-capitalize text-rui-text-secondary"
+        class="capitalize text-rui-text-secondary"
         :class="{
-          '-mb-1': !horizontal
+          '-mb-1 text-center': !horizontal,
         }"
       >
         {{ location.name }}
@@ -69,8 +71,7 @@ const css = useCssModule();
 </template>
 
 <style lang="scss" module>
-.wrapper,
-.icon {
+.wrapper {
   height: v-bind(size);
   width: v-bind(size);
 }

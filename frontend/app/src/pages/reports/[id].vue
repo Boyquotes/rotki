@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { type ComputedRef } from 'vue';
-import { Routes } from '@/router/routes';
-import { type SelectedReport } from '@/types/reports';
+import { NoteLocation } from '@/types/notes';
+import type { SelectedReport } from '@/types/reports';
 
 defineOptions({
-  name: 'ReportDetail'
+  name: 'ReportDetail',
+});
+
+definePage({
+  meta: {
+    canNavigateBack: true,
+    noteLocation: NoteLocation.PROFIT_LOSS_REPORTS,
+  },
 });
 
 const loading = ref(true);
@@ -13,12 +19,11 @@ const reportsStore = useReportsStore();
 const { report, reports } = storeToRefs(reportsStore);
 
 const { fetchReports, fetchReport, clearReport, isLatestReport } = reportsStore;
-const { premiumURL } = useInterop();
 const router = useRouter();
-const route = useRoute();
+const route = useRoute<'/reports/[id]'>();
 let firstPage = true;
 
-const selectedReport: ComputedRef<SelectedReport> = computed(() => get(report));
+const selectedReport = computed<SelectedReport>(() => get(report));
 const settings = computed(() => get(selectedReport).settings);
 
 const initialOpenReportActionable = ref<boolean>(false);
@@ -30,13 +35,12 @@ const latest = isLatestReport(reportId);
 const { t } = useI18n();
 
 onMounted(async () => {
-  if (get(reports).entries.length === 0) {
+  if (get(reports).entries.length === 0)
     await fetchReports();
-  }
+
   const success = await fetchReport(reportId);
-  if (!success) {
-    await router.push(Routes.PROFIT_LOSS_REPORTS);
-  }
+  if (!success)
+    router.push('/reports');
 
   if (get(route).query.openReportActionable) {
     set(initialOpenReportActionable, true);
@@ -46,22 +50,12 @@ onMounted(async () => {
 });
 
 const showUpgradeMessage = computed(
-  () =>
-    get(report).entriesLimit > 0 &&
-    get(report).entriesLimit < get(report).entriesFound
+  () => get(report).entriesLimit > 0 && get(report).entriesLimit < get(report).entriesFound,
 );
 
 onUnmounted(() => clearReport());
 
-const onPage = async ({
-  limit,
-  offset,
-  reportId
-}: {
-  reportId: number;
-  limit: number;
-  offset: number;
-}) => {
+async function onPage({ limit, offset, reportId }: { reportId: number; limit: number; offset: number }) {
   if (firstPage) {
     firstPage = false;
     return;
@@ -69,32 +63,38 @@ const onPage = async ({
   set(refreshing, true);
   await fetchReport(reportId, { limit, offset });
   set(refreshing, false);
-};
+}
 
-const regenerateReport = async () => {
+async function regenerateReport() {
   const { start, end } = get(report);
   await router.push({
-    path: Routes.PROFIT_LOSS_REPORTS,
+    path: '/reports',
     query: {
       regenerate: 'true',
       start: start.toString(),
-      end: end.toString()
-    }
+      end: end.toString(),
+    },
   });
-};
+}
 </script>
 
 <template>
   <ProgressScreen v-if="loading">
     {{ t('profit_loss_report.loading') }}
   </ProgressScreen>
-  <VContainer v-else>
+  <div
+    v-else
+    class="container"
+  >
     <div class="flex flex-col gap-8">
       <ReportHeader :period="report" />
-      <RuiAlert v-if="showUpgradeMessage" type="warning">
-        <i18n
+      <RuiAlert
+        v-if="showUpgradeMessage"
+        type="warning"
+      >
+        <i18n-t
           tag="div"
-          path="profit_loss_report.upgrade"
+          keypath="profit_loss_report.upgrade"
           class="text-subtitle-1"
         >
           <template #processed>
@@ -106,15 +106,18 @@ const regenerateReport = async () => {
               class="font-medium"
             />
           </template>
-        </i18n>
-        <i18n tag="div" path="profit_loss_report.upgrade2">
+        </i18n-t>
+        <i18n-t
+          tag="div"
+          keypath="profit_loss_report.upgrade2"
+        >
           <template #link>
-            <BaseExternalLink
+            <ExternalLink
               :text="t('upgrade_row.rotki_premium')"
-              :href="premiumURL"
+              premium
             />
           </template>
-        </i18n>
+        </i18n-t>
       </RuiAlert>
       <AccountingSettingsDisplay :accounting-settings="settings" />
       <div class="flex gap-2">
@@ -148,5 +151,5 @@ const regenerateReport = async () => {
         @update:page="onPage($event)"
       />
     </div>
-  </VContainer>
+  </div>
 </template>

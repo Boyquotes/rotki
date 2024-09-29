@@ -2,12 +2,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from rotkehlchen.chain.ethereum.modules.compound.v2.compound import Compound
+from rotkehlchen.chain.ethereum.modules.compound.compound import Compound
+from rotkehlchen.chain.ethereum.modules.liquity.trove import Liquity
 from rotkehlchen.constants import ONE
 from rotkehlchen.constants.assets import A_COMP, A_CUSDC, A_DAI, A_USDC, A_WBTC
 from rotkehlchen.fval import FVal
-from rotkehlchen.premium.premium import Premium, PremiumCredentials
-from rotkehlchen.types import ChecksumEvmAddress, Timestamp, deserialize_evm_tx_hash
+from rotkehlchen.types import ChecksumEvmAddress, Price, Timestamp, deserialize_evm_tx_hash
 from rotkehlchen.utils.misc import ts_now
 
 if TYPE_CHECKING:
@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from rotkehlchen.db.dbhandler import DBHandler
     from rotkehlchen.history.price import PriceHistorian
     from rotkehlchen.inquirer import Inquirer
+    from rotkehlchen.premium.premium import Premium
 
 
 TEST_ACCOUNTS = [
@@ -39,7 +40,7 @@ def test_compound_events_stats(
         database: 'DBHandler',
         ethereum_inquirer: 'EthereumInquirer',
         ethereum_transaction_decoder: 'EthereumTransactionDecoder',
-        rotki_premium_credentials: 'PremiumCredentials',
+        rotki_premium_object: 'Premium',
         inquirer: 'Inquirer',  # pylint: disable=unused-argument
         price_historian: 'PriceHistorian',  # pylint: disable=unused-argument
         ethereum_accounts: list[ChecksumEvmAddress],
@@ -71,11 +72,10 @@ def test_compound_events_stats(
         ignore_cache=True,
         tx_hashes=tx_hashes,
     )
-
     compound = Compound(
         ethereum_inquirer=ethereum_inquirer,
         database=database,
-        premium=Premium(credentials=rotki_premium_credentials, username=username),
+        premium=rotki_premium_object,
         msg_aggregator=database.msg_aggregator,
     )
     stats = compound.get_stats_for_addresses(
@@ -83,6 +83,7 @@ def test_compound_events_stats(
         from_timestamp=Timestamp(0),
         to_timestamp=ts_now(),
         given_defi_balances={},
+        given_eth_balances={},
     )
 
     # Check interest profit mappings
@@ -102,3 +103,18 @@ def test_compound_events_stats(
     # Check rewards mappings
     rewards_0 = stats['rewards']['0x65304d6aff5096472519ca86a6a1fea31cb47Ced']
     assert rewards_0[A_COMP].amount == FVal('0.06366460157923238')
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('ethereum_accounts', [TEST_ACCOUNTS])
+def test_liquity_tcr_non_exact_int(ethereum_inquirer: 'EthereumInquirer'):
+    liquity = Liquity(
+        ethereum_inquirer=ethereum_inquirer,
+        database=ethereum_inquirer.database,
+        premium=None,
+        msg_aggregator=ethereum_inquirer.database.msg_aggregator,
+    )
+    tcr = liquity._calculate_total_collateral_ratio(
+        eth_price=Price(FVal('3014.3297469828553224123')),
+    )
+    assert tcr == FVal('559.5721380010671944')

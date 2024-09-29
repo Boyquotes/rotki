@@ -1,25 +1,39 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
+import AutoDetectTokensSetting from '@/components/settings/general/AutoDetectTokensSetting.vue';
+import { NoteLocation } from '@/types/notes';
+
+definePage({
+  meta: {
+    noteLocation: NoteLocation.SETTINGS_GENERAL,
+  },
+});
+
 const amountExample = bigNumberify(123456.789);
 const { t } = useI18n();
 </script>
 
 <template>
-  <div class="general-settings mt-n8">
+  <div class="general-settings flex flex-col gap-8">
     <SettingCategory>
       <template #title>
         {{ t('general_settings.title') }}
       </template>
 
-      <UsageAnalyticsSetting />
-      <LanguageSetting class="mb-6" />
-      <VersionUpdateFrequencySetting />
-      <BalanceSaveFrequencySetting />
-      <DateDisplayFormatSetting />
-      <DateInputFormatSetting />
-      <DisplayDateInLocaltimeSetting />
-      <BtcDerivationGapLimitSetting />
-      <TreatEthAsEth2Setting />
-      <EvmChainsToIgnoreSettings />
+      <div class="flex flex-col gap-4">
+        <UsageAnalyticsSetting />
+        <LanguageSetting />
+        <VersionUpdateFrequencySetting />
+        <BalanceSaveFrequencySetting />
+        <AutoDetectTokensSetting />
+        <DateDisplayFormatSetting />
+        <DateInputFormatSetting />
+        <DisplayDateInLocaltimeSetting />
+        <CsvExportDelimiterSetting />
+        <BtcDerivationGapLimitSetting />
+        <TreatEthAsEth2Setting />
+        <EvmChainsToIgnoreSettings />
+        <AskUserUponSizeDiscrepancySetting />
+      </div>
     </SettingCategory>
 
     <SettingCategory>
@@ -27,7 +41,7 @@ const { t } = useI18n();
         {{ t('general_settings.amount.title') }}
       </template>
 
-      <MainCurrencySetting />
+      <MainCurrencySetting class="mb-4" />
       <div class="grid sm:grid-cols-3 gap-4">
         <FloatingPrecisionSetting />
         <NumericSeparatorsSettings />
@@ -39,7 +53,10 @@ const { t } = useI18n();
         <strong>
           {{ t('general_settings.amount.label.resulting_format') }}
         </strong>
-        <AmountDisplay :value="amountExample" show-currency="symbol" />
+        <AmountDisplay
+          :value="amountExample"
+          show-currency="symbol"
+        />
       </div>
 
       <RoundingSettings />

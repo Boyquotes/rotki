@@ -25,13 +25,13 @@ from rotkehlchen.fval import FVal
 from rotkehlchen.inquirer import Inquirer, get_underlying_asset_price
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.serialization.deserialize import deserialize_evm_address
-from rotkehlchen.types import ChecksumEvmAddress, SupportedBlockchain
-from rotkehlchen.user_messages import MessagesAggregator
+from rotkehlchen.types import ChainID, ChecksumEvmAddress, SupportedBlockchain
 from rotkehlchen.utils.misc import get_chunks
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.user_messages import MessagesAggregator
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -163,13 +163,10 @@ def _is_token_non_standard(symbol: str, address: ChecksumEvmAddress) -> bool:
     if symbol in {'UNI-V2', 'pDAI'}:
         return True
 
-    if address in (
-            '0xCb2286d9471cc185281c4f763d34A962ED212962',  # Sushi LP token
-            ETH_SPECIAL_ADDRESS,
-    ):
-        return True
-
-    return False
+    return address in (
+        '0xCb2286d9471cc185281c4f763d34A962ED212962',  # Sushi LP token
+        ETH_SPECIAL_ADDRESS,
+    )
 
 
 def _handle_pooltogether(normalized_balance: FVal, token_name: str) -> DefiBalance | None:
@@ -213,7 +210,7 @@ class ZerionSDK:
     def __init__(
             self,
             ethereum_inquirer: 'EthereumInquirer',
-            msg_aggregator: MessagesAggregator,
+            msg_aggregator: 'MessagesAggregator',
             database: 'DBHandler',
     ) -> None:
         self.ethereum = ethereum_inquirer
@@ -375,7 +372,7 @@ class ZerionSDK:
         try:
             identifier = ethaddress_to_identifier(token_address)
             token = EvmToken(identifier)
-            usd_price = Inquirer().find_usd_price(token)
+            usd_price = Inquirer.find_usd_price(token)
         except (UnknownAsset, UnsupportedAsset):
             if not _is_token_non_standard(token_symbol, token_address):
                 self.msg_aggregator.add_warning(
@@ -410,7 +407,7 @@ class ZerionSDK:
             if result is not None:
                 return result
 
-        asset = get_crypto_asset_by_symbol(token_symbol)
+        asset = get_crypto_asset_by_symbol(token_symbol, chain_id=ChainID.ETHEREUM)
         if asset is None:
             return None
 

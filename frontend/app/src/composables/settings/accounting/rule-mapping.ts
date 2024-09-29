@@ -1,57 +1,47 @@
-import { type MaybeRef } from '@vueuse/core';
-import { type AccountingRuleLinkedSettingMap } from '@/types/settings/accounting';
+import type { MaybeRef } from '@vueuse/core';
+import type { AccountingRuleLinkedSettingMap } from '@/types/settings/accounting';
 
 export const useAccountingRuleMappings = createSharedComposable(() => {
+  // eslint-disable-next-line @typescript-eslint/unbound-method
   const { t, te } = useI18n();
 
   const { getAccountingRuleLinkedMapping } = useAccountingApi();
 
-  const accountingRuleLinkedMapping: Ref<Record<string, string[]>> =
-    asyncComputed(() => getAccountingRuleLinkedMapping(), {});
+  const accountingRuleLinkedMapping: Ref<Record<string, string[]>> = asyncComputed(
+    () => getAccountingRuleLinkedMapping(),
+    {},
+  );
 
   const store = storeToRefs(useAccountingSettingsStore());
 
-  const stateInStore = (stateName: string): stateName is keyof typeof store =>
-    stateName in store;
+  const stateInStore = (stateName: string): stateName is keyof typeof store => stateName in store;
 
-  const stateIsBoolean = (state: MaybeRef<any>): state is MaybeRef<boolean> =>
-    typeof get(state) === 'boolean';
+  const stateIsBoolean = (state: MaybeRef<any>): state is MaybeRef<boolean> => typeof get(state) === 'boolean';
 
-  const accountingRuleLinkedMappingData = (
-    key: MaybeRef<string>
-  ): ComputedRef<AccountingRuleLinkedSettingMap[]> =>
+  const accountingRuleLinkedMappingData = (key: MaybeRef<string>): ComputedRef<AccountingRuleLinkedSettingMap[]> =>
     computed(() => {
       const data = get(accountingRuleLinkedMapping)[get(key)];
 
-      if (!data) {
+      if (!data)
         return [];
-      }
 
       const result: AccountingRuleLinkedSettingMap[] = [];
 
-      data.forEach(item => {
+      data.forEach((item) => {
         const translationKey = `accounting_settings.trade.labels.${item}`;
         const stateName = transformCase(item, true);
 
-        assert(
-          stateInStore(stateName),
-          `linked property ${stateName} is not part of the setting`
-        );
+        assert(stateInStore(stateName), `linked property ${stateName} is not part of the setting`);
         const state = store[stateName];
 
-        assert(
-          stateIsBoolean(state),
-          `linked property ${stateName} is not boolean`
-        );
+        assert(stateIsBoolean(state), `linked property ${stateName} is not boolean`);
 
-        const label = te(translationKey)
-          ? t(translationKey)
-          : toHumanReadable(item);
+        const label = te(translationKey) ? t(translationKey) : toHumanReadable(item);
 
         result.push({
           identifier: item,
           label,
-          state: get(state)
+          state: get(state),
         });
       });
 
@@ -59,6 +49,6 @@ export const useAccountingRuleMappings = createSharedComposable(() => {
     });
 
   return {
-    accountingRuleLinkedMappingData
+    accountingRuleLinkedMappingData,
   };
 });

@@ -1,8 +1,6 @@
 import logging
-import os
 from collections import deque
 from json.decoder import JSONDecodeError
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
 import gevent
@@ -13,6 +11,7 @@ from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import (
     A_BAT,
     A_BNB,
+    A_BTC,
     A_BZRX,
     A_CBAT,
     A_CDAI,
@@ -39,6 +38,7 @@ from rotkehlchen.constants.assets import (
 )
 from rotkehlchen.constants.prices import ZERO_PRICE
 from rotkehlchen.constants.resolver import strethaddress_to_identifier
+from rotkehlchen.constants.timing import WEEK_IN_SECONDS
 from rotkehlchen.db.settings import CachedSettings
 from rotkehlchen.errors.asset import UnknownAsset, UnsupportedAsset, WrongAssetType
 from rotkehlchen.errors.misc import RemoteError
@@ -49,12 +49,12 @@ from rotkehlchen.fval import FVal
 from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.history.deserialization import deserialize_price
 from rotkehlchen.history.types import HistoricalPrice, HistoricalPriceOracle
-from rotkehlchen.interfaces import HistoricalPriceOracleInterface
+from rotkehlchen.interfaces import HistoricalPriceOracleWithCoinListInterface
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import ExternalService, Price, Timestamp
 from rotkehlchen.utils.misc import pairwise, set_user_agent, ts_now
 from rotkehlchen.utils.mixins.penalizable_oracle import PenalizablePriceOracleMixin
-from rotkehlchen.utils.serialization import jsonloads_dict, rlk_jsondumps
+from rotkehlchen.utils.serialization import jsonloads_dict
 
 if TYPE_CHECKING:
     from rotkehlchen.db.dbhandler import DBHandler
@@ -183,23 +183,22 @@ def _check_hourly_data_sanity(
         if diff != 3600:
             raise RemoteError(
                 'Unexpected data format in cryptocompare query_endpoint_histohour. '
-                'Problem at indices {} and {} of {}_to_{} prices. Time difference is: {}'.format(
-                    index, index + 1, from_asset.symbol, to_asset.symbol, diff),
+                f'Problem at indices {index} and {index + 1} of '
+                f'{from_asset.symbol}_to_{to_asset.symbol} prices. Time difference is: {diff}',
             )
 
         index += 2
 
 
-class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, PenalizablePriceOracleMixin):  # noqa: E501
-    def __init__(self, data_directory: Path, database: Optional['DBHandler']) -> None:
-        HistoricalPriceOracleInterface.__init__(self, oracle_name='cryptocompare')
+class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleWithCoinListInterface, PenalizablePriceOracleMixin):  # noqa: E501
+    def __init__(self, database: Optional['DBHandler']) -> None:
+        HistoricalPriceOracleWithCoinListInterface.__init__(self, oracle_name='cryptocompare')
         ExternalServiceWithApiKey.__init__(
             self,
             database=database,
             service_name=ExternalService.CRYPTOCOMPARE,
         )
         PenalizablePriceOracleMixin.__init__(self)
-        self.data_directory = data_directory
         self.session = requests.session()
         set_user_agent(self.session)
         self.last_histohour_query_ts = 0
@@ -217,7 +216,7 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
         - Existence of a cached price
         - Last rate limit
         """
-        data_range = GlobalDBHandler().get_historical_price_range(
+        data_range = GlobalDBHandler.get_historical_price_range(
             from_asset=from_asset,
             to_asset=to_asset,
             source=HistoricalPriceOracle.CRYPTOCOMPARE,
@@ -260,24 +259,23 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
         assert self.db is not None, msg
         self.db = None
 
-    def _api_query(self, path: str) -> dict[str, Any]:
+    def _api_query(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Queries cryptocompare
 
         - May raise RemoteError if there is a problem reaching the cryptocompare server
         or with reading the response returned by the server
         """
         querystr = f'https://min-api.cryptocompare.com/data/{path}'
-        log.debug('Querying cryptocompare', url=querystr)
-        api_key = self._get_api_key()
-        if api_key:
-            querystr += '?' if '?' not in querystr else '&'
-            querystr += f'api_key={api_key}'
+        params = params if params is not None else {}
+        if (api_key := self._get_api_key()):
+            params |= {'api_key': api_key}
 
         tries = CRYPTOCOMPARE_QUERY_RETRY_TIMES
         timeout = CachedSettings().get_timeout_tuple()
         while tries >= 0:
+            log.debug('Querying cryptocompare', url=querystr, params=params)
             try:
-                response = self.session.get(querystr, timeout=timeout)
+                response = self.session.get(querystr, timeout=timeout, params=params)
             except requests.exceptions.RequestException as e:
                 self.penalty_info.note_failure_or_penalize()
                 raise RemoteError(f'Cryptocompare API request failed due to {e!s}') from e
@@ -436,11 +434,15 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
         except UnsupportedAsset as e:
             raise PriceQueryUnsupportedAsset(e.identifier) from e
 
-        query_path = (
-            f'v2/histohour?fsym={cc_from_asset_symbol}&tsym={cc_to_asset_symbol}'
-            f'&limit={limit}&toTs={to_timestamp}'
+        result = self._api_query(
+            path='v2/histohour',
+            params={
+                'fsym': cc_from_asset_symbol,
+                'tsym': cc_to_asset_symbol,
+                'limit': limit,
+                'toTs': to_timestamp,
+            },
         )
-        result = self._api_query(path=query_path)
         return result
 
     def query_current_price(
@@ -476,8 +478,13 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
         except UnsupportedAsset as e:
             raise PriceQueryUnsupportedAsset(e.identifier) from e
 
-        query_path = f'price?fsym={cc_from_asset_symbol}&tsyms={cc_to_asset_symbol}'
-        result = self._api_query(path=query_path)
+        result = self._api_query(
+            path='price',
+            params={
+                'fsym': cc_from_asset_symbol,
+                'tsyms': cc_to_asset_symbol,
+            },
+        )
         # Up until 23/09/2020 cryptocompare may return {} due to bug.
         # Handle that case by assuming 0 if that happens
         if cc_to_asset_symbol not in result:
@@ -522,13 +529,15 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
         except UnsupportedAsset as e:
             raise PriceQueryUnsupportedAsset(e.identifier) from e
 
-        query_path = (
-            f'pricehistorical?fsym={cc_from_asset_symbol}&tsyms={cc_to_asset_symbol}'
-            f'&ts={timestamp}'
-        )
-        if to_asset == 'BTC':
-            query_path += '&tryConversion=false'
-        result = self._api_query(query_path)
+        params = {
+            'fsym': cc_from_asset_symbol,
+            'tsyms': cc_to_asset_symbol,
+            'ts': timestamp,
+        }
+        if to_asset == A_BTC:
+            params['tryConversion'] = 'false'
+
+        result = self._api_query(path='pricehistorical', params=params)
         # Up until 23/09/2020 cryptocompare may return {} due to bug.
         # Handle that case by assuming 0 if that happens
         if (
@@ -637,7 +646,7 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
         now = ts_now()
 
         # If we got cached data for up to 1 hour ago there is no point doing anything
-        data_range = GlobalDBHandler().get_historical_price_range(
+        data_range = GlobalDBHandler.get_historical_price_range(
             from_asset=from_asset,
             to_asset=to_asset,
             source=HistoricalPriceOracle.CRYPTOCOMPARE,
@@ -651,7 +660,7 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
             return
 
         if purge_old:
-            GlobalDBHandler().delete_historical_prices(
+            GlobalDBHandler.delete_historical_prices(
                 from_asset=from_asset,
                 to_asset=to_asset,
                 source=HistoricalPriceOracle.CRYPTOCOMPARE,
@@ -685,7 +694,7 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
         now_ts = ts_now()
         # save time at start of the query, in case the query does not complete due to rate limit
         self.last_histohour_query_ts = now_ts
-        range_result = GlobalDBHandler().get_historical_price_range(
+        range_result = GlobalDBHandler.get_historical_price_range(
             from_asset=from_asset,
             to_asset=to_asset,
             source=HistoricalPriceOracle.CRYPTOCOMPARE,
@@ -749,7 +758,7 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
                 )
                 continue
 
-        GlobalDBHandler().add_historical_prices(prices)
+        GlobalDBHandler.add_historical_prices(prices)
         self.last_histohour_query_ts = ts_now()  # also save when last query finished
 
     def query_historical_price(
@@ -780,7 +789,7 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
         except (UnknownAsset, WrongAssetType) as e:
             raise PriceQueryUnsupportedAsset(e.identifier) from e
         # check DB cache
-        price_cache_entry = GlobalDBHandler().get_historical_price(
+        price_cache_entry = GlobalDBHandler.get_historical_price(
             from_asset=from_asset,
             to_asset=to_asset,
             timestamp=timestamp,
@@ -806,7 +815,7 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
             )
 
         log.debug('Got historical price from cryptocompare', from_asset=from_asset, to_asset=to_asset, timestamp=timestamp, price=price)  # noqa: E501
-        GlobalDBHandler().add_historical_prices(entries=[HistoricalPrice(
+        GlobalDBHandler.add_historical_prices(entries=[HistoricalPrice(
             from_asset=from_asset,
             to_asset=to_asset,
             source=HistoricalPriceOracle.CRYPTOCOMPARE,
@@ -817,43 +826,15 @@ class Cryptocompare(ExternalServiceWithApiKey, HistoricalPriceOracleInterface, P
 
     def all_coins(self) -> dict[str, dict[str, Any]]:
         """
-        Gets the mapping of all the cryptocompare coins
+        Gets the mapping of all the cryptocompare coins.
 
         May raise:
         - RemoteError if there is a problem reaching the cryptocompare server
         or with reading the response returned by the server
         """
-        # Get coin list of cryptocompare
-        invalidate_cache = True
-        coinlist_cache_path = os.path.join(self.data_directory, 'cryptocompare_coinlist.json')
-        if os.path.isfile(coinlist_cache_path):
-            log.info('Found cryptocompare coinlist cache', path=coinlist_cache_path)
-            with open(coinlist_cache_path, encoding='utf8') as f:
-                try:
-                    data = jsonloads_dict(f.read())
-                    now = ts_now()
-                    invalidate_cache = False
-
-                    # If we got a cache and its' over a month old then requery cryptocompare
-                    if data['time'] < now and now - data['time'] > 2629800:
-                        log.info('Cryptocompare coinlist cache is now invalidated')
-                        invalidate_cache = True
-                        data = data['data']
-                except JSONDecodeError:
-                    invalidate_cache = True
-
-        if invalidate_cache:
+        if (data := self.maybe_get_cached_coinlist(considered_recent_secs=WEEK_IN_SECONDS)) is None:  # noqa: E501
             data = self._api_query('all/coinlist')
-
-            # Also save the cache
-            with open(coinlist_cache_path, 'w', encoding='utf8') as f:
-                now = ts_now()
-                log.info('Writing coinlist cache', timestamp=now)
-                write_data = {'time': now, 'data': data}
-                f.write(rlk_jsondumps(write_data))
-        else:
-            # in any case take the data
-            data = data['data']
+            self.cache_coinlist(data)
 
         # As described in the docs
         # https://min-api.cryptocompare.com/documentation?key=Other&cat=allCoinsWithContentEndpoint

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { type BigNumber } from '@rotki/common';
+import type { BigNumber } from '@rotki/common';
 
 withDefaults(
   defineProps<{
@@ -11,8 +11,8 @@ withDefaults(
   {
     loading: false,
     value: () => Zero,
-    fiat: false
-  }
+    fiat: false,
+  },
 );
 </script>
 
@@ -23,6 +23,7 @@ withDefaults(
     </div>
     <slot>
       <AmountDisplay
+        class="font-bold"
         :fiat-currency="fiat ? 'USD' : undefined"
         :value="value"
         :loading="loading"

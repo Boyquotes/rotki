@@ -9,8 +9,12 @@ const { t } = useI18n();
     variant="flat"
     class="max-w-[27.5rem] mx-auto !bg-transparent"
   >
-    <div class="flex items-center space-x-14">
-      <RuiProgress color="primary" variant="indeterminate" circular />
+    <div class="flex items-center space-x-10">
+      <RuiProgress
+        color="primary"
+        variant="indeterminate"
+        circular
+      />
       <h5
         class="text-rui-text-secondary text-h5"
         data-cy="connection-loading__content"

@@ -30,13 +30,13 @@ from rotkehlchen.types import EvmTokenKind
 if TYPE_CHECKING:
     from rotkehlchen.externalapis.coingecko import Coingecko
     from rotkehlchen.externalapis.cryptocompare import Cryptocompare
-    from rotkehlchen.interfaces import HistoricalPriceOracleInterface
+    from rotkehlchen.interfaces import HistoricalPriceOracleWithCoinListInterface
 
 
 def _validate_single_oracle_id(
         data: dict[str, Any],
         oracle_name: Literal['coingecko', 'cryptocompare'],
-        oracle_obj: 'HistoricalPriceOracleInterface',
+        oracle_obj: 'HistoricalPriceOracleWithCoinListInterface',
 ) -> None:
     coin_key = data.get(oracle_name)
     if coin_key is None or len(coin_key) == 0:
@@ -213,7 +213,7 @@ class EvmTokenSchema(CryptoAssetFieldsSchema):
             **_kwargs: Any,
     ) -> None:
         super().validate_schema(data, **_kwargs)
-        given_underlying_tokens = data.get('underlying_tokens', None)
+        given_underlying_tokens = data.get('underlying_tokens')
         if given_underlying_tokens is not None:
             weight_sum = sum(x['weight'] for x in given_underlying_tokens)
             if weight_sum > ONE:

@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { type ComputedRef } from 'vue';
-import { type StyleValue } from 'vue/types/jsx';
-import { isVideo } from '@/utils/nft';
+import type { StyleValue } from 'vue';
 
 const props = withDefaults(
   defineProps<{
@@ -11,15 +9,12 @@ const props = withDefaults(
   }>(),
   {
     styled: undefined,
-    size: '50px'
-  }
+    size: '50px',
+  },
 );
-
-const css = useCssModule();
 
 const { identifier } = toRefs(props);
 const { assetInfo } = useAssetInfoRetrieval();
-const { shouldRenderImage } = useNfts();
 
 const frontendStore = useFrontendSettingsStore();
 
@@ -30,79 +25,51 @@ const balanceData = assetInfo(identifier);
 
 const { t } = useI18n();
 
-const imageUrlSource: ComputedRef<string | null> = computed(
-  () => get(balanceData)?.imageUrl || null
-);
+const imageUrlSource = computed<string | null>(() => get(balanceData)?.imageUrl || null);
 
-const domain: ComputedRef<string | null> = computed(() =>
-  getDomain(get(imageUrlSource) || '')
-);
+const { shouldRender, isVideo, renderedMedia } = useNftImage(imageUrlSource);
+
+const domain = computed<string | null>(() => getDomain(get(imageUrlSource) || ''));
 
 const { show } = useConfirmStore();
 
-const showAllowDomainConfirmation = () => {
+function showAllowDomainConfirmation() {
   show(
     {
-      title: t(
-        'general_settings.nft_setting.update_whitelist_confirmation.title'
-      ),
+      title: t('general_settings.nft_setting.update_whitelist_confirmation.title'),
       message: t(
         'general_settings.nft_setting.update_whitelist_confirmation.message',
         {
-          domain: get(domain)
+          domain: get(domain),
         },
-        2
-      )
+        2,
+      ),
     },
-    allowDomain
+    allowDomain,
   );
-};
+}
 
-const allowDomain = () => {
+function allowDomain() {
   const domainVal = get(domain);
 
-  if (!domainVal) {
+  if (!domainVal)
     return;
-  }
 
-  const newWhitelisted = [
-    ...get(whitelistedDomainsForNftImages),
-    domainVal
-  ].filter(uniqueStrings);
+  const newWhitelisted = [...get(whitelistedDomainsForNftImages), domainVal].filter(uniqueStrings);
 
   updateSetting({ whitelistedDomainsForNftImages: newWhitelisted });
-};
+}
 
-const renderImage: ComputedRef<boolean> = computed(() => {
-  const image = get(imageUrlSource);
-
-  if (!image) {
-    return true;
-  }
-
-  return shouldRenderImage(image);
-});
-
-const imageUrl: ComputedRef<string> = computed(() => {
-  const image = get(imageUrlSource);
-
-  if (!image || !get(renderImage)) {
-    return './assets/images/placeholder.svg';
-  }
-
-  return image;
-});
-
-const collectionName: ComputedRef<string | null> = computed(() => {
+const collectionName = computed<string | null>(() => {
   const data = get(balanceData);
-  if (!data || !data.collectionName) {
+  if (!data || !data.collectionName)
     return null;
-  }
+
   const tokenId = get(identifier).split('_')[3];
   return `${data.collectionName} #${tokenId}`;
 });
 
-const name: ComputedRef<string | null> = computed(() => {
+const name = computed<string | null>(() => {
   const data = get(balanceData);
   return data?.name || get(collectionName);
 });
@@ -116,7 +83,7 @@ const fallbackData = computed(() => {
   const data = id.split('_');
   return {
     address: data[2],
-    tokenId: data[3]
+    tokenId: data[3],
   };
 });
 </script>
@@ -127,34 +94,31 @@ const fallbackData = computed(() => {
       <div class="cursor-pointer">
         <RuiTooltip
           :popper="{ placement: 'top' }"
-          :disabled="renderImage"
-          open-delay="400"
+          :disabled="shouldRender"
+          :open-delay="400"
           class="w-full"
           tooltip-class="max-w-[10rem]"
         >
           <template #activator>
             <div
-              class="my-2"
-              :class="css.preview"
+              class="my-2 bg-rui-grey-200 rounded flex items-center justify-center"
+              :class="$style.preview"
               :style="styled"
-              @click="!renderImage ? showAllowDomainConfirmation() : null"
+              @click="!shouldRender ? showAllowDomainConfirmation() : null"
             >
-              <template v-if="imageUrl">
-                <video
-                  v-if="isVideo(imageUrl)"
-                  width="100%"
-                  height="100%"
-                  :src="imageUrl"
-                />
-                <VImg
-                  v-else
-                  :src="imageUrl"
-                  width="100%"
-                  height="100%"
-                  contain
-                  aspect-ratio="1"
-                />
-              </template>
+              <video
+                v-if="isVideo"
+                width="100%"
+                height="100%"
+                :src="renderedMedia"
+              />
+              <AppImage
+                v-else
+                class="rounded overflow-hidden"
+                :src="renderedMedia"
+                :size="size"
+                contain
+              />
             </div>
           </template>
 
@@ -168,17 +132,19 @@ const fallbackData = computed(() => {
 
       <div class="ml-3 overflow-hidden flex-fill">
         <template v-if="isNftDetailLoading">
-          <VSkeletonLoader class="mt-1" width="120" type="text" />
-          <VSkeletonLoader class="mt-1" width="80" type="text" />
+          <RuiSkeletonLoader class="mt-1 mb-1.5 w-[7.5rem]" />
+          <RuiSkeletonLoader class="mt-1 w-[5rem]" />
         </template>
-        <div v-else-if="name" :class="css['nft-details']">
-          <div class="font-medium" :class="css['nft-details__entry']">
+        <div
+          v-else-if="name"
+          :class="$style['nft-details']"
+        >
+          <div class="font-medium text-truncate">
             {{ name }}
           </div>
           <div
             v-if="collectionName"
-            class="grey--text"
-            :class="css['nft-details__entry']"
+            class="text-rui-text-secondary text-truncate"
           >
             {{ collectionName }}
           </div>
@@ -204,7 +170,6 @@ const fallbackData = computed(() => {
 
 <style module lang="scss">
 .preview {
-  background: #f5f5f5;
   width: v-bind(size);
   height: v-bind(size);
   max-width: v-bind(size);
@@ -214,11 +179,5 @@ const fallbackData = computed(() => {
 .nft-details {
   flex: 1;
   max-width: 400px;
-
-  &__entry {
-    text-overflow: ellipsis;
-    overflow: hidden;
-    white-space: nowrap;
-  }
 }
 </style>

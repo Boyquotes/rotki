@@ -1,57 +1,65 @@
 <script setup lang="ts">
-import { type BigNumber } from '@rotki/common';
+import type { BigNumber } from '@rotki/common';
 
 withDefaults(
   defineProps<{
-    value?: string;
     locations?: string[];
     previewLocationBalance?: Record<string, BigNumber> | null;
+    optionalShowExisting?: boolean;
   }>(),
   {
-    value: '',
     locations: () => [],
-    previewLocationBalance: null
-  }
+    previewLocationBalance: null,
+    optionalShowExisting: false,
+  },
 );
 
-const emit = defineEmits<{
-  (e: 'input', location: string): void;
-}>();
-const input = (location: string) => {
-  emit('input', location);
-};
+const model = defineModel<string>({ required: true, default: '' });
 
 const { t } = useI18n();
+
+const showOnlyExisting = ref<boolean>(true);
 </script>
 
 <template>
-  <VSheet outlined class="pa-4" rounded>
+  <RuiCard
+    variant="outlined"
+    class="[&>div]:!overflow-visible"
+    rounded="sm"
+  >
     <div class="text-subtitle-2 mb-3">
-      {{ t('dashboard.snapshot.edit.dialog.balances.optional') }}
+      {{ t('common.optional') }}
     </div>
-    <div>
-      <LocationSelector
-        :value="value"
-        :items="locations"
-        class="edit-balances-snapshot__location"
-        attach=".edit-balances-snapshot__location"
-        :menu-props="{ top: true }"
-        outlined
-        clearable
-        :persistent-hint="!value"
-        :hide-details="!!value"
-        :hint="t('dashboard.snapshot.edit.dialog.balances.hints.location')"
-        :label="t('common.location')"
-        @input="input($event)"
-      />
-    </div>
-    <div v-if="previewLocationBalance" class="mt-4">
+    <RuiSwitch
+      v-if="optionalShowExisting"
+      v-model="showOnlyExisting"
+      color="primary"
+      size="sm"
+      hide-details
+      class="[&_span]:text-sm [&_span]:mt-0.5 mb-4"
+    >
+      {{ t('dashboard.snapshot.edit.dialog.balances.only_show_existing') }}
+    </RuiSwitch>
+    <LocationSelector
+      v-model="model"
+      :items="showOnlyExisting ? locations : []"
+      class="edit-balances-snapshot__location"
+      clearable
+      :persistent-hint="!modelValue"
+      :hide-details="!!modelValue"
+      :hint="t('dashboard.snapshot.edit.dialog.balances.hints.location')"
+      :label="t('common.location')"
+    />
+    <div
+      v-if="previewLocationBalance"
+      class="mt-4"
+    >
       <div class="text-subtitle-2">
         {{ t('dashboard.snapshot.edit.dialog.balances.preview.title') }}
       </div>
       <div class="flex items-center mt-2">
         <div>
-          <div class="text-overline text--secondary mb-n2">
+          <div class="text-overline text-rui-text-secondary -mb-2">
             {{ t('dashboard.snapshot.edit.dialog.balances.preview.from') }}
           </div>
           <AmountDisplay
@@ -63,7 +71,7 @@ const { t } = useI18n();
           <RuiIcon name="arrow-right-line" />
         </div>
         <div>
-          <div class="text-overline text--secondary mb-n2">
+          <div class="text-overline text-rui-text-secondary -mb-2">
             {{ t('dashboard.snapshot.edit.dialog.balances.preview.to') }}
           </div>
           <AmountDisplay
@@ -73,5 +81,5 @@ const { t } = useI18n();
         </div>
       </div>
     </div>
-  </VSheet>
+  </RuiCard>
 </template>

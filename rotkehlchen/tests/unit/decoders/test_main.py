@@ -10,13 +10,13 @@ from rotkehlchen.chain.ethereum.transactions import EthereumTransactions
 from rotkehlchen.chain.evm.constants import GENESIS_HASH, ZERO_ADDRESS
 from rotkehlchen.chain.evm.decoding.constants import CPT_GAS
 from rotkehlchen.chain.evm.decoding.utils import maybe_reshuffle_events
+from rotkehlchen.chain.evm.l2_with_l1_fees.types import L2WithL1FeesTransaction
 from rotkehlchen.chain.evm.structures import EvmTxReceipt, EvmTxReceiptLog
 from rotkehlchen.chain.evm.types import string_to_evm_address
-from rotkehlchen.chain.optimism.types import OptimismTransaction
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import A_ETH, A_USDT
 from rotkehlchen.db.evmtx import DBEvmTx
-from rotkehlchen.db.optimismtx import DBOptimismTx
+from rotkehlchen.db.l2withl1feestx import DBL2WithL1FeesTx
 from rotkehlchen.errors.misc import InputError, NotERC20Conformant
 from rotkehlchen.fval import FVal
 from rotkehlchen.history.events.structures.evm_event import EvmEvent
@@ -39,41 +39,67 @@ ADDRESS_WITHOUT_GENESIS_TX = '0x4bBa290826C253BD854121346c370a9886d1bC26'
 
 
 def test_decoders_initialization(ethereum_transaction_decoder: EthereumTransactionDecoder):
-    """Make sure that all decoders we have created are detected and initialized"""
+    """Make sure that all decoders we have created for ethereum are detected and initialized"""
     assert set(ethereum_transaction_decoder.decoders.keys()) == {
+        'Aave',
         'Aavev1',
         'Aavev2',
+        'Aavev3',
         'Airdrops',
         'Balancerv1',
         'Balancerv2',
         'BaseBridge',
+        'Blur',
+        'Cctp',
         'Compoundv2',
         'Compoundv3',
         'Cowswap',
         'Curve',
         'Diva',
+        'Defisaver',
+        'Dripsv1',
         'Dxdaomesa',
         'Eas',
+        'Eigenlayer',
         'Ens',
         'Eth2',
+        'Fluence',
+        'Gearbox',
         'Gitcoin',
         'Gitcoinv2',
         'Golem',
+        'HarvestFinance',
+        'Juicebox',
         'Kyber',
+        'Lido',
         'Liquity',
         'Lockedgno',
         'Makerdao',
         'Makerdaosai',
+        'Metamask',
+        'Monerium',
         'Polygon',
+        'Safe',
         'Octant',
+        'Odosv1',
+        'Odosv2',
+        'Omni',
+        'Omnibridge',
         'Oneinchv1',
         'Oneinchv2',
         'Oneinchv3',
         'Oneinchv4',
         'Oneinchv5',
+        'Oneinchv6',
         'OptimismBridge',
+        'Paraswap',
+        'Paladin',
         'PickleFinance',
         'Safemultisig',
+        'ScrollBridge',
+        'Shutter',
+        'Sky',
+        'SocketBridgeDecoder',
         'Stakedao',
         'Sushiswap',
         'Thegraph',
@@ -86,12 +112,16 @@ def test_decoders_initialization(ethereum_transaction_decoder: EthereumTransacti
         'Convex',
         'Weth',
         'Yearn',
+        'Yearnygov',
         'ArbitrumOneBridge',
         'XdaiBridge',
+        'Zerox',
     }
 
     counterparty_ids = {counterparty.identifier for counterparty in ethereum_transaction_decoder.rules.all_counterparties}  # noqa: E501
     assert counterparty_ids == {
+        '0x',
+        'kyber',
         'kyber legacy',
         'element-finance',
         'badger',
@@ -99,14 +129,16 @@ def test_decoders_initialization(ethereum_transaction_decoder: EthereumTransacti
         '1inch-v2',
         'uniswap',
         'curve',
+        'drips',
         'gnosis-chain',
         'gas',
         'ens',
         'eas',
+        'fluence',
         'liquity',
         'Locked GNO',
         'shapeshift',
-        'hop-protocol',
+        'hop',
         '1inch',
         'gitcoin',
         'golem',
@@ -121,11 +153,14 @@ def test_decoders_initialization(ethereum_transaction_decoder: EthereumTransacti
         'makerdao dsr',
         'makerdao sai',
         'pickle finance',
+        'harvest finance',
         'stakedao',
         'convex',
         'votium',
+        'aave',
         'aave-v1',
         'aave-v2',
+        'aave-v3',
         'compound',
         'compound-v3',
         'dxdaomesa',
@@ -142,13 +177,34 @@ def test_decoders_initialization(ethereum_transaction_decoder: EthereumTransacti
         '1inch-v3',
         '1inch-v4',
         '1inch-v5',
+        '1inch-v6',
         'safe-multisig',
+        'safe',
+        'scroll',
         'diva',
         'arbitrum_one',
         'base',
         'sDAI',
         'thegraph',
         'octant',
+        'monerium',
+        'metamask_swaps',
+        'paraswap',
+        'ygov',
+        'socket',
+        'juicebox',
+        'shutter',
+        'eigenlayer',
+        'omni',
+        'blur',
+        'lido',
+        'cctp',
+        'gearbox',
+        'paladin',
+        'defisaver',
+        'odos-v1',
+        'odos-v2',
+        'sky',
     }
 
 
@@ -184,7 +240,7 @@ def test_no_logs_and_zero_eth(
         chain_id=ChainID.ETHEREUM,
         contract_address=None,
         status=True,
-        type=0,
+        tx_type=0,
         logs=[],
     )
     dbevmtx = DBEvmTx(database)
@@ -234,7 +290,7 @@ def test_simple_erc20_transfer(
     accounts = ethereum_accounts if chain == ChainID.ETHEREUM else optimism_accounts
     from_address = accounts[0]
     to_address = accounts[1]
-    transaction = OptimismTransaction(
+    transaction = L2WithL1FeesTransaction(
         tx_hash=evmhash,
         chain_id=chain,
         timestamp=0,
@@ -254,13 +310,12 @@ def test_simple_erc20_transfer(
         chain_id=chain,
         contract_address=None,
         status=True,
-        type=0,
+        tx_type=0,
         logs=[
             EvmTxReceiptLog(
                 log_index=73,
                 data=hexstring_to_bytes('0x000000000000000000000000000000000000000000000000000000000243de35'),
                 address=tether_address,
-                removed=False,
                 topics=[
                     hexstring_to_bytes('0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'),
                     hexstring_to_bytes('0x0000000000000000000000004bba290826c253bd854121346c370a9886d1bc26'),
@@ -269,7 +324,7 @@ def test_simple_erc20_transfer(
             ),
         ],
     )
-    dbevmtx = DBEvmTx(database) if chain == ChainID.ETHEREUM else DBOptimismTx(database)
+    dbevmtx = DBEvmTx(database) if chain == ChainID.ETHEREUM else DBL2WithL1FeesTx(database)
     tx_decoder = ethereum_transaction_decoder if chain is ChainID.ETHEREUM else optimism_transaction_decoder  # noqa: E501
     with database.user_write() as cursor:
         dbevmtx.add_evm_transactions(cursor, [transaction], relevant_address=None)
@@ -330,7 +385,7 @@ def test_eth_transfer(
     accounts = ethereum_accounts if chain is ChainID.ETHEREUM else optimism_accounts
     from_address = accounts[0]
     to_address = accounts[1]
-    transaction = OptimismTransaction(
+    transaction = L2WithL1FeesTransaction(
         tx_hash=evmhash,
         chain_id=chain,
         timestamp=0,
@@ -350,10 +405,10 @@ def test_eth_transfer(
         chain_id=chain,
         contract_address=None,
         status=True,
-        type=0,
+        tx_type=0,
         logs=[],
     )
-    dbevmtx = DBEvmTx(database) if chain == ChainID.ETHEREUM else DBOptimismTx(database)
+    dbevmtx = DBEvmTx(database) if chain == ChainID.ETHEREUM else DBL2WithL1FeesTx(database)
     tx_decoder = ethereum_transaction_decoder if chain is ChainID.ETHEREUM else optimism_transaction_decoder  # noqa: E501
     with database.user_write() as cursor:
         dbevmtx.add_evm_transactions(cursor, [transaction], relevant_address=None)
@@ -414,7 +469,7 @@ def test_eth_spend(
     evmhash = deserialize_evm_tx_hash('0x8caa7df2ebebfceb98207605e64691202b9e7498c3cccdbccb41c1600cf16e65')  # noqa: E501
     from_address = ethereum_accounts[0] if chain is ChainID.ETHEREUM else optimism_accounts[0]
     to_address = string_to_evm_address('0x38C3f1Ab36BdCa29133d8AF7A19811D10B6CA3FC')
-    transaction = OptimismTransaction(
+    transaction = L2WithL1FeesTransaction(
         tx_hash=evmhash,
         chain_id=chain,
         timestamp=0,
@@ -434,10 +489,10 @@ def test_eth_spend(
         chain_id=chain,
         contract_address=None,
         status=True,
-        type=0,
+        tx_type=0,
         logs=[],
     )
-    dbevmtx = DBEvmTx(database) if chain == ChainID.ETHEREUM else DBOptimismTx(database)
+    dbevmtx = DBEvmTx(database) if chain == ChainID.ETHEREUM else DBL2WithL1FeesTx(database)
     tx_decoder = ethereum_transaction_decoder if chain is ChainID.ETHEREUM else optimism_transaction_decoder  # noqa: E501
     with database.user_write() as cursor:
         dbevmtx.add_evm_transactions(cursor, [transaction], relevant_address=None)
@@ -511,7 +566,7 @@ def test_eth_deposit(
         chain_id=ChainID.ETHEREUM,
         contract_address=None,
         status=True,
-        type=0,
+        tx_type=0,
         logs=[],
     )
     dbevmtx = DBEvmTx(database)
@@ -749,7 +804,7 @@ def test_maybe_reshuffle_events():
     )
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [[
     '0xA1E4380A3B1f749673E270229993eE55F35663b4',
     '0x756F45E3FA69347A9A973A725E3C98bC4db0b5a0',
@@ -775,7 +830,6 @@ def test_genesis_transaction(database, ethereum_inquirer, ethereum_accounts):
     with query_patch as query_mock:
         events, _ = get_decoded_events_of_transaction(
             evm_inquirer=ethereum_inquirer,
-            database=database,
             tx_hash=evmhash,
             transactions=transactions,
         )
@@ -811,10 +865,10 @@ def test_genesis_transaction(database, ethereum_inquirer, ethereum_accounts):
     assert events == expected_events
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_manager_connect_at_start', [(INFURA_ETH_NODE,)])
 @pytest.mark.parametrize('ethereum_accounts', [[ADDRESS_WITHOUT_GENESIS_TX]])
-def test_genesis_transaction_no_address(database, ethereum_inquirer):
+def test_genesis_transaction_no_address(ethereum_inquirer):
     """
     Test that decoding a genesis transaction is handled correctly when there is no address tracked
     with a genesis transaction.
@@ -823,12 +877,11 @@ def test_genesis_transaction_no_address(database, ethereum_inquirer):
     with pytest.raises(InputError):
         get_decoded_events_of_transaction(
             evm_inquirer=ethereum_inquirer,
-            database=database,
             tx_hash=tx_hex,
         )
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [['0x9531C059098e3d194fF87FebB587aB07B30B1306']])
 def test_phising_zero_transfers(database, ethereum_inquirer):
     """Checks that zero transfer phishing transactions are marked as ignored."""
@@ -836,7 +889,6 @@ def test_phising_zero_transfers(database, ethereum_inquirer):
     evmhash = deserialize_evm_tx_hash(tx_hex)
     events, _ = get_decoded_events_of_transaction(
         evm_inquirer=ethereum_inquirer,
-        database=database,
         tx_hash=evmhash,
     )
     assert events == []
@@ -850,11 +902,7 @@ def test_phising_zero_transfers(database, ethereum_inquirer):
     assert ignored_actions == {ActionType.HISTORY_EVENT: {f'{ChainID.ETHEREUM.value}{tx_hex}'}}, 'Transaction with only zero transfers should have been marked as ignored'  # noqa: E501
 
     # Repeat the same process to see that redecoding doesnt break anything
-    events, _ = get_decoded_events_of_transaction(
-        evm_inquirer=ethereum_inquirer,
-        database=database,
-        tx_hash=evmhash,
-    )
+    events, _ = get_decoded_events_of_transaction(evm_inquirer=ethereum_inquirer, tx_hash=evmhash)
     assert events == []
 
     with database.conn.read_ctx() as cursor:
@@ -881,3 +929,26 @@ def test_error_at_decoder_initialization(database, ethereum_inquirer, eth_transa
 
     assert len(warnings) == 0
     assert errors == ['Failed at initialization of ethereum Lockedgno decoder due to non conformant token']  # noqa: E501
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('ethereum_accounts', [['0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12']])
+def test_failed_transaction(ethereum_inquirer, ethereum_accounts):
+    """Checks that a failed transaction is understood as failed"""
+    tx_hex = deserialize_evm_tx_hash('0xfbfd35db096d0acb26a988895841d786baafe08f6cf55265338e0b5db58350ee')  # noqa: E501
+    evmhash = deserialize_evm_tx_hash(tx_hex)
+    events, _ = get_decoded_events_of_transaction(evm_inquirer=ethereum_inquirer, tx_hash=evmhash)
+    gas = '0.00056954114283532'
+    assert events == [EvmEvent(
+        tx_hash=evmhash,
+        sequence_index=0,
+        timestamp=TimestampMS(1659633427000),
+        location=Location.ETHEREUM,
+        event_type=HistoryEventType.FAIL,
+        event_subtype=HistoryEventSubType.FEE,
+        asset=A_ETH,
+        balance=Balance(amount=FVal(gas)),
+        location_label=ethereum_accounts[0],
+        notes=f'Burned {gas} ETH for gas of a failed transaction',
+        counterparty=CPT_GAS,
+    )]

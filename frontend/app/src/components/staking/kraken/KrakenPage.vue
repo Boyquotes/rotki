@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { SupportedExchange } from '@/types/exchanges';
 import { Section } from '@/types/status';
 import { Routes } from '@/router/routes';
 
@@ -9,25 +8,21 @@ const { load, $reset } = useKrakenStakingStore();
 const { connectedExchanges } = storeToRefs(useExchangesStore());
 const isKrakenConnected = computed(() => {
   const exchanges = get(connectedExchanges);
-  return exchanges.some(
-    ({ location }) => location === SupportedExchange.KRAKEN
-  );
+  return exchanges.some(({ location }) => location === 'kraken');
 });
 
 onMounted(async () => {
-  if (get(isKrakenConnected)) {
+  if (get(isKrakenConnected))
     await load(false);
-  }
 });
 
 onUnmounted(() => {
   $reset();
 });
 
-watch(isKrakenConnected, async isKrakenConnected => {
-  if (isKrakenConnected) {
+watch(isKrakenConnected, async (isKrakenConnected) => {
+  if (isKrakenConnected)
     await load(false);
-  }
 });
 
 const loading = shouldShowLoadingScreen(Section.STAKING_KRAKEN);
@@ -44,7 +39,7 @@ const refresh = () => load(true);
     child
   >
     <template #buttons>
-      <RuiTooltip open-delay="400">
+      <RuiTooltip :open-delay="400">
         <template #activator>
           <RuiButton
             variant="outlined"
@@ -62,18 +57,25 @@ const refresh = () => load(true);
       </RuiTooltip>
     </template>
 
-    <FullSizeContent v-if="!isKrakenConnected" class="gap-4">
+    <FullSizeContent
+      v-if="!isKrakenConnected"
+      class="gap-4"
+    >
       <span class="font-bold text-h5">
         {{ t('kraken_page.page.title') }}
       </span>
 
       <InternalLink :to="Routes.API_KEYS_EXCHANGES">
-        <VImg width="64px" contain src="/assets/images/protocols/kraken.svg" />
+        <AppImage
+          width="64px"
+          contain
+          src="/assets/images/protocols/kraken.svg"
+        />
       </InternalLink>
 
-      <i18n
+      <i18n-t
         tag="h6"
-        path="kraken_page.page.description"
+        keypath="kraken_page.page.description"
         class="font-light text-h6 text-rui-text-secondary"
       >
         <template #link>
@@ -81,7 +83,7 @@ const refresh = () => load(true);
             {{ t('kraken_page.page.api_key') }}
           </InternalLink>
         </template>
-      </i18n>
+      </i18n-t>
     </FullSizeContent>
     <ProgressScreen v-else-if="loading">
       <template #message>

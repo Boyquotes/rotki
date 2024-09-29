@@ -4,19 +4,25 @@ from unittest.mock import patch
 
 import pytest
 import requests
-from flaky import flaky
 
+from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.api.server import APIServer
+from rotkehlchen.chain.ethereum.modules.liquity.constants import CPT_LIQUITY
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants.assets import A_ETH, A_LQTY, A_LUSD
+from rotkehlchen.constants.misc import ONE
+from rotkehlchen.db.history_events import DBHistoryEvents
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.tests.utils.api import (
     api_url_for,
-    assert_ok_async_response,
     assert_proper_response_with_result,
-    wait_for_async_task_with_result,
+    assert_proper_sync_response_with_result,
 )
+from rotkehlchen.tests.utils.factories import make_evm_tx_hash
 from rotkehlchen.tests.utils.mock import MockResponse
+from rotkehlchen.types import Location, TimestampMS
 
 if TYPE_CHECKING:
     from rotkehlchen.externalapis.etherscan import Etherscan
@@ -30,7 +36,7 @@ JUSTIN = string_to_evm_address('0x3DdfA8eC3052539b6C9549F12cEA2C295cfF5296')
 LIQUITY_POOL_DEPOSITOR = string_to_evm_address('0xFBcAFB005695afa660836BaC42567cf6917911ac')
 
 
-@flaky(max_runs=3, min_passes=1)  # etherscan may occasionally time out
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('ethereum_accounts', [[LQTY_ADDR]])
 @pytest.mark.parametrize('ethereum_modules', [['liquity']])
 @pytest.mark.parametrize('should_mock_current_price_queries', [True])
@@ -41,19 +47,37 @@ def test_trove_position(rotkehlchen_api_server, inquirer):  # pylint: disable=un
         rotkehlchen_api_server,
         'liquitytrovesresource',
     ), json={'async_query': async_query})
-    if async_query:
-        task_id = assert_ok_async_response(response)
-        result = wait_for_async_task_with_result(rotkehlchen_api_server, task_id)
-    else:
-        result = assert_proper_response_with_result(response)
+    result = assert_proper_response_with_result(
+        response=response,
+        rotkehlchen_api_server=rotkehlchen_api_server,
+        async_query=async_query,
+    )
 
-    assert LQTY_ADDR in result
-    trove_data = result[LQTY_ADDR]
-    assert 'collateral' in trove_data
-    assert 'debt' in trove_data
-    assert 'collateralization_ratio' in trove_data
-    assert 'liquidation_price' in trove_data
-    assert trove_data['active'] is True
+    assert LQTY_ADDR in result['balances']
+    assert 'balances' in result
+    assert 'total_collateral_ratio' in result
+    assert result['total_collateral_ratio'] == '0.2797543579772264'
+
+    balances = result['balances']
+
+    assert balances == {
+        '0x063c26fF1592688B73d8e2A18BA4C23654e2792E': {
+            'collateral': {
+                'amount': '0',
+                'usd_value': '0.0',
+                'asset': 'ETH',
+            },
+            'debt': {
+                'amount': '0',
+                'usd_value': '0.0',
+                'asset': 'eip155:1/erc20:0x5f98805A4E8be255a32880FDeC7F6728C6568bA0',
+            },
+            'collateralization_ratio': None,
+            'liquidation_price': None,
+            'active': True,
+            'trove_id': 148,
+        },
+    }
 
 
 @pytest.mark.parametrize('should_mock_web3', [True])
@@ -82,11 +106,11 @@ def test_trove_staking(rotkehlchen_api_server, inquirer):  # pylint: disable=unu
         rotkehlchen_api_server,
         'liquitystakingresource',
     ), json={'async_query': async_query})
-    if async_query:
-        task_id = assert_ok_async_response(response)
-        result = wait_for_async_task_with_result(rotkehlchen_api_server, task_id)
-    else:
-        result = assert_proper_response_with_result(response)
+    result = assert_proper_response_with_result(
+        response=response,
+        rotkehlchen_api_server=rotkehlchen_api_server,
+        async_query=async_query,
+    )
 
     assert LQTY_STAKING in result
     stake_data = result[LQTY_STAKING]
@@ -112,6 +136,7 @@ def test_trove_staking(rotkehlchen_api_server, inquirer):  # pylint: disable=unu
     }
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('ethereum_accounts', [[ADDR_WITHOUT_TROVE]])
 @pytest.mark.parametrize('ethereum_modules', [['liquity']])
 @pytest.mark.parametrize('start_with_valid_premium', [True])
@@ -123,15 +148,23 @@ def test_account_without_info(rotkehlchen_api_server, inquirer):  # pylint: disa
         rotkehlchen_api_server,
         'liquitytrovesresource',
     ), json={'async_query': async_query})
-    if async_query:
-        task_id = assert_ok_async_response(response)
-        result = wait_for_async_task_with_result(rotkehlchen_api_server, task_id)
-    else:
-        result = assert_proper_response_with_result(response)
+    result = assert_proper_response_with_result(
+        response=response,
+        rotkehlchen_api_server=rotkehlchen_api_server,
+        async_query=async_query,
+    )
 
-    assert ADDR_WITHOUT_TROVE not in result
+    assert 'balances' in result
+    assert 'total_collateral_ratio' in result
+    assert result['total_collateral_ratio'] == '0.2797543579772264'
+
+    balances = result['balances']
+    assert isinstance(balances, dict)
+
+    assert ADDR_WITHOUT_TROVE not in balances
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('ethereum_accounts', [[LQTY_PROXY, ADDR_WITHOUT_TROVE, LQTY_ADDR]])
 @pytest.mark.parametrize('ethereum_modules', [['liquity']])
 @pytest.mark.parametrize('start_with_valid_premium', [True])
@@ -143,15 +176,57 @@ def test_account_with_proxy(rotkehlchen_api_server, inquirer):  # pylint: disabl
         rotkehlchen_api_server,
         'liquitytrovesresource',
     ), json={'async_query': async_query})
-    if async_query:
-        task_id = assert_ok_async_response(response)
-        result = wait_for_async_task_with_result(rotkehlchen_api_server, task_id)
-    else:
-        result = assert_proper_response_with_result(response)
+    result = assert_proper_response_with_result(
+        response=response,
+        rotkehlchen_api_server=rotkehlchen_api_server,
+        async_query=async_query,
+    )
 
-    assert LQTY_PROXY in result
-    assert ADDR_WITHOUT_TROVE not in result
-    assert LQTY_ADDR in result
+    assert 'balances' in result
+    assert 'total_collateral_ratio' in result
+    assert result['total_collateral_ratio'] == '0.2797543579772264'
+
+    balances = result['balances']
+    assert isinstance(balances, dict)
+
+    assert LQTY_PROXY in balances
+    assert ADDR_WITHOUT_TROVE not in balances
+    assert LQTY_ADDR in balances
+
+    assert balances == {
+        '0x063c26fF1592688B73d8e2A18BA4C23654e2792E': {
+            'collateral': {
+                'amount': '0',
+                'usd_value': '0.0',
+                'asset': 'ETH',
+            },
+            'debt': {
+                'amount': '0',
+                'usd_value': '0.0',
+                'asset': 'eip155:1/erc20:0x5f98805A4E8be255a32880FDeC7F6728C6568bA0',
+            },
+            'collateralization_ratio': None,
+            'liquidation_price': None,
+            'active': True,
+            'trove_id': 148,
+        },
+        '0x9476832d4687c14b2c1a04E2ee4693162a7340B6': {
+            'collateral': {
+                'amount': '0',
+                'usd_value': '0.0',
+                'asset': 'ETH',
+            },
+            'debt': {
+                'amount': '0',
+                'usd_value': '0.0',
+                'asset': 'eip155:1/erc20:0x5f98805A4E8be255a32880FDeC7F6728C6568bA0',
+            },
+            'collateralization_ratio': None,
+            'liquidation_price': None,
+            'active': True,
+            'trove_id': 267,
+        },
+    }
     # test that the list of addresses was not mutated
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
     assert len(rotki.chains_aggregator.accounts.eth) == 3
@@ -186,11 +261,11 @@ def test_stability_pool(rotkehlchen_api_server):
             'liquitystabilitypoolresource',
         ), json={'async_query': async_query})
 
-    if async_query:
-        task_id = assert_ok_async_response(response)
-        result = wait_for_async_task_with_result(rotkehlchen_api_server, task_id)
-    else:
-        result = assert_proper_response_with_result(response)
+    result = assert_proper_response_with_result(
+        response=response,
+        rotkehlchen_api_server=rotkehlchen_api_server,
+        async_query=async_query,
+    )
 
     assert JUSTIN in result
     assert LIQUITY_POOL_DEPOSITOR in result
@@ -208,11 +283,11 @@ def test_stability_pool(rotkehlchen_api_server):
     assert FVal(result[JUSTIN]['balances']['deposited']['usd_value']) == expected_amount * FVal(1.5)  # noqa: E501
 
 
-@pytest.mark.parametrize('use_custom_database', ['liquity_stats.db'])
 @pytest.mark.parametrize('new_db_unlock_actions', [None])
 @pytest.mark.parametrize('ethereum_modules', [['liquity']])
 @pytest.mark.parametrize('start_with_valid_premium', [True])
-@pytest.mark.parametrize('should_mock_current_price_queries', [True])
+@pytest.mark.parametrize('should_mock_price_queries', [True])
+@pytest.mark.parametrize('default_mock_price_value', [ONE])
 @pytest.mark.parametrize('add_accounts_to_db', [[False]])
 @pytest.mark.parametrize('ethereum_accounts', [
     [
@@ -222,40 +297,130 @@ def test_stability_pool(rotkehlchen_api_server):
 ])
 def test_staking_stats(rotkehlchen_api_server: APIServer, ethereum_accounts: list[str]):
     """
-    Test that the stats generated by the liquity endpoint are correct using pre-queried
-    information and that the stats combining all the data are consistent with the
+    Test that the stats generated by the liquity endpoint are correct using mocked events
+    and that the stats combining all the data are consistent with the
     information for each tracked address
     """
-    response = requests.post(
-        api_url_for(
-            rotkehlchen_api_server,
-            'evmpendingtransactionsdecodingresource',
-        ), json={'async_query': False, 'data': [{'evm_chain': 'ethereum'}]},
-    )
-    async_query = random.choice([False])
+    default_ts = TimestampMS(1707278951000)
+    reward_lusd_event = make_evm_tx_hash()
+    evm_events = [
+        EvmEvent(  # deposit 1 for address 0
+            tx_hash=make_evm_tx_hash(),
+            sequence_index=1,
+            timestamp=default_ts,
+            location=Location.ETHEREUM,
+            event_type=HistoryEventType.STAKING,
+            event_subtype=HistoryEventSubType.DEPOSIT_ASSET,
+            asset=A_LUSD,
+            balance=Balance(FVal('1974')),
+            counterparty=CPT_LIQUITY,
+            location_label=ethereum_accounts[0],
+        ), EvmEvent(  # deposit 2 for address 0
+            tx_hash=make_evm_tx_hash(),
+            sequence_index=1,
+            timestamp=default_ts,
+            location=Location.ETHEREUM,
+            event_type=HistoryEventType.STAKING,
+            event_subtype=HistoryEventSubType.DEPOSIT_ASSET,
+            asset=A_LUSD,
+            balance=Balance(FVal('2000')),
+            counterparty=CPT_LIQUITY,
+            location_label=ethereum_accounts[0],
+        ), EvmEvent(  # deposit 1 for address 1
+            tx_hash=make_evm_tx_hash(),
+            sequence_index=1,
+            timestamp=default_ts,
+            location=Location.ETHEREUM,
+            event_type=HistoryEventType.STAKING,
+            event_subtype=HistoryEventSubType.DEPOSIT_ASSET,
+            asset=A_LUSD,
+            balance=Balance(FVal('1000')),
+            counterparty=CPT_LIQUITY,
+            location_label=ethereum_accounts[1],
+        ), EvmEvent(  # address 0 stability pool gains
+            tx_hash=make_evm_tx_hash(),
+            sequence_index=1,
+            timestamp=default_ts,
+            location=Location.ETHEREUM,
+            event_type=HistoryEventType.STAKING,
+            event_subtype=HistoryEventSubType.REWARD,
+            asset=A_LQTY,
+            balance=Balance(FVal(44)),
+            counterparty=CPT_LIQUITY,
+            location_label=ethereum_accounts[0],
+        ), EvmEvent(  # address 1 stability pool gains
+            tx_hash=make_evm_tx_hash(),
+            sequence_index=1,
+            timestamp=default_ts,
+            location=Location.ETHEREUM,
+            event_type=HistoryEventType.STAKING,
+            event_subtype=HistoryEventSubType.REWARD,
+            asset=A_LQTY,
+            balance=Balance(FVal(4240.34942308358)),
+            counterparty=CPT_LIQUITY,
+            location_label=ethereum_accounts[1],
+        ), EvmEvent(  # stake lqty and get reward
+            tx_hash=reward_lusd_event,
+            sequence_index=1,
+            timestamp=default_ts,
+            location=Location.ETHEREUM,
+            event_type=HistoryEventType.STAKING,
+            event_subtype=HistoryEventSubType.DEPOSIT_ASSET,
+            asset=A_LQTY,
+            balance=Balance(FVal(10)),
+            counterparty=CPT_LIQUITY,
+            location_label=ethereum_accounts[1],
+        ), EvmEvent(
+            tx_hash=reward_lusd_event,
+            sequence_index=2,
+            timestamp=default_ts,
+            location=Location.ETHEREUM,
+            event_type=HistoryEventType.STAKING,
+            event_subtype=HistoryEventSubType.REWARD,
+            asset=A_LUSD,
+            balance=Balance(FVal(65556)),
+            counterparty=CPT_LIQUITY,
+            location_label=ethereum_accounts[1],
+        ), EvmEvent(  # lqty reward for address 0
+            tx_hash=make_evm_tx_hash(),
+            sequence_index=2,
+            timestamp=default_ts,
+            location=Location.ETHEREUM,
+            event_type=HistoryEventType.STAKING,
+            event_subtype=HistoryEventSubType.REWARD,
+            asset=A_LQTY,
+            balance=Balance(FVal(400)),
+            counterparty=CPT_LIQUITY,
+            location_label=ethereum_accounts[0],
+        ),
+    ]
+    db = rotkehlchen_api_server.rest_api.rotkehlchen.data.db
+    history_events = DBHistoryEvents(db)
+    with db.user_write() as write_cursor:
+        for event in evm_events:
+            history_events.add_history_event(
+                write_cursor=write_cursor,
+                event=event,
+            )
+
     response = requests.get(api_url_for(
         rotkehlchen_api_server,
         'modulestatsresource',
         module='liquity',
-    ), json={'async_query': async_query})
-    if async_query:
-        task_id = assert_ok_async_response(response)
-        result = wait_for_async_task_with_result(rotkehlchen_api_server, task_id)
-    else:
-        result = assert_proper_response_with_result(response)
+    ), json={'async_query': False})
+    result = assert_proper_sync_response_with_result(response)
 
     global_stats = result['global_stats']
     address_0_data = result['by_address'][ethereum_accounts[0]]
     address_1_data = result['by_address'][ethereum_accounts[1]]
-    assert FVal(address_1_data['total_deposited_stability_pool']) == FVal('396454.0')
-    assert FVal(address_0_data['total_deposited_stability_pool']) == FVal('1519146.7290263602')
+    assert FVal(address_0_data['total_deposited_stability_pool']) == FVal('3974')
+    assert FVal(address_1_data['total_deposited_stability_pool']) == FVal('1000')
     assert FVal(global_stats['total_deposited_stability_pool']) == FVal(address_0_data['total_deposited_stability_pool']) + FVal(address_1_data['total_deposited_stability_pool'])  # noqa: E501
-    assert len(global_stats['staking_gains']) == 3
-    assert len(global_stats['stability_pool_gains']) == 2
+    assert address_0_data['stability_pool_gains'][0]['amount'] == '444.0'
+    assert address_1_data['stability_pool_gains'][0]['amount'] == '4240.34942308358'
+    assert len(global_stats['staking_gains']) == 1
+    assert len(global_stats['stability_pool_gains']) == 1
     assert FVal(global_stats['stability_pool_gains'][0]['amount']).is_close(FVal(address_0_data['stability_pool_gains'][0]['amount']) + FVal(address_1_data['stability_pool_gains'][0]['amount']), max_diff='1e-8')  # noqa: E501
-    assert FVal(address_0_data['stability_pool_gains'][0]['amount']).is_close(FVal('1.7820064710306824'))  # noqa: E501
-    assert address_1_data['stability_pool_gains'][0]['amount'] == '12.294706987216218'
-    assert address_1_data['stability_pool_gains'][1]['amount'] == '4240.34942308358'
 
 
 @pytest.mark.vcr(match_on=['uri', 'method'], filter_query_parameters=['apikey'])
@@ -271,7 +436,7 @@ def test_proxy_info_is_shown(rotkehlchen_api_server, ethereum_accounts):
         'liquitystabilitypoolresource',
     ), json={'async_query': False})
 
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert 'gains' in result[user_address]['proxies']['0x33EAfDB72b69BFBe6b5911eDCbab41011e63C523']
 
     # check the other endpoint.
@@ -279,5 +444,5 @@ def test_proxy_info_is_shown(rotkehlchen_api_server, ethereum_accounts):
         rotkehlchen_api_server,
         'liquitystakingresource',
     ), json={'async_query': False})
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert 'staked' in result[user_address]['proxies']['0x33EAfDB72b69BFBe6b5911eDCbab41011e63C523']  # noqa: E501

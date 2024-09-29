@@ -1,29 +1,29 @@
-import { type Wrapper, mount } from '@vue/test-utils';
+import { type VueWrapper, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
-import Vuetify from 'vuetify';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DefiWizard from '@/components/defi/wizard/DefiWizard.vue';
 import { snakeCaseTransformer } from '@/services/axios-tranformers';
 import { FrontendSettings } from '@/types/settings/frontend-settings';
 
 vi.mock('@/composables/api/settings/settings-api', () => ({
   useSettingsApi: vi.fn().mockReturnValue({
-    setSettings: vi.fn()
-  })
+    setSettings: vi.fn(),
+  }),
 }));
 
-describe('DefiWizard.vue', () => {
-  let wrapper: Wrapper<any>;
+describe('defiWizard.vue', () => {
+  let wrapper: VueWrapper<InstanceType<typeof DefiWizard>>;
   let settings: FrontendSettings;
   let api: ReturnType<typeof useSettingsApi>;
 
   const createWrapper = () => {
-    const vuetify = new Vuetify();
     const pinia = createPinia();
     setActivePinia(pinia);
     return mount(DefiWizard, {
-      pinia,
-      vuetify,
-      stubs: ['v-tooltip', 'module-selector', 'module-address-selector', 'card']
+      global: {
+        plugins: [pinia],
+        stubs: ['module-selector', 'module-address-selector'],
+      },
     });
   };
 
@@ -34,29 +34,27 @@ describe('DefiWizard.vue', () => {
     api.setSettings = vi.fn();
   });
 
-  test('wizard completes when use default is pressed', async () => {
+  afterEach(() => {
+    wrapper.unmount();
+  });
+
+  it('wizard completes when use default is pressed', async () => {
     expect.assertions(1);
     await wrapper.find('.defi-wizard__use-default').trigger('click');
-    await wrapper.vm.$nextTick();
+    await nextTick();
     expect(api.setSettings).toBeCalledWith({
-      frontendSettings: JSON.stringify(
-        snakeCaseTransformer({ ...settings, defiSetupDone: true })
-      )
+      frontendSettings: JSON.stringify(snakeCaseTransformer({ ...settings, defiSetupDone: true })),
     });
   });
 
-  test('wizard completes when complete is pressed', async () => {
+  it('wizard completes when complete is pressed', async () => {
     expect.assertions(1);
     await wrapper.find('.defi-wizard__select-modules').trigger('click');
-    await wrapper.vm.$nextTick();
-    await wrapper.find('.defi-wizard__select-accounts').trigger('click');
-    await wrapper.vm.$nextTick();
-    await wrapper.find('.defi-wizard__done').trigger('click');
-    await wrapper.vm.$nextTick();
+    await nextTick();
+    await wrapper.find('[data-cy=defi-wizard-done]').trigger('click');
+    await nextTick();
     expect(api.setSettings).toBeCalledWith({
-      frontendSettings: JSON.stringify(
-        snakeCaseTransformer({ ...settings, defiSetupDone: true })
-      )
+      frontendSettings: JSON.stringify(snakeCaseTransformer({ ...settings, defiSetupDone: true })),
     });
   });
 });

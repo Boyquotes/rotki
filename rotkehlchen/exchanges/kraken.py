@@ -9,7 +9,7 @@ import logging
 import operator
 import time
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import urlencode
 
 import gevent
@@ -66,7 +66,6 @@ from rotkehlchen.types import (
     TimestampMS,
     TradeType,
 )
-from rotkehlchen.user_messages import MessagesAggregator
 from rotkehlchen.utils.misc import pairwise, ts_ms_to_sec, ts_now
 from rotkehlchen.utils.mixins.cacheable import cache_response_timewise
 from rotkehlchen.utils.mixins.enums import SerializableEnumNameMixin
@@ -77,13 +76,13 @@ if TYPE_CHECKING:
     from rotkehlchen.assets.asset import Asset, AssetWithOracles
     from rotkehlchen.db.dbhandler import DBHandler
     from rotkehlchen.db.drivers.gevent import DBCursor
+    from rotkehlchen.user_messages import MessagesAggregator
 
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
 KRAKEN_DELISTED = ('XDAO', 'XXVN', 'ZKRW', 'XNMC', 'BSV', 'XICN')
-KRAKEN_PUBLIC_METHODS = ('AssetPairs', 'Assets')
 KRAKEN_QUERY_TRIES = 8
 KRAKEN_BACKOFF_DIVIDEND = 15
 MAX_CALL_COUNTER_INCREASE = 2  # Trades and Ledger produce the max increase
@@ -184,7 +183,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
             api_key: ApiKey,
             secret: ApiSecret,
             database: 'DBHandler',
-            msg_aggregator: MessagesAggregator,
+            msg_aggregator: 'MessagesAggregator',
             kraken_account_type: KrakenAccountType | None = None,
     ):
         super().__init__(
@@ -193,8 +192,8 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
             api_key=api_key,
             secret=secret,
             database=database,
+            msg_aggregator=msg_aggregator,
         )
-        self.msg_aggregator = msg_aggregator
         self.session.headers.update({'API-Key': self.api_key})
         self.set_account_type(kraken_account_type)
         self.call_counter = 0
@@ -259,7 +258,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
 
     def _validate_single_api_key_action(
             self,
-            method_str: str,
+            method_str: Literal['Balance', 'TradesHistory', 'Ledgers'],
             req: dict[str, Any] | None = None,
     ) -> tuple[bool, str]:
         try:
@@ -297,29 +296,8 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
         else:
             self.call_counter += 1
 
-    def _query_public(self, method: str, req: dict | None = None) -> dict | str:
-        """API queries that do not require a valid key/secret pair.
-
-        Arguments:
-        method -- API method name (string, no default)
-        req    -- additional API request parameters (default: {})
-        """
-        if req is None:
-            req = {}
-        urlpath = f'{KRAKEN_BASE_URL}/{KRAKEN_API_VERSION}/public/{method}'
-        try:
-            response = self.session.post(urlpath, data=req, timeout=CachedSettings().get_timeout_tuple())  # noqa: E501
-        except requests.exceptions.RequestException as e:
-            raise RemoteError(f'Kraken API request failed due to {e!s}') from e
-
-        self._manage_call_counter(method)
-        return _check_and_get_response(response, method)
-
     def api_query(self, method: str, req: dict | None = None) -> dict:
         tries = KRAKEN_QUERY_TRIES
-        query_method = (
-            self._query_public if method in KRAKEN_PUBLIC_METHODS else self._query_private
-        )
         while tries > 0:
             if self.call_counter + MAX_CALL_COUNTER_INCREASE > self.call_limit:
                 # If we are close to the limit, check how much our call counter reduced
@@ -347,7 +325,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
                 data=req,
                 call_counter=self.call_counter,
             )
-            result = query_method(method, req)
+            result = self._query_private(method, req)
             if isinstance(result, str):
                 # Got a recoverable error
                 backoff_in_seconds = int(KRAKEN_BACKOFF_DIVIDEND / tries)
@@ -430,16 +408,16 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
 
                 our_asset = asset_from_kraken(kraken_name)
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found unsupported/unknown kraken asset {e.identifier}. '
-                    f' Ignoring its balance query.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='balance query',
                 )
                 continue
             except DeserializationError as e:
                 msg = str(e)
                 self.msg_aggregator.add_error(
-                    'Error processing kraken balance for {kraken_name}. Check logs '
-                    'for details. Ignoring it.',
+                    f'Error processing kraken balance for {kraken_name}. Check logs '
+                    f'for details. Ignoring it.',
                 )
                 log.error(
                     'Error processing kraken balance',
@@ -453,7 +431,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
             if our_asset.identifier != 'KFEE':
                 # There is no price value for KFEE
                 try:
-                    usd_price = Inquirer().find_usd_price(our_asset)
+                    usd_price = Inquirer.find_usd_price(our_asset)
                 except RemoteError as e:
                     self.msg_aggregator.add_error(
                         f'Error processing kraken balance entry due to inability to '
@@ -475,7 +453,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
 
     def query_until_finished(
             self,
-            endpoint: str,
+            endpoint: Literal['Ledgers'],
             keyname: str,
             start_ts: Timestamp,
             end_ts: Timestamp,
@@ -590,7 +568,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
 
     def _query_endpoint_for_period(
             self,
-            endpoint: str,
+            endpoint: Literal['Ledgers'],
             start_ts: Timestamp,
             end_ts: Timestamp,
             offset: int | None = None,
@@ -668,9 +646,9 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
                     link=movement.event_identifier,
                 ))
             except UnknownAsset as e:
-                self.msg_aggregator.add_warning(
-                    f'Found unknown kraken asset {e.identifier}. '
-                    f'Ignoring its deposit/withdrawals query.',
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='deposit/withdrawal',
                 )
                 continue
             except (DeserializationError, KeyError) as e:
@@ -1198,7 +1176,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
                         receive_spend_events[event.event_identifier].append((idx, event))
                     else:
                         group_events.append((idx, event))
-                if fee_amount != ZERO:
+                if event_type != HistoryEventType.INFORMATIONAL and fee_amount != ZERO:  # avoid processing ignored events with fees that were converted to informational  # noqa: E501
                     group_events.append((idx, HistoryEvent(
                         event_identifier=identifier,
                         sequence_index=current_fee_index,
@@ -1211,7 +1189,7 @@ class Kraken(ExchangeInterface, ExchangeWithExtras):
                             usd_value=ZERO,
                         ),
                         notes=notes,
-                        event_type=event_type,
+                        event_type=event_type if event_type != HistoryEventType.RECEIVE else HistoryEventType.SPEND,  # in instant swaps @tewshi found that fees can also be in the receive part  # noqa: E501
                         event_subtype=HistoryEventSubType.FEE,
                     )))
                     # Increase the fee index to not have duplicates in the case of having a normal

@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { DefiProtocol } from '@rotki/common/lib/blockchain';
-import { type Module } from '@/types/modules';
+import { type DefiProtocol, type Module, isDefiProtocol } from '@/types/modules';
 import { Section } from '@/types/status';
 
 defineProps<{
@@ -8,7 +7,7 @@ defineProps<{
 }>();
 
 const selection = ref<string>();
-const protocol = ref<DefiProtocol | null>(null);
+const protocol = ref<DefiProtocol>();
 const defiLending = useDefiLending();
 const route = useRoute();
 const { t } = useI18n();
@@ -34,30 +33,25 @@ const summary = computed(() => {
   return get(defiLending.loanSummary(protocols));
 });
 
-const refreshing = logicOr(
-  isLoading(Section.DEFI_BORROWING),
-  isLoading(Section.DEFI_BORROWING_HISTORY)
-);
+const refreshing = logicOr(isLoading(Section.DEFI_BORROWING), isLoading(Section.DEFI_BORROWING_HISTORY));
 
-const refresh = async () => {
+async function refresh() {
   await defiLending.fetchBorrowing(true);
-};
+}
 
 onMounted(async () => {
   const currentRoute = get(route);
-  const queryElement = currentRoute.query['protocol'];
-  const protocols = Object.values(DefiProtocol);
-  const protocolIndex = protocols.indexOf(queryElement as DefiProtocol);
-  if (protocolIndex >= 0) {
-    set(protocol, protocols[protocolIndex]);
-  }
+  const queryElement = currentRoute.query.protocol;
+  if (isDefiProtocol(queryElement))
+    set(protocol, queryElement);
+
   await defiLending.fetchBorrowing(false);
 });
 
-const refreshTooltip: ComputedRef<string> = computed(() =>
+const refreshTooltip = computed<string>(() =>
   t('helpers.refresh_header.tooltip', {
-    title: t('borrowing.header').toLocaleLowerCase()
-  })
+    title: t('borrowing.header').toLocaleLowerCase(),
+  }),
 );
 </script>
 
@@ -87,10 +81,22 @@ const refreshTooltip: ComputedRef<string> = computed(() =>
     </template>
 
     <ProgressScreen v-if="loading">
-      <template #message>{{ t('borrowing.loading') }}</template>
+      <template #message>
+        {{ t('borrowing.loading') }}
+      </template>
     </ProgressScreen>
 
-    <div v-else class="flex flex-col gap-4">
+    <div
+      v-else
+      class="flex flex-col gap-4"
+    >
+      <RuiAlert
+        type="warning"
+        :title="t('common.important_notice')"
+        class="mb-2"
+      >
+        {{ t('decentralized_overview.deprecated_warning') }}
+      </RuiAlert>
       <StatCardWide>
         <StatCardColumn>
           <template #title>
@@ -116,35 +122,44 @@ const refreshTooltip: ComputedRef<string> = computed(() =>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <RuiCard>
-          <VAutocomplete
+          <RuiAutoComplete
             v-model="selection"
             class="borrowing__vault-selection"
             :label="t('borrowing.select_loan')"
-            chips
             dense
-            outlined
-            item-key="identifier"
-            :items="loans"
-            item-text="identifier"
+            variant="outlined"
+            key-attr="identifier"
+            text-attr="identifier"
+            :options="loans"
             hide-details
             clearable
-            :open-on-clear="false"
+            auto-select-first
+            :item-height="40"
           >
             <template #selection="{ item }">
               <DefiSelectorItem :item="item" />
             </template>
             <template #item="{ item }">
-              <DefiSelectorItem :item="item" />
+              <DefiSelectorItem
+                class="py-1"
+                :item="item"
+              />
             </template>
-          </VAutocomplete>
+          </RuiAutoComplete>
           <div class="p-2 text-body-2 text-rui-text-secondary">
             {{ t('borrowing.select_loan_hint') }}
           </div>
         </RuiCard>
-        <DefiProtocolSelector v-model="protocol" liabilities />
+        <DefiProtocolSelector
+          v-model="protocol"
+          liabilities
+        />
       </div>
 
-      <LoanInfo v-if="loan" :loan="loan" />
+      <LoanInfo
+        v-if="loan"
+        :loan="loan"
+      />
 
       <FullSizeContent v-else>
         <div class="flex h-full text-h6 items-center justify-center">

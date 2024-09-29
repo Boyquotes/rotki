@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NamedTuple
+from enum import StrEnum, auto
+from typing import TYPE_CHECKING, Any, Self
 
 from rotkehlchen.accounting.mixins.event import AccountingEventMixin, AccountingEventType
 from rotkehlchen.accounting.structures.balance import Balance
@@ -14,53 +15,24 @@ from rotkehlchen.history.events.structures.types import EventDirection
 from rotkehlchen.history.price import PriceHistorian
 from rotkehlchen.serialization.deserialize import deserialize_fval, deserialize_timestamp
 from rotkehlchen.types import ChecksumEvmAddress, Eth2PubKey, Location, Timestamp
-from rotkehlchen.utils.misc import from_gwei
 
 if TYPE_CHECKING:
     from rotkehlchen.accounting.pot import AccountingPot
     from rotkehlchen.assets.asset import Asset
 
+    VALIDATOR_DETAILS_DB_TUPLE = tuple[int | None, Eth2PubKey, str, ChecksumEvmAddress | None, Timestamp | None, Timestamp | None, Timestamp | None]  # noqa: E501
 
-class ValidatorID(NamedTuple):
-    # not using index due to : https://github.com/python/mypy/issues/9043
-    index: int | None  # type: ignore  # may be null if the index is not yet determined
+
+@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
+class ValidatorID:
+    index: int | None
     public_key: Eth2PubKey
-    ownership_proportion: FVal
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, NamedTuple) and self.public_key == other.public_key  # type: ignore  # ignore is due to isinstance not recognized
 
     def __hash__(self) -> int:
         return hash(self.public_key)
 
-
-Eth2ValidatorDBTuple = tuple[int, str, str]
-
-
-@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
-class Eth2Validator:
-    index: int
-    public_key: Eth2PubKey
-    ownership_proportion: FVal = ONE
-
-    def serialize_for_db(self) -> Eth2ValidatorDBTuple:
-        return self.index, self.public_key, str(self.ownership_proportion)
-
-    @classmethod
-    def deserialize_from_db(cls, result: Eth2ValidatorDBTuple) -> 'Eth2Validator':
-        return cls(
-            index=result[0],
-            public_key=Eth2PubKey(result[1]),
-            ownership_proportion=FVal(result[2]),
-        )
-
-    def serialize(self) -> dict[str, Any]:
-        percentage_value = self.ownership_proportion.to_percentage(precision=2, with_perc_sign=False)  # noqa: E501
-        return {
-            'validator_index': self.index,
-            'public_key': self.public_key,
-            'ownership_percentage': percentage_value,
-        }
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, ValidatorID) and self.public_key == other.public_key
 
 
 ValidatorDailyStatsDBTuple = tuple[
@@ -75,7 +47,7 @@ class ValidatorDailyStats(AccountingEventMixin):
     validator_index: int  # keeping the index here so it can be shown in accounting
     timestamp: Timestamp
     pnl: FVal = ZERO  # Value in ETH
-    ownership_percentage: FVal = ONE  # customized by get_eth2_history_events
+    ownership_percentage: FVal = ONE  # customized by refresh_eth2_get_daily_stats
 
     def __str__(self) -> str:
         return f'ETH2 validator {self.validator_index} daily stats'
@@ -186,55 +158,94 @@ class ValidatorDailyStats(AccountingEventMixin):
         return 1
 
 
-class ValidatorPerformance(NamedTuple):
-    balance: int  # in gwei
-    performance_1d: int  # in gwei
-    performance_1w: int  # in gwei
-    performance_1m: int  # in gwei
-    performance_1y: int  # in gwei
-    performance_total: int  # in gwei
+@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
+class ValidatorDetails:
+    validator_index: int | None  # can be None if no index has yet been created due to not yet being seen by the consensys layer  # noqa: E501
+    public_key: Eth2PubKey
+    withdrawal_address: ChecksumEvmAddress | None = None  # only set if user has 0x1 credentials
+    activation_timestamp: Timestamp | None = None  # activation timestamp. None if not activated yet.  # noqa: E501
+    withdrawable_timestamp: Timestamp | None = None  # the timestamp from which on a full withdrawal can happen. None if not exited and fully withdrawable yet  # noqa: E501
+    exited_timestamp: Timestamp | None = None  # the timestamp at which the validator exited. None if we don't know it yet  # noqa: E501
+    ownership_proportion: FVal = ONE  # [0, 1] proportion of ownership user has on the validator
 
-    def serialize(self, eth_usd_price: FVal) -> dict[str, dict[str, str]]:
-        return {
-            'balance': _serialize_gwei_with_price(self.balance, eth_usd_price),
-            'performance_1d': _serialize_gwei_with_price(self.performance_1d, eth_usd_price),
-            'performance_1w': _serialize_gwei_with_price(self.performance_1w, eth_usd_price),
-            'performance_1m': _serialize_gwei_with_price(self.performance_1m, eth_usd_price),
-            'performance_1y': _serialize_gwei_with_price(self.performance_1y, eth_usd_price),
-            'performance_total': _serialize_gwei_with_price(self.performance_total, eth_usd_price),
-        }
+    def __hash__(self) -> int:
+        return hash(self.public_key)
 
-
-DEPOSITING_VALIDATOR_PERFORMANCE = ValidatorPerformance(
-    balance=32000000000,
-    performance_1d=0,
-    performance_1w=0,
-    performance_1m=0,
-    performance_1y=0,
-    performance_total=0,
-)
-
-
-class ValidatorDetails(NamedTuple):
-    validator_index: int | None
-    public_key: str
-    eth1_depositor: ChecksumEvmAddress | None
-    has_exited: bool
-    performance: ValidatorPerformance
-
-    def serialize(self, eth_usd_price: FVal) -> dict[str, Any]:
-        return {
+    def serialize(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
             'index': self.validator_index,
             'public_key': self.public_key,
-            'eth1_depositor': self.eth1_depositor,
-            'has_exited': self.has_exited,
-            **self.performance.serialize(eth_usd_price),
         }
+        if self.ownership_proportion != ONE:
+            data['ownership_percentage'] = self.ownership_proportion.to_percentage(precision=2, with_perc_sign=False)  # noqa: E501
+
+        for name in ('activation_timestamp', 'withdrawable_timestamp', 'withdrawal_address'):
+            if (value := getattr(self, name)) is not None:
+                data[name] = value
+
+        return data
+
+    def serialize_for_db(self) -> 'VALIDATOR_DETAILS_DB_TUPLE':
+        """Serialize for DB insertion without touching the ownership proportion since
+        the place this is inserted in the DB should not modify ownership"""
+        return (
+            self.validator_index,
+            self.public_key,
+            str(self.ownership_proportion),
+            self.withdrawal_address,
+            self.activation_timestamp,
+            self.withdrawable_timestamp,
+            self.exited_timestamp,
+        )
+
+    @classmethod
+    def deserialize_from_db(cls, result: 'VALIDATOR_DETAILS_DB_TUPLE') -> Self:
+        return cls(
+            validator_index=result[0],
+            public_key=result[1],
+            ownership_proportion=FVal(result[2]),
+            withdrawal_address=result[3],
+            activation_timestamp=result[4],
+            withdrawable_timestamp=result[5],
+            exited_timestamp=result[6],
+        )
 
 
-def _serialize_gwei_with_price(value: int, eth_usd_price: FVal) -> dict[str, str]:
-    normalized_value = from_gwei(value)
-    return {
-        'amount': str(normalized_value),
-        'usd_value': str(normalized_value * eth_usd_price),
-    }
+class ValidatorStatus(StrEnum):
+    PENDING = auto()
+    ACTIVE = auto()
+    EXITING = auto()
+    EXITED = auto()
+
+
+@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False)
+class ValidatorDetailsWithStatus(ValidatorDetails):
+    status: ValidatorStatus = ValidatorStatus.ACTIVE
+
+    def serialize(self) -> dict[str, Any]:
+        result = super().serialize()
+        result['status'] = str(self.status)
+        return result
+
+    def determine_status(self, exited_indices: set[int]) -> None:
+        if self.validator_index in exited_indices:
+            self.status = ValidatorStatus.EXITED
+        elif self.withdrawable_timestamp is not None:
+            self.status = ValidatorStatus.EXITING
+        elif self.activation_timestamp is not None:
+            self.status = ValidatorStatus.ACTIVE
+        else:
+            self.status = ValidatorStatus.PENDING
+
+
+class PerformanceStatusFilter(StrEnum):
+    """A smaller subset of validator statuses used by the frontend filtering
+
+    Pending does not make sense for the places this is called as validators have no performance
+    or daily stats. And since this is where we filter for now we use this also
+    for the validators endpoint for consistency. If we want to filter by all statuses
+    we can do it in the future.
+    """
+    ALL = auto()
+    ACTIVE = auto()
+    EXITED = auto()

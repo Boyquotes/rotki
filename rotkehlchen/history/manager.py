@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -16,6 +17,7 @@ from rotkehlchen.exchanges.manager import SUPPORTED_EXCHANGES, ExchangeManager
 from rotkehlchen.fval import FVal
 from rotkehlchen.history.events.structures.base import HistoryBaseEntry, HistoryEvent
 from rotkehlchen.logging import RotkehlchenLogsAdapter
+from rotkehlchen.premium.premium import has_premium_check
 from rotkehlchen.tasks.manager import TaskManager
 from rotkehlchen.tasks.utils import query_missing_prices_of_base_entries
 from rotkehlchen.types import EVM_CHAINS_WITH_TRANSACTIONS, Location, Timestamp
@@ -78,6 +80,8 @@ class HistoryQueryingManager:
             db_settings = self.db.get_settings(cursor)
         self.dateformat = db_settings.date_display_format
         self.datelocaltime = db_settings.display_date_in_localtime
+        # query daily eth2 daily stats for PnL only if they want to count PnL before withdrawals
+        self.should_query_eth2_daily_stats = db_settings.eth_staking_taxable_after_withdrawal_enabled is False  # noqa: E501
 
     def _increase_progress(self, step: int, total_steps: int, step_by: int = 1) -> int:
         """Counts the progress for querying history. When transmitted to the frontend
@@ -91,13 +95,19 @@ class HistoryQueryingManager:
         location = filter_query.location
         from_ts = filter_query.from_ts
         to_ts = filter_query.to_ts
+        excluded_instances: dict[Location, set[str]] = defaultdict(set[str])
 
         with self.db.conn.read_ctx() as cursor:
-            excluded_locations = {exchange.location for exchange in self.db.get_settings(cursor).non_syncing_exchanges}  # noqa: E501
+            for exchange_id in self.db.get_settings(cursor).non_syncing_exchanges:
+                excluded_instances[exchange_id.location].add(exchange_id.name)
 
         if location is not None:
-            if location not in excluded_locations:
-                self.query_location_latest_trades(location=location, from_ts=from_ts, to_ts=to_ts)
+            self.query_location_latest_trades(
+                location=location,
+                excluded_instances=excluded_instances[location],
+                from_ts=from_ts,
+                to_ts=to_ts,
+            )
 
             return
 
@@ -132,7 +142,7 @@ class HistoryQueryingManager:
         if only_cache is False:
             self._query_services_for_trades(filter_query=filter_query)
 
-        has_premium = self.chains_aggregator.premium is not None
+        has_premium = has_premium_check(self.chains_aggregator.premium)
         with self.db.conn.read_ctx() as cursor:
             trades, filter_total_found = self.db.get_trades_and_limit_info(
                 cursor=cursor,
@@ -144,10 +154,12 @@ class HistoryQueryingManager:
     def query_location_latest_trades(
             self,
             location: Location,
+            excluded_instances: set[str],
             from_ts: Timestamp,
             to_ts: Timestamp,
     ) -> None:
         """Queries the service of a specific location for latest trades and saves them in the DB.
+        Services whose names are present in the excluded_instances set are not queried.
         May raise:
 
         - RemoteError if there is a problem with reaching the service
@@ -160,11 +172,12 @@ class HistoryQueryingManager:
             return
 
         for exchange in exchanges_list:
-            exchange.query_trade_history(
-                start_ts=from_ts,
-                end_ts=to_ts,
-                only_cache=False,
-            )
+            if exchange.name not in excluded_instances:
+                exchange.query_trade_history(
+                    start_ts=from_ts,
+                    end_ts=to_ts,
+                    only_cache=False,
+                )
 
     def _query_services_for_asset_movements(self, filter_query: AssetMovementsFilterQuery) -> None:
         """Queries all services requested for asset movements and writes them to the DB"""
@@ -214,7 +227,7 @@ class HistoryQueryingManager:
         if only_cache is False:
             self._query_services_for_asset_movements(filter_query=filter_query)
 
-        has_premium = self.chains_aggregator.premium is not None
+        has_premium = has_premium_check(self.chains_aggregator.premium)
         asset_movements, filter_total_found = self.db.get_asset_movements_and_limit_info(
             filter_query=filter_query,
             has_premium=has_premium,
@@ -269,7 +282,7 @@ class HistoryQueryingManager:
                 entries_missing_prices=entries,
                 base_entries_ignore_set=task_manager.base_entries_ignore_set,
             )
-        has_premium = self.chains_aggregator.premium is not None
+        has_premium = has_premium_check(self.chains_aggregator.premium)
         events, filter_total_found, _ = db.get_history_events_and_limit_info(
             cursor=cursor,
             filter_query=filter_query,
@@ -386,16 +399,17 @@ class HistoryQueryingManager:
         eth2 = self.chains_aggregator.get_module('eth2')
         if eth2 is not None and has_premium:
             self.processing_state_name = 'Querying ETH2 staking history'
-            try:
-                eth2_events = self.chains_aggregator.get_eth2_history_events(
-                    from_timestamp=Timestamp(0),
-                    to_timestamp=end_ts,
-                )
-                history.extend(eth2_events)
-            except RemoteError as e:
-                self.msg_aggregator.add_error(
-                    f'Eth2 events are not included in the PnL report due to {e!s}',
-                )
+            if self.should_query_eth2_daily_stats:
+                try:
+                    eth2_events = self.chains_aggregator.refresh_eth2_get_daily_stats(
+                        from_timestamp=Timestamp(0),
+                        to_timestamp=end_ts,
+                    )
+                    history.extend(eth2_events)
+                except RemoteError as e:
+                    self.msg_aggregator.add_error(
+                        f'Eth2 daily stats are not included in the PnL report due to {e!s}',
+                    )
             # make sure that eth2 events and history events are combined
             eth2.combine_block_with_tx_events()
 

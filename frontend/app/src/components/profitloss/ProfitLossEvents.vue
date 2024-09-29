@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { type DataTableHeader } from '@/types/vuetify';
-import { type ProfitLossEvents, type SelectedReport } from '@/types/reports';
+import { some } from 'lodash-es';
 import { isTransactionEvent } from '@/utils/report';
+import type { DataTableColumn, DataTableOptions, DataTableSortData } from '@rotki/ui-library';
+import type { ProfitLossEvent, ProfitLossEvents, SelectedReport } from '@/types/reports';
+
+interface GroupLine {
+  top: boolean;
+  bottom: boolean;
+}
 
 const props = withDefaults(
   defineProps<{
@@ -11,329 +17,344 @@ const props = withDefaults(
   }>(),
   {
     loading: false,
-    refreshing: false
-  }
+    refreshing: false,
+  },
 );
 
 const emit = defineEmits<{
-  (
-    e: 'update:page',
-    page: { reportId: number; offset: number; limit: number }
-  ): void;
+  (e: 'update:page', page: { reportId: number; offset: number; limit: number }): void;
 }>();
 
 const { t } = useI18n();
 
-interface PaginationOptions {
-  page: number;
-  itemsPerPage: number;
-  sortBy: any[];
-  sortDesc: boolean[];
-}
+type PnLItem = ProfitLossEvent & { id: number; groupLine: GroupLine };
 
 const { report } = toRefs(props);
 
-const options = ref<PaginationOptions | null>(null);
+const tablePagination = ref<DataTableOptions<PnLItem>['pagination']>();
+const expanded = ref([]);
 
-const route = useRoute();
+const sort = ref<DataTableSortData<PnLItem>>({
+  column: 'timestamp',
+  direction: 'asc',
+});
+
+const route = useRoute('/reports/[id]');
 const { getChain } = useSupportedChains();
 
-const tableHeaders = computed<DataTableHeader[]>(() => [
+const tableHeaders = computed<DataTableColumn<PnLItem>[]>(() => [
   {
-    text: '',
-    value: 'group',
-    sortable: false,
-    class: 'px-0',
-    cellClass: 'px-0'
+    label: '',
+    key: 'group',
+    class: '!p-0',
+    cellClass: '!p-0 h-px',
   },
   {
-    text: t('common.type'),
-    align: 'center',
-    value: 'type',
-    width: 110,
-    sortable: false
+    label: '',
+    key: 'expand',
   },
   {
-    text: t('common.location'),
-    value: 'location',
-    width: '120px',
+    label: t('common.type'),
+    key: 'type',
     align: 'center',
+    class: 'w-[6.875rem]',
+  },
+  {
+    label: t('common.location'),
+    key: 'location',
+    align: 'center',
+    class: 'w-[7.5rem]',
     cellClass: 'py-2',
-    sortable: false
   },
   {
-    text: t('profit_loss_events.headers.tax_free_amount'),
+    label: t('profit_loss_events.headers.tax_free_amount'),
+    key: 'free_amount',
     align: 'end',
-    value: 'free_amount',
-    sortable: false
   },
   {
-    text: t('profit_loss_events.headers.taxable_amount'),
+    label: t('profit_loss_events.headers.taxable_amount'),
+    key: 'taxable_amount',
     align: 'end',
-    value: 'taxable_amount',
-    sortable: false
   },
   {
-    text: t('common.price'),
+    label: t('common.price'),
+    key: 'price',
     align: 'end',
-    value: 'price',
-    sortable: false
   },
   {
-    text: t('profit_loss_events.headers.pnl_free'),
+    label: t('profit_loss_events.headers.pnl_free'),
+    key: 'pnl_free',
     align: 'end',
-    value: 'pnl_free',
-    sortable: false
   },
   {
-    text: t('profit_loss_events.headers.pnl_taxable'),
+    label: t('profit_loss_events.headers.pnl_taxable'),
+    key: 'pnl_taxable',
     align: 'end',
-    value: 'pnl_taxable',
-    sortable: false
   },
   {
-    text: t('common.datetime'),
-    value: 'time',
-    sortable: false
+    label: t('common.datetime'),
+    key: 'timestamp',
   },
   {
-    text: t('common.notes'),
-    value: 'notes',
-    sortable: false
+    label: t('common.notes'),
+    key: 'notes',
   },
   {
-    text: t('common.actions_text'),
-    value: 'actions',
+    label: t('common.actions_text'),
+    key: 'actions',
     align: 'end',
-    width: 140,
-    sortable: false
-  }
+    class: 'w-[8.75rem]',
+  },
 ]);
 
-const items = computed(() => {
-  const entries = report.value.entries.map((value, index) => ({
+const items = computed<PnLItem[]>(() =>
+  get(report).entries.map((value, index) => ({
     ...value,
-    id: index
-  }));
-
-  return entries.map((entry, index) => ({
-    ...entry,
-    groupLine: checkGroupLine(entries, index)
-  }));
-});
+    id: index,
+    groupLine: checkGroupLine(get(report).entries, index),
+  })),
+);
 
 const itemLength = computed(() => {
   const { entriesFound, entriesLimit } = report.value;
-  if (entriesLimit > 0 && entriesLimit <= entriesFound) {
+  if (entriesLimit > 0 && entriesLimit <= entriesFound)
     return entriesLimit;
-  }
+
   return entriesFound;
 });
 
 const premium = usePremium();
 
-const showUpgradeMessage = computed(
-  () =>
-    !premium.value && report.value.totalActions > report.value.processedActions
-);
+const showUpgradeMessage = computed(() => !premium.value && report.value.totalActions > report.value.processedActions);
 
-const updatePagination = async (options: PaginationOptions | null) => {
-  if (!options) {
+function updatePagination(tableOptions: DataTableOptions<PnLItem>) {
+  const { pagination } = tableOptions;
+  set(tablePagination, pagination);
+
+  if (!pagination)
     return;
-  }
-  const { itemsPerPage, page } = options;
+
+  const { page, limit } = pagination;
 
   const reportId = Number.parseInt(get(route).params.id as string);
 
   emit('update:page', {
     reportId,
-    limit: itemsPerPage,
-    offset: itemsPerPage * (page - 1)
+    limit,
+    offset: limit * (page - 1),
   });
-};
+}
 
-watch(options, updatePagination);
-
-const checkGroupLine = (entries: ProfitLossEvents, index: number) => {
+function checkGroupLine(entries: ProfitLossEvents, index: number) {
   const current = entries[index];
   const prev = index - 1 >= 0 ? entries[index - 1] : null;
   const next = index + 1 < entries.length ? entries[index + 1] : null;
 
   return {
     top: !!(current?.groupId && prev && current?.groupId === prev?.groupId),
-    bottom: !!(current?.groupId && next && current?.groupId === next?.groupId)
+    bottom: !!(current?.groupId && next && current?.groupId === next?.groupId),
   };
-};
+}
 
-const css = useCssModule();
+function isExpanded(id: number) {
+  return some(get(expanded), { id });
+}
+
+function expand(item: PnLItem) {
+  set(expanded, isExpanded(item.id) ? [] : [item]);
+}
 </script>
 
 <template>
   <RuiCard>
-    <template #header>{{ t('common.events') }}</template>
-    <DataTable
-      :headers="tableHeaders"
-      :items="items"
-      single-expand
+    <template #header>
+      {{ t('common.events') }}
+    </template>
+    <RuiDataTable
+      v-model:expanded="expanded"
+      v-model:sort="sort"
+      :cols="tableHeaders"
+      :rows="items"
       :loading="loading || refreshing"
-      :expanded="items"
-      :server-items-length="itemLength"
-      :options.sync="options"
-      sort-by="time"
+      :pagination="{
+        limit: tablePagination?.limit ?? 10,
+        page: tablePagination?.page ?? 1,
+        total: itemLength,
+      }"
+      :pagination-modifiers="{ external: true }"
+      outlined
+      single-expand
+      sticky-header
+      row-attr="id"
+      @update:options="updatePagination($event)"
     >
-      <template #item.group="{ item }">
+      <template #item.group="{ row }">
         <RuiTooltip
-          v-if="item.groupId && (item.groupLine.top || item.groupLine.bottom)"
+          v-if="row.groupId && (row.groupLine.top || row.groupLine.bottom)"
           :popper="{ placement: 'right' }"
-          open-delay="400"
-          class="h-full"
+          :open-delay="400"
+          class="h-full !block"
         >
           <template #activator>
-            <div :class="css.group">
+            <div :class="$style.group">
               <div
-                v-if="item.groupLine.top"
-                :class="[css.group__line, css['group__line-top']]"
+                v-if="row.groupLine.top"
+                :class="[$style.group__line, $style['group__line-top']]"
               />
-              <div :class="css.group__dot" />
+              <div :class="$style.group__dot" />
               <div
-                v-if="item.groupLine.bottom"
-                :class="[css.group__line, css['group__line-bottom']]"
+                v-if="row.groupLine.bottom"
+                :class="[$style.group__line, $style['group__line-bottom']]"
               />
             </div>
           </template>
           <span>{{ t('profit_loss_events.same_action') }}</span>
         </RuiTooltip>
       </template>
-      <template #item.type="{ item }">
-        <ProfitLossEventType :type="item.type" />
+      <template #item.type="{ row }">
+        <ProfitLossEventType :type="row.type" />
       </template>
-      <template #item.location="{ item }">
-        <LocationDisplay :identifier="item.location" />
+      <template #item.location="{ row }">
+        <LocationDisplay :identifier="row.location" />
       </template>
-      <template #item.time="{ item }">
-        <DateDisplay :timestamp="item.timestamp" />
+      <template #item.timestamp="{ row }">
+        <DateDisplay :timestamp="row.timestamp" />
       </template>
-      <template #item.free_amount="{ item }">
+      <template #item.free_amount="{ row }">
         <div class="flex items-center justify-between flex-nowrap gap-4">
-          <AssetLink v-if="item.asset" :asset="item.asset" link>
-            <AssetIcon class="flex" :identifier="item.asset" size="24px" />
+          <AssetLink
+            v-if="row.assetIdentifier"
+            :asset="row.assetIdentifier"
+            link
+          >
+            <AssetIcon
+              class="flex"
+              :identifier="row.assetIdentifier"
+              size="24px"
+            />
           </AssetLink>
           <AmountDisplay
             force-currency
-            :value="item.freeAmount"
-            :asset="item.asset ? item.asset : ''"
+            :value="row.freeAmount"
+            :asset="row.assetIdentifier ? row.assetIdentifier : ''"
           />
         </div>
       </template>
-      <template #item.taxable_amount="{ item }">
+      <template #item.taxable_amount="{ row }">
         <AmountDisplay
           force-currency
-          :value="item.taxableAmount"
-          :asset="item.asset ? item.asset : ''"
+          :value="row.taxableAmount"
+          :asset="row.assetIdentifier ? row.assetIdentifier : ''"
         />
       </template>
-      <template #item.price="{ item }">
+      <template #item.price="{ row }">
         <AmountDisplay
           force-currency
-          :value="item.price"
+          :value="row.price"
           show-currency="symbol"
           :fiat-currency="report.settings.profitCurrency"
         />
       </template>
-      <template #item.pnl_taxable="{ item }">
+      <template #item.pnl_taxable="{ row }">
         <AmountDisplay
           pnl
           force-currency
-          :value="item.pnlTaxable"
+          :value="row.pnlTaxable"
           show-currency="symbol"
           :fiat-currency="report.settings.profitCurrency"
         />
       </template>
-      <template #item.pnl_free="{ item }">
+      <template #item.pnl_free="{ row }">
         <AmountDisplay
           pnl
           force-currency
-          :value="item.pnlFree"
+          :value="row.pnlFree"
           show-currency="symbol"
           :fiat-currency="report.settings.profitCurrency"
         />
       </template>
-      <template v-if="showUpgradeMessage" #body.prepend="{ headers }">
+      <template
+        v-if="showUpgradeMessage"
+        #body.prepend="{ colspan }"
+      >
         <UpgradeRow
           events
           :total="report.totalActions"
           :limit="report.processedActions"
           :time-end="report.lastProcessedTimestamp"
           :time-start="report.firstProcessedTimestamp"
-          :colspan="headers.length"
+          :colspan="colspan"
           :label="t('common.events')"
         />
       </template>
-      <template #item.notes="{ item }">
-        <div class="py-4">
+      <template #item.notes="{ row }">
+        <div class="py-1">
           <HistoryEventNote
-            v-if="isTransactionEvent(item)"
-            :notes="item.notes"
-            :amount="
-              item.taxableAmount.isZero() ? item.freeAmount : item.taxableAmount
-            "
-            :asset="item.asset"
-            :chain="getChain(item.location)"
+            v-if="isTransactionEvent(row)"
+            :notes="row.notes"
+            :amount="row.taxableAmount.isZero() ? row.freeAmount : row.taxableAmount"
+            :asset="row.assetIdentifier"
+            :chain="getChain(row.location)"
           />
-          <template v-else>{{ item.notes }}</template>
+          <HistoryEventNote
+            v-else
+            :notes="row.notes"
+            :asset="row.assetIdentifier"
+          />
         </div>
       </template>
-      <template #item.actions="{ item }">
+      <template #item.actions="{ row }">
         <ReportProfitLossEventAction
-          :event="item"
+          v-if="report.settings.profitCurrency"
+          :event="row"
           :currency="report.settings.profitCurrency"
         />
       </template>
-      <template #expanded-item="{ headers, item }">
+      <template #item.expand="{ row }">
+        <RuiTooltip
+          :open-delay="400"
+          :popper="{ placement: 'top' }"
+        >
+          <template #activator>
+            <RuiTableRowExpander
+              v-if="row.costBasis"
+              :expanded="isExpanded(row.id)"
+              @click="expand(row)"
+            />
+          </template>
+
+          {{ isExpanded(row.id) ? t('profit_loss_events.cost_basis.hide') : t('profit_loss_events.cost_basis.show') }}
+        </RuiTooltip>
+      </template>
+      <template #expanded-item="{ row }">
         <CostBasisTable
-          v-if="item.costBasis"
-          :show-group-line="item.groupLine.bottom"
+          v-if="row.costBasis"
+          :show-group-line="row.groupLine.bottom"
           :currency="report.settings.profitCurrency"
-          :colspan="headers.length"
-          :cost-basis="item.costBasis"
+          :cost-basis="row.costBasis"
         />
       </template>
-    </DataTable>
+    </RuiDataTable>
   </RuiCard>
 </template>
 
 <style module lang="scss">
 .group {
-  height: 100%;
-  position: relative;
-  width: 10px;
-  margin-left: 1.5rem;
+  @apply relative h-full w-2.5 ml-6;
 
   &__dot {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: 10px;
-    height: 10px;
-    border-radius: 10px;
-    background: var(--v-primary-base);
+    @apply absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-rui-primary;
   }
 
   &__line {
-    position: absolute;
-    height: 50%;
-    left: 50%;
-    width: 0;
-    transform: translateX(-50%);
-    border-left: 2px dashed var(--v-primary-base);
+    @apply absolute h-1/2 left-1/2 w-0 transform -translate-x-1/2 border-l-2 border-dashed border-rui-primary;
 
     &-top {
-      top: 0;
+      @apply top-0;
     }
 
     &-bottom {
-      bottom: 0;
+      @apply bottom-0;
     }
   }
 }

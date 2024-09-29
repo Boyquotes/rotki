@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { Severity } from '@rotki/common/lib/messages';
+import { Severity } from '@rotki/common';
 import { DialogType } from '@/types/dialogs';
+import { TaskType } from '@/types/task-type';
 
 withDefaults(
   defineProps<{
     dropdown?: boolean;
   }>(),
-  { dropdown: false }
+  { dropdown: false },
 );
 
 type ResetType = 'soft' | 'hard';
@@ -20,31 +21,35 @@ const { restartBackend } = useBackendManagement();
 
 const { t } = useI18n();
 
+const { isTaskRunning } = useTaskStore();
+const loading = isTaskRunning(TaskType.RESET_ASSET);
+
 async function restoreAssets(resetType: ResetType) {
+  if (get(loading))
+    return;
+
   const result = await restoreAssetsDatabase(resetType);
 
   if (result.success) {
     showDoneConfirmation();
-  } else {
+  }
+  else {
     const { message } = result;
-    const title = t('asset_update.restore.title').toString();
-    if (message.includes('There are assets that can not')) {
+    const title = t('asset_update.restore.title');
+    if (message.includes('There are assets that can not'))
       showDoubleConfirmation(resetType);
-    }
+
     notify({
       title,
       message,
       severity: Severity.ERROR,
-      display: true
+      display: true,
     });
   }
 }
 
-const { navigateToUserLogin } = useAppNavigation();
-
 async function updateComplete() {
   await logout();
-  await navigateToUserLogin();
   setConnected(false);
   await restartBackend();
   await connect();
@@ -52,51 +57,54 @@ async function updateComplete() {
 
 const { show } = useConfirmStore();
 
-const showRestoreConfirmation = (type: ResetType) => {
+function showRestoreConfirmation(type: ResetType) {
   show(
     {
       title: t('asset_update.restore.delete_confirmation.title'),
       message:
         type === 'soft'
           ? t('asset_update.restore.delete_confirmation.soft_reset_message')
-          : t('asset_update.restore.delete_confirmation.hard_reset_message')
+          : t('asset_update.restore.delete_confirmation.hard_reset_message'),
     },
-    () => restoreAssets(type)
+    () => restoreAssets(type),
   );
-};
+}
 
-const showDoubleConfirmation = (type: ResetType) => {
+function showDoubleConfirmation(type: ResetType) {
   show(
     {
       title: t('asset_update.restore.hard_restore_confirmation.title'),
-      message: t('asset_update.restore.hard_restore_confirmation.message')
+      message: t('asset_update.restore.hard_restore_confirmation.message'),
     },
-    () => restoreAssets(type)
+    () => restoreAssets(type),
   );
-};
+}
 
-const showDoneConfirmation = () => {
+function showDoneConfirmation() {
   show(
     {
       title: t('asset_update.restore.success.title'),
       message: t('asset_update.restore.success.description'),
       primaryAction: t('common.actions.ok'),
       singleAction: true,
-      type: DialogType.SUCCESS
+      type: DialogType.SUCCESS,
     },
-    updateComplete
+    updateComplete,
   );
-};
+}
 </script>
 
 <template>
-  <VMenu v-if="dropdown" offset-x left>
-    <template #activator="{ on }">
+  <RuiMenu
+    v-if="dropdown"
+    :popper="{ placement: 'left-start' }"
+  >
+    <template #activator="{ attrs }">
       <RuiButton
         id="reset-asset-activator"
-        variant="text"
-        class="!p-3 rounded-none"
-        v-on="on"
+        variant="list"
+        :disabled="loading"
+        v-bind="attrs"
       >
         <template #prepend>
           <RuiIcon name="restart-line" />
@@ -107,35 +115,32 @@ const showDoneConfirmation = () => {
         </template>
       </RuiButton>
     </template>
-    <VList>
-      <VListItem two-line link @click="showRestoreConfirmation('soft')">
-        <VListItemContent>
-          <VListItemTitle>
-            {{ t('asset_update.restore.soft_reset') }}
-          </VListItemTitle>
-          <VListItemSubtitle>
-            {{ t('asset_update.restore.soft_reset_hint') }}
-          </VListItemSubtitle>
-        </VListItemContent>
-      </VListItem>
-      <VListItem two-line link @click="showRestoreConfirmation('hard')">
-        <VListItemContent>
-          <VListItemTitle>
-            {{ t('asset_update.restore.hard_reset') }}
-          </VListItemTitle>
-          <VListItemSubtitle>
-            {{ t('asset_update.restore.hard_reset_hint') }}
-          </VListItemSubtitle>
-        </VListItemContent>
-      </VListItem>
-    </VList>
-  </VMenu>
-  <div v-else class="flex flex-row gap-2">
-    <RuiTooltip :popper="{ placement: 'top' }" open-delay="400">
+    <div class="py-2">
+      <ListItem
+        :title="t('asset_update.restore.soft_reset')"
+        :subtitle="t('asset_update.restore.soft_reset_hint')"
+        @click="showRestoreConfirmation('soft')"
+      />
+      <ListItem
+        :title="t('asset_update.restore.hard_reset')"
+        :subtitle="t('asset_update.restore.hard_reset_hint')"
+        @click="showRestoreConfirmation('hard')"
+      />
+    </div>
+  </RuiMenu>
+  <div
+    v-else
+    class="flex flex-row gap-2"
+  >
+    <RuiTooltip
+      :popper="{ placement: 'top' }"
+      :open-delay="400"
+    >
       <template #activator>
         <RuiButton
           variant="outlined"
           color="primary"
+          :loading="loading"
           @click="showRestoreConfirmation('soft')"
         >
           {{ t('asset_update.restore.soft_reset') }}
@@ -143,9 +148,16 @@ const showDoneConfirmation = () => {
       </template>
       {{ t('asset_update.restore.soft_reset_hint') }}
     </RuiTooltip>
-    <RuiTooltip :popper="{ placement: 'top' }" open-delay="400">
+    <RuiTooltip
+      :popper="{ placement: 'top' }"
+      :open-delay="400"
+    >
       <template #activator>
-        <RuiButton color="primary" @click="showRestoreConfirmation('hard')">
+        <RuiButton
+          color="primary"
+          :loading="loading"
+          @click="showRestoreConfirmation('hard')"
+        >
           {{ t('asset_update.restore.hard_reset') }}
         </RuiButton>
       </template>

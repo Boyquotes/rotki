@@ -9,37 +9,50 @@ import gevent
 from rotkehlchen.api.websockets.typedefs import WSMessageType
 from rotkehlchen.assets.asset import AssetWithOracles
 from rotkehlchen.chain.bitcoin.xpub import XpubManager
-from rotkehlchen.chain.constants import LAST_EVM_ACCOUNTS_DETECT_KEY
-from rotkehlchen.chain.ethereum.modules.eth2.constants import (
-    LAST_PRODUCED_BLOCKS_QUERY_TS,
-    LAST_WITHDRAWALS_EXIT_QUERY_TS,
-    WITHDRAWALS_TS_PREFIX,
-)
 from rotkehlchen.chain.ethereum.modules.makerdao.cache import (
     query_ilk_registry_and_maybe_update_cache,
 )
 from rotkehlchen.chain.ethereum.modules.yearn.utils import query_yearn_vaults
 from rotkehlchen.chain.ethereum.utils import should_update_protocol_cache
-from rotkehlchen.constants.misc import LAST_SPAM_ASSETS_DETECT_KEY
 from rotkehlchen.constants.timing import (
+    AAVE_V3_ASSETS_UPDATE,
+    AUGMENTED_SPAM_ASSETS_DETECTION_REFRESH,
     DATA_UPDATES_REFRESH,
     DAY_IN_SECONDS,
-    EVM_ACCOUNTS_DETECTION_REFRESH,
+    EVMLIKE_ACCOUNTS_DETECTION_REFRESH,
     HOUR_IN_SECONDS,
+    OWNED_ASSETS_UPDATE,
     SPAM_ASSETS_DETECTION_REFRESH,
 )
-from rotkehlchen.db.constants import LAST_DATA_UPDATES_KEY
+from rotkehlchen.db.cache import DBCacheDynamic, DBCacheStatic
+from rotkehlchen.db.calendar import CalendarEntry
 from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.db.filtering import EvmTransactionsFilterQuery, HistoryEventFilterQuery
 from rotkehlchen.db.history_events import DBHistoryEvents
+from rotkehlchen.db.settings import CachedSettings
 from rotkehlchen.errors.api import PremiumAuthenticationError
 from rotkehlchen.errors.asset import UnknownAsset, WrongAssetType
 from rotkehlchen.errors.misc import RemoteError
+from rotkehlchen.externalapis.gnosispay import init_gnosis_pay
+from rotkehlchen.externalapis.monerium import init_monerium
 from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.history.types import HistoricalPriceOracle
 from rotkehlchen.logging import RotkehlchenLogsAdapter
-from rotkehlchen.premium.premium import Premium, premium_create_and_verify
-from rotkehlchen.tasks.assets import autodetect_spam_assets_in_db
+from rotkehlchen.premium.premium import Premium, has_premium_check, premium_create_and_verify
+from rotkehlchen.serialization.deserialize import deserialize_timestamp
+from rotkehlchen.tasks.assets import (
+    augmented_spam_detection,
+    autodetect_spam_assets_in_db,
+    maybe_detect_new_tokens,
+    update_aave_v3_underlying_assets,
+    update_owned_assets,
+)
+from rotkehlchen.tasks.calendar import (
+    CalendarNotification,
+    delete_past_calendar_entries,
+    maybe_create_calendar_reminders,
+    notify_reminders,
+)
 from rotkehlchen.tasks.utils import query_missing_prices_of_base_entries, should_run_periodic_task
 from rotkehlchen.types import (
     EVM_CHAINS_WITH_TRANSACTIONS,
@@ -50,11 +63,12 @@ from rotkehlchen.types import (
     Location,
     Optional,
     SupportedBlockchain,
+    Timestamp,
     get_args,
 )
 from rotkehlchen.utils.misc import ts_now
 
-from .events import LAST_EVENTS_PROCESSING_TASK_TS, process_events
+from .events import process_events
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.aggregator import ChainsAggregator
@@ -131,6 +145,7 @@ class TaskManager:
         self.query_balances = query_balances
         self.query_yearn_vaults = query_yearn_vaults
         self.last_premium_status_check = ts_now()
+        self.last_calendar_reminder_check = Timestamp(0)
         self.msg_aggregator = msg_aggregator
         self.premium_check_retries = 0
         self.premium_sync_manager: Optional[PremiumSyncManager] = premium_sync_manager
@@ -156,6 +171,15 @@ class TaskManager:
             self._maybe_run_events_processing,
             self._maybe_detect_withdrawal_exits,
             self._maybe_detect_new_spam_tokens,
+            self._maybe_augmented_detect_new_spam_tokens,
+            self._maybe_query_monerium,
+            self._maybe_update_owned_assets,
+            self._maybe_update_aave_v3_underlying_assets,
+            self._maybe_create_calendar_reminder,
+            self._maybe_trigger_calendar_reminder,
+            self._maybe_delete_past_calendar_events,
+            self._maybe_query_graph_delegated_tokens,
+            self._maybe_query_gnosispay,
         ]
         if self.premium_sync_manager is not None:
             self.potential_tasks.append(self._maybe_schedule_db_upload)
@@ -207,7 +231,7 @@ class TaskManager:
             if asset.cryptocompare is None and asset.symbol is None:
                 continue  # type: ignore  # asset.symbol may be None for auto generated underlying tokens
 
-            data_range = GlobalDBHandler().get_historical_price_range(
+            data_range = GlobalDBHandler.get_historical_price_range(
                 from_asset=asset,
                 to_asset=main_currency,
                 source=HistoricalPriceOracle.CRYPTOCOMPARE,
@@ -307,7 +331,7 @@ class TaskManager:
                 queriable_accounts: list[ChecksumEvmAddress] = []
                 for account in accounts:
                     _, end_ts = dbevmtx.get_queried_range(cursor, account, blockchain)
-                    if now - max(self.last_evm_tx_query_ts[(account, blockchain)], end_ts) > EVM_TX_QUERY_FREQUENCY:  # noqa: E501
+                    if now - max(self.last_evm_tx_query_ts[account, blockchain], end_ts) > EVM_TX_QUERY_FREQUENCY:  # noqa: E501
                         queriable_accounts.append(account)
 
             if len(queriable_accounts) == 0:
@@ -317,7 +341,7 @@ class TaskManager:
             address = random.choice(queriable_accounts)
             task_name = f'Query {blockchain!s} transactions for {address}'
             log.debug(f'Scheduling task to {task_name}')
-            self.last_evm_tx_query_ts[(address, blockchain)] = now
+            self.last_evm_tx_query_ts[address, blockchain] = now
             # Since this task is heavy we spawn it only for one chain at a time.
             return [self.greenlet_manager.spawn_and_track(
                 after_seconds=None,
@@ -516,27 +540,31 @@ class TaskManager:
         Update the balances of a user if the difference between last time they were updated
         and the current time exceeds the `balance_save_frequency`.
         """
-        with self.database.conn.read_ctx() as cursor:
-            if self.database.should_save_balances(cursor):
-                task_name = 'Periodically update snapshot balances'
-                log.debug(f'Scheduling task to {task_name}')
-                return [self.greenlet_manager.spawn_and_track(
-                    after_seconds=None,
-                    task_name=task_name,
-                    exception_is_error=True,
-                    method=self.query_balances,
-                    requested_save_data=True,
-                    save_despite_errors=False,
-                    timestamp=None,
-                    ignore_cache=True,
-                )]
-        return None
+        with self.database.conn.read_ctx() as read_cursor:
+            if not self.database.should_save_balances(read_cursor):
+                return None
+
+        maybe_detect_new_tokens(self.database)
+        task_name = 'Periodically update snapshot balances'
+        log.debug(f'Scheduling task to {task_name}')
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name=task_name,
+            exception_is_error=True,
+            method=self.query_balances,
+            requested_save_data=True,
+            save_despite_errors=False,
+            timestamp=None,
+            ignore_cache=True,
+        )]
 
     def _maybe_query_produced_blocks(self) -> Optional[list[gevent.Greenlet]]:
         """Schedules the blocks production query if enough time has passed"""
         with self.database.conn.read_ctx() as cursor:
-            result = self.database.get_used_query_range(cursor, LAST_PRODUCED_BLOCKS_QUERY_TS)
-            if result is not None and ts_now() - result[1] <= DAY_IN_SECONDS:
+            result = self.database.get_static_cache(
+                cursor=cursor, name=DBCacheStatic.LAST_PRODUCED_BLOCKS_QUERY_TS,
+            )
+            if result is not None and ts_now() - result <= DAY_IN_SECONDS:
                 return None
 
             cursor.execute('SELECT validator_index FROM eth2_validators')
@@ -570,14 +598,17 @@ class TaskManager:
         now = ts_now()
         addresses = self.chains_aggregator.accounts.eth
         with self.database.conn.read_ctx() as cursor:
-            end_timestamps = cursor.execute('SELECT end_ts FROM used_query_ranges WHERE name LIKE ?', (f'{WITHDRAWALS_TS_PREFIX}%',)).fetchall()  # noqa: E501
+            end_timestamps = cursor.execute(
+                'SELECT value FROM key_value_cache WHERE name LIKE ?',
+                (DBCacheDynamic.WITHDRAWALS_TS.value[0].replace('{address}', '%'),),
+            ).fetchall()
 
         should_query = False
         if len(end_timestamps) != len(addresses):
             should_query = True
         else:
             for entry in end_timestamps:
-                if now - entry[0] >= HOUR_IN_SECONDS * 3:
+                if now - int(entry[0]) >= HOUR_IN_SECONDS * 3:
                     should_query = True
                     break
 
@@ -605,8 +636,10 @@ class TaskManager:
             return None
 
         with self.database.conn.read_ctx() as cursor:
-            result = self.database.get_used_query_range(cursor, LAST_WITHDRAWALS_EXIT_QUERY_TS)
-            if result is not None and ts_now() - result[1] <= HOUR_IN_SECONDS * 2:
+            result = self.database.get_static_cache(
+                cursor=cursor, name=DBCacheStatic.LAST_WITHDRAWALS_EXIT_QUERY_TS,
+            )
+            if result is not None and ts_now() - result <= HOUR_IN_SECONDS * 2:
                 return None
 
         task_name = 'Periodically detect withdrawal exits'
@@ -622,8 +655,10 @@ class TaskManager:
         """Schedules the events processing task which may combine/edit events"""
         now = ts_now()
         with self.database.conn.read_ctx() as cursor:
-            result = self.database.get_used_query_range(cursor, LAST_EVENTS_PROCESSING_TASK_TS)
-            if result is not None and now - result[1] <= HOUR_IN_SECONDS:
+            result = self.database.get_static_cache(
+                cursor=cursor, name=DBCacheStatic.LAST_EVENTS_PROCESSING_TASK_TS,
+            )
+            if result is not None and now - result <= HOUR_IN_SECONDS:
                 return None
 
         task_name = 'Periodically process events'
@@ -638,6 +673,10 @@ class TaskManager:
         )]
 
     def _maybe_update_yearn_vaults(self) -> Optional[list[gevent.Greenlet]]:
+        with self.database.conn.read_ctx() as cursor:
+            if len(self.database.get_single_blockchain_addresses(cursor, SupportedBlockchain.ETHEREUM)) == 0:  # noqa: E501
+                return None
+
         if should_update_protocol_cache(CacheType.YEARN_VAULTS) is True:
             ethereum_manager: EthereumManager = self.chains_aggregator.get_chain_manager(SupportedBlockchain.ETHEREUM)  # noqa: E501
             return [self.greenlet_manager.spawn_and_track(
@@ -656,7 +695,7 @@ class TaskManager:
         Function that schedules the data update task if either there is no data update
         cache yet or this cache is older than `DATA_UPDATES_REFRESH`
         """
-        if should_run_periodic_task(self.database, LAST_DATA_UPDATES_KEY, DATA_UPDATES_REFRESH) is False:  # noqa: E501
+        if should_run_periodic_task(self.database, DBCacheStatic.LAST_DATA_UPDATES_TS, DATA_UPDATES_REFRESH) is False:  # noqa: E501
             return None
 
         return [self.greenlet_manager.spawn_and_track(
@@ -671,7 +710,7 @@ class TaskManager:
         Function that schedules the EVM accounts detection task if there has been more than
         EVM_ACCOUNTS_DETECTION_REFRESH seconds since the last time it ran.
         """
-        if should_run_periodic_task(self.database, LAST_EVM_ACCOUNTS_DETECT_KEY, EVM_ACCOUNTS_DETECTION_REFRESH) is False:  # noqa: E501
+        if should_run_periodic_task(self.database, DBCacheStatic.LAST_EVM_ACCOUNTS_DETECT_TS, EVMLIKE_ACCOUNTS_DETECTION_REFRESH) is False:  # noqa: E501
             return None
 
         return [self.greenlet_manager.spawn_and_track(
@@ -684,6 +723,10 @@ class TaskManager:
         )]
 
     def _maybe_update_ilk_cache(self) -> Optional[list[gevent.Greenlet]]:
+        with self.database.conn.read_ctx() as cursor:
+            if len(self.database.get_single_blockchain_addresses(cursor, SupportedBlockchain.ETHEREUM)) == 0:  # noqa: E501
+                return None
+
         if should_update_protocol_cache(CacheType.MAKERDAO_VAULT_ILK, 'ETH-A') is True:
             return [self.greenlet_manager.spawn_and_track(
                 after_seconds=None,
@@ -700,7 +743,7 @@ class TaskManager:
         This function queries the globaldb looking for assets that look like spam tokens
         and ignores them in addition to marking them as spam tokens
         """
-        if should_run_periodic_task(self.database, LAST_SPAM_ASSETS_DETECT_KEY, SPAM_ASSETS_DETECTION_REFRESH) is False:  # noqa: E501
+        if should_run_periodic_task(self.database, DBCacheStatic.LAST_SPAM_ASSETS_DETECT_KEY, SPAM_ASSETS_DETECTION_REFRESH) is False:  # noqa: E501
             return None
 
         return [self.greenlet_manager.spawn_and_track(
@@ -709,6 +752,188 @@ class TaskManager:
             exception_is_error=True,
             method=autodetect_spam_assets_in_db,
             user_db=self.database,
+        )]
+
+    def _maybe_augmented_detect_new_spam_tokens(self) -> Optional[list[gevent.Greenlet]]:
+        """
+        This function runs the augmented token detection algorithm which is a heavier and more
+        time consuming analysis on user's asset that involves external calls in order to find and
+        detect potential spam tokens.
+        """
+        if should_run_periodic_task(self.database, DBCacheStatic.LAST_AUGMENTED_SPAM_ASSETS_DETECT_KEY, AUGMENTED_SPAM_ASSETS_DETECTION_REFRESH) is False:  # noqa: E501
+            return None
+
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name='Augmented detection of spam assets',
+            exception_is_error=True,
+            method=augmented_spam_detection,
+            user_db=self.database,
+        )]
+
+    def _maybe_update_owned_assets(self) -> Optional[list[gevent.Greenlet]]:
+        """
+        This function runs the logic to copy the owned assets from the user db to the globaldb.
+        This task is required to have a fresh status on the assets searches when the filter for
+        owned assets is used.
+        """
+        if should_run_periodic_task(self.database, DBCacheStatic.LAST_OWNED_ASSETS_UPDATE, OWNED_ASSETS_UPDATE) is False:  # noqa: E501
+            return None
+
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name='Update owned assets in globaldb',
+            exception_is_error=True,
+            method=update_owned_assets,
+            user_db=self.database,
+        )]
+
+    def _maybe_update_aave_v3_underlying_assets(self) -> Optional[list[gevent.Greenlet]]:
+        """
+        This function runs the logic to query the aave v3 contracts to get all the
+        underlying assets supported by them and save them in the globaldb.
+        """
+        if should_run_periodic_task(self.database, DBCacheStatic.LAST_AAVE_V3_ASSETS_UPDATE, AAVE_V3_ASSETS_UPDATE) is False:  # noqa: E501
+            return None
+
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name='Update aave v3 underlying assets in globaldb',
+            exception_is_error=True,
+            method=update_aave_v3_underlying_assets,
+            chains_aggregator=self.chains_aggregator,
+        )]
+
+    def _maybe_query_monerium(self) -> Optional[list[gevent.Greenlet]]:
+        if not has_premium_check(self.chains_aggregator.premium):
+            return None  # should not run in free mode
+
+        if (monerium := init_monerium(self.database)) is None:
+            return None
+
+        if should_run_periodic_task(self.database, DBCacheStatic.LAST_MONERIUM_QUERY_TS, HOUR_IN_SECONDS) is False:  # noqa: E501
+            return None
+
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name='Query monerium',
+            exception_is_error=False,  # don't spam user messages if errors happen
+            method=monerium.get_and_process_orders,
+        )]
+
+    def _maybe_query_gnosispay(self) -> Optional[list[gevent.Greenlet]]:
+        if not has_premium_check(self.chains_aggregator.premium):
+            return None  # should not run in free mode
+
+        if (gnosispay := init_gnosis_pay(self.database)) is None:
+            return None
+
+        if should_run_periodic_task(self.database, DBCacheStatic.LAST_GNOSISPAY_QUERY_TS, HOUR_IN_SECONDS) is False:  # noqa: E501
+            return None
+
+        from_ts = Timestamp(0)
+        with self.database.conn.read_ctx() as cursor:
+            cursor.execute('SELECT value FROM key_value_cache WHERE name=?', (DBCacheStatic.LAST_GNOSISPAY_QUERY_TS.value,))  # noqa: E501
+            if (result := cursor.fetchone()) is not None:
+                from_ts = deserialize_timestamp(result[0])
+
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name='Query Gnosis Pay transaction',
+            exception_is_error=False,  # don't spam user messages if errors happen
+            method=gnosispay.get_and_process_transactions,
+            after_ts=from_ts,
+        )]
+
+    def _maybe_create_calendar_reminder(self) -> Optional[list[gevent.Greenlet]]:
+        """Create upcoming reminders for specific history events, if not already created."""
+        if (
+            CachedSettings().get_entry('auto_create_calendar_reminders') is False or
+            should_run_periodic_task(
+                database=self.database,
+                key_name=DBCacheStatic.LAST_CREATE_REMINDER_CHECK_TS,
+                refresh_period=DAY_IN_SECONDS,
+            ) is False
+        ):
+            return None
+
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name='Maybe create calendar reminders',
+            exception_is_error=True,
+            method=maybe_create_calendar_reminders,
+            database=self.database,
+        )]
+
+    def _maybe_trigger_calendar_reminder(self) -> Optional[list[gevent.Greenlet]]:
+        """Get upcoming reminders and maybe process them"""
+        if (now := ts_now()) - self.last_calendar_reminder_check < 60 * 5:
+            return None
+
+        with self.database.conn.read_ctx() as cursor:
+            cursor.execute(
+                'SELECT event.identifier, event.name, event.description, event.counterparty, '
+                'event.timestamp, event.address, event.blockchain, event.color, '
+                'event.auto_delete, reminder.identifier, reminder.secs_before FROM '
+                'calendar_reminders AS reminder LEFT JOIN calendar AS event '
+                'ON reminder.event_id = event.identifier WHERE '
+                '? > event.timestamp - reminder.secs_before',
+                (now,),
+            )
+            reminders = [CalendarNotification(
+                event=CalendarEntry.deserialize_from_db(row[:9]),
+                identifier=row[9],
+                secs_before=row[10],
+            ) for row in cursor]
+
+        if len(reminders) == 0:
+            return None
+
+        self.last_calendar_reminder_check = now
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name='Notify calendar reminders',
+            exception_is_error=True,
+            method=notify_reminders,
+            reminders=reminders,
+            database=self.database,
+            msg_aggregator=self.msg_aggregator,
+        )]
+
+    def _maybe_delete_past_calendar_events(self) -> Optional[list[gevent.Greenlet]]:
+        """
+        Delete old calendar events if the setting for deleting them allows it and if they haven't
+        been marked to not be deleted.
+        """
+        if should_run_periodic_task(self.database, DBCacheStatic.LAST_DELETE_PAST_CALENDAR_EVENTS, DAY_IN_SECONDS) is False:  # noqa: E501
+            return None
+
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name='Delete old calendar entries',
+            exception_is_error=True,
+            method=delete_past_calendar_entries,
+            database=self.database,
+        )]
+
+    def _maybe_query_graph_delegated_tokens(self) -> Optional[list[gevent.Greenlet]]:
+        """
+        Periodically query Ethereum transaction logs for Graph staking-related transactions,
+        particularly, search for DelegationTransferredToL2 event. If not found, it decodes
+        and adds them.
+        """
+        if should_run_periodic_task(self.database, DBCacheStatic.LAST_GRAPH_DELEGATIONS_CHECK_TS, DAY_IN_SECONDS) is False:  # noqa: E501
+            return None
+
+        if len(self.chains_aggregator.accounts.get(SupportedBlockchain.ETHEREUM)) == 0:
+            return None
+
+        return [self.greenlet_manager.spawn_and_track(
+            after_seconds=None,
+            task_name="Search for Graph's GRT DelegationTransferredToL2 events",
+            exception_is_error=True,
+            method=self.chains_aggregator.ethereum.transactions.query_for_graph_delegation_txns,  # type: ignore[attr-defined]
+            addresses=self.chains_aggregator.accounts.eth,
         )]
 
     def _schedule(self) -> None:
@@ -759,4 +984,13 @@ class TaskManager:
             return
 
         with self.schedule_lock:
-            self._schedule()
+            if self.should_schedule:  # adding this check here to protect against going to schedule during logout/shutdown once task manager has been cleared and DB has been deleted  # noqa: E501
+                self._schedule()
+
+    def clear(self) -> None:
+        """Ensure that no task is kept referenced. Used when removing the task manager"""
+        for task_list in self.running_greenlets.values():
+            gevent.killall(task_list)
+
+        self.running_greenlets.clear()
+        self.should_schedule = False

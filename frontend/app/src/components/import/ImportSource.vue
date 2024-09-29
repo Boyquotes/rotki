@@ -1,54 +1,51 @@
 <script setup lang="ts">
 import useVuelidate from '@vuelidate/core';
 import { helpers, requiredIf } from '@vuelidate/validators';
-import { displayDateFormatter } from '@/data/date_formatter';
+import { displayDateFormatter } from '@/data/date-formatter';
 import { DateFormat } from '@/types/date-format';
-import { type TaskMeta } from '@/types/task';
 import { TaskType } from '@/types/task-type';
-import { type ImportSourceType } from '@/types/upload-types';
+import { toMessages } from '@/utils/validation';
+import type { TaskMeta } from '@/types/task';
+import type { ImportSourceType } from '@/types/upload-types';
 
-const props = withDefaults(
-  defineProps<{ source: ImportSourceType; icon?: string }>(),
-  { icon: '' }
-);
+const props = withDefaults(defineProps<{ source: ImportSourceType; icon?: string }>(), { icon: '' });
 
 const { source } = toRefs(props);
-const dateInputFormat = ref<string | null>(null);
+const dateInputFormat = ref<string>();
 const uploaded = ref(false);
 const errorMessage = ref('');
 const formatHelp = ref<boolean>(false);
-const file = ref<File | null>(null);
+const file = ref<File>();
 
 const { t } = useI18n();
-const { appSession } = useInterop();
+const { getPath } = useInterop();
 
 const rules = {
   dateInputFormat: {
     required: helpers.withMessage(
-      t('general_settings.date_display.validation.empty').toString(),
-      requiredIf(refIsTruthy(dateInputFormat))
+      t('general_settings.date_display.validation.empty'),
+      requiredIf(refIsTruthy(dateInputFormat)),
     ),
     validDate: helpers.withMessage(
-      t('general_settings.date_display.validation.invalid').toString(),
-      (v: string | null): boolean =>
-        v === null || displayDateFormatter.containsValidDirectives(v)
-    )
-  }
+      t('general_settings.date_display.validation.invalid'),
+      (v: string | undefined): boolean => v === undefined || displayDateFormatter.containsValidDirectives(v),
+    ),
+  },
 };
 
 const v$ = useVuelidate(
   rules,
   {
-    dateInputFormat
+    dateInputFormat,
   },
-  { $autoDirty: true }
+  { $autoDirty: true },
 );
 
 const dateInputFormatExample = computed(() => {
   const now = new Date();
-  if (!get(dateInputFormat)) {
+  if (!get(dateInputFormat))
     return '';
-  }
+
   return displayDateFormatter.format(now, get(dateInputFormat)!);
 });
 
@@ -58,78 +55,67 @@ const { awaitTask, isTaskRunning } = useTaskStore();
 const loading = isTaskRunning(taskType, { source: get(source) });
 const { importDataFrom, importFile } = useImportDataApi();
 
-const uploadPackaged = async (file: string) => {
+async function uploadPackaged(file: string) {
   try {
     const sourceVal = get(source);
-    const { taskId } = await importDataFrom(
-      sourceVal,
-      file,
-      get(dateInputFormat) || null
-    );
+    const { taskId } = await importDataFrom(sourceVal, file, get(dateInputFormat) || null);
 
     const taskMeta = {
-      title: t('file_upload.task.title', { source: sourceVal }).toString(),
-      source: sourceVal
+      title: t('file_upload.task.title', { source: sourceVal }),
+      source: sourceVal,
     };
 
-    const { result } = await awaitTask<boolean, TaskMeta>(
-      taskId,
-      taskType,
-      taskMeta,
-      true
-    );
+    const { result } = await awaitTask<boolean, TaskMeta>(taskId, taskType, taskMeta, true);
 
-    if (result) {
+    if (result)
       set(uploaded, true);
-    }
-  } catch (e: any) {
-    set(errorMessage, e.message);
   }
-};
+  catch (error: any) {
+    if (!isTaskCancelled(error))
+      set(errorMessage, error.message);
+  }
+}
 
-const uploadFile = async () => {
+async function uploadFile() {
   const fileVal = get(file);
   if (fileVal) {
-    if (appSession) {
-      await uploadPackaged(fileVal.path);
-    } else {
+    const path = getPath(fileVal);
+    if (path) {
+      await uploadPackaged(path);
+    }
+    else {
       const formData = new FormData();
       formData.append('source', get(source));
       formData.append('file', fileVal);
       formData.append('async_query', 'true');
       const dateInputFormatVal = get(dateInputFormat);
-      if (dateInputFormatVal) {
+      if (dateInputFormatVal)
         formData.append('timestamp_format', dateInputFormatVal);
-      }
+
       try {
         const { taskId } = await importFile(formData);
-        const { result } = await awaitTask<boolean, TaskMeta>(
-          taskId,
-          taskType,
-          {
-            title: t('file_upload.task.title', {
-              source: get(source)
-            }).toString()
-          }
-        );
+        const taskMeta = {
+          title: t('file_upload.task.title', { source: get(source) }),
+          source: get(source),
+        };
+        const { result } = await awaitTask<boolean, TaskMeta>(taskId, taskType, taskMeta);
 
-        if (result) {
+        if (result)
           set(uploaded, true);
-        }
-      } catch (e: any) {
-        set(errorMessage, e.message);
+      }
+      catch (error: any) {
+        if (!isTaskCancelled(error))
+          set(errorMessage, error.message);
       }
     }
   }
-};
+}
 
-const changeShouldCustomDateFormat = () => {
-  if (get(dateInputFormat) === null) {
+function changeShouldCustomDateFormat() {
+  if (!isDefined(dateInputFormat))
     set(dateInputFormat, DateFormat.DateMonthYearHourMinuteSecond);
-  } else {
-    set(dateInputFormat, null);
-  }
-};
+  else set(dateInputFormat, undefined);
+}
 
 const isRotkiCustomImport = computed(() => get(source).startsWith('rotki_'));
 </script>
@@ -142,35 +128,34 @@ const isRotkiCustomImport = computed(() => get(source).startsWith('rotki_'));
     <form>
       <FileUpload
         v-model="file"
+        v-model:error-message="errorMessage"
         :loading="loading"
         :uploaded="uploaded"
         :source="source"
-        :error-message="errorMessage"
         @update:uploaded="uploaded = $event"
       />
-      <VSwitch
+      <RuiSwitch
         v-if="!isRotkiCustomImport"
-        :value="dateInputFormat !== null"
-        @change="changeShouldCustomDateFormat()"
+        color="primary"
+        class="mt-4"
+        :model-value="dateInputFormat !== undefined"
+        @update:model-value="changeShouldCustomDateFormat()"
       >
-        <template #label>
-          {{ t('file_upload.date_input_format.switch_label') }}
-        </template>
-      </VSwitch>
+        {{ t('file_upload.date_input_format.switch_label') }}
+      </RuiSwitch>
       <RuiTextField
-        v-if="dateInputFormat !== null"
+        v-if="dateInputFormat !== undefined"
         v-model="dateInputFormat"
         class="mt-2"
         variant="outlined"
         color="primary"
-        :error-messages="v$.dateInputFormat.$errors.map(e => e.$message)"
+        :error-messages="toMessages(v$.dateInputFormat)"
         :label="t('file_upload.date_input_format.placeholder')"
         :hint="
           t('file_upload.date_input_format.hint', {
-            format: dateInputFormatExample
+            format: dateInputFormatExample,
           })
         "
-        persistent-hint
       >
         <template #append>
           <RuiButton

@@ -1,101 +1,62 @@
 import { defaultGeneralSettings } from '@/data/factories';
-import { type AddressNamePriority } from '@/types/settings/address-name-priorities';
-import {
-  type Currency,
-  type SupportedCurrency,
-  useCurrencies
-} from '@/types/currencies';
-import { type Exchange } from '@/types/exchanges';
-import { type Module } from '@/types/modules';
-import { type PriceOracle } from '@/types/settings/price-oracle';
-import { type GeneralSettings } from '@/types/user';
+import { type SupportedCurrency, useCurrencies } from '@/types/currencies';
+import type { GeneralSettings } from '@/types/user';
 
 export const useGeneralSettingsStore = defineStore('settings/general', () => {
   const { defaultCurrency } = useCurrencies();
-  const settings = reactive(defaultGeneralSettings(get(defaultCurrency)));
+  const settings = ref(defaultGeneralSettings(get(defaultCurrency)));
 
-  const uiFloatingPrecision: ComputedRef<number> = computed(
-    () => settings.uiFloatingPrecision
-  );
-  const submitUsageAnalytics: ComputedRef<boolean> = computed(
-    () => settings.submitUsageAnalytics
-  );
-  const ksmRpcEndpoint: ComputedRef<string> = computed(
-    () => settings.ksmRpcEndpoint
-  );
-  const dotRpcEndpoint: ComputedRef<string> = computed(
-    () => settings.dotRpcEndpoint
-  );
-  const balanceSaveFrequency: ComputedRef<number> = computed(
-    () => settings.balanceSaveFrequency
-  );
-  const dateDisplayFormat: ComputedRef<string> = computed(
-    () => settings.dateDisplayFormat
-  );
-  const mainCurrency: ComputedRef<Currency> = computed(
-    () => settings.mainCurrency
-  );
-  const activeModules: ComputedRef<Module[]> = computed(
-    () => settings.activeModules
-  );
-  const btcDerivationGapLimit: ComputedRef<number> = computed(
-    () => settings.btcDerivationGapLimit
-  );
-  const displayDateInLocaltime: ComputedRef<boolean> = computed(
-    () => settings.displayDateInLocaltime
-  );
-  const currentPriceOracles: ComputedRef<PriceOracle[]> = computed(
-    () => settings.currentPriceOracles
-  );
-  const historicalPriceOracles: ComputedRef<PriceOracle[]> = computed(
-    () => settings.historicalPriceOracles
-  );
-  const ssfGraphMultiplier: ComputedRef<number> = computed(
-    () => settings.ssfGraphMultiplier
-  );
-  const inferZeroTimedBalances: ComputedRef<boolean> = computed(
-    () => settings.inferZeroTimedBalances
-  );
-  const nonSyncingExchanges: ComputedRef<Exchange[]> = computed(
-    () => settings.nonSyncingExchanges
-  );
-  const evmchainsToSkipDetection: ComputedRef<string[]> = computed(
-    () => settings.evmchainsToSkipDetection
-  );
-  const treatEth2AsEth: ComputedRef<boolean> = computed(
-    () => settings.treatEth2AsEth
-  );
-  const addressNamePriority: ComputedRef<AddressNamePriority[]> = computed(
-    () => settings.addressNamePriority
-  );
-  const queryRetryLimit: ComputedRef<number> = computed(
-    () => settings.queryRetryLimit
-  );
-  const connectTimeout: ComputedRef<number> = computed(
-    () => settings.connectTimeout
-  );
-  const readTimeout: ComputedRef<number> = computed(() => settings.readTimeout);
+  const uiFloatingPrecision = useComputedRef(settings, 'uiFloatingPrecision');
+  const submitUsageAnalytics = useComputedRef(settings, 'submitUsageAnalytics');
+  const ksmRpcEndpoint = useComputedRef(settings, 'ksmRpcEndpoint');
+  const dotRpcEndpoint = useComputedRef(settings, 'dotRpcEndpoint');
+  const beaconRpcEndpoint = useComputedRef(settings, 'beaconRpcEndpoint');
+  const balanceSaveFrequency = useComputedRef(settings, 'balanceSaveFrequency');
+  const dateDisplayFormat = useComputedRef(settings, 'dateDisplayFormat');
+  const mainCurrency = useComputedRef(settings, 'mainCurrency');
+  const activeModules = useComputedRef(settings, 'activeModules');
+  const btcDerivationGapLimit = useComputedRef(settings, 'btcDerivationGapLimit');
+  const displayDateInLocaltime = useComputedRef(settings, 'displayDateInLocaltime');
+  const currentPriceOracles = useComputedRef(settings, 'currentPriceOracles');
+  const historicalPriceOracles = useComputedRef(settings, 'historicalPriceOracles');
+  const ssfGraphMultiplier = useComputedRef(settings, 'ssfGraphMultiplier');
+  const inferZeroTimedBalances = useComputedRef(settings, 'inferZeroTimedBalances');
+  const nonSyncingExchanges = useComputedRef(settings, 'nonSyncingExchanges');
+  const evmchainsToSkipDetection = useComputedRef(settings, 'evmchainsToSkipDetection');
+  const treatEth2AsEth = useComputedRef(settings, 'treatEth2AsEth');
+  const addressNamePriority = useComputedRef(settings, 'addressNamePriority');
+  const queryRetryLimit = useComputedRef(settings, 'queryRetryLimit');
+  const connectTimeout = useComputedRef(settings, 'connectTimeout');
+  const readTimeout = useComputedRef(settings, 'readTimeout');
+  const oraclePenaltyThresholdCount = useComputedRef(settings, 'oraclePenaltyThresholdCount');
+  const oraclePenaltyDuration = useComputedRef(settings, 'oraclePenaltyDuration');
+  const autoDeleteCalendarEntries = useComputedRef(settings, 'autoDeleteCalendarEntries');
+  const autoCreateCalendarReminders = useComputedRef(settings, 'autoCreateCalendarReminders');
+  const askUserUponSizeDiscrepancy = useComputedRef(settings, 'askUserUponSizeDiscrepancy');
+  const autoDetectTokens = useComputedRef(settings, 'autoDetectTokens');
+  const csvExportDelimiter = useComputedRef(settings, 'csvExportDelimiter');
 
-  const currencySymbol: ComputedRef<SupportedCurrency> = computed(() => {
+  const currencySymbol = computed<SupportedCurrency>(() => {
     const currency = get(mainCurrency);
     return currency.tickerSymbol;
   });
 
-  const floatingPrecision: ComputedRef<number> = uiFloatingPrecision;
-  const currency: ComputedRef<Currency> = mainCurrency;
-
   const update = (generalSettings: GeneralSettings): void => {
-    Object.assign(settings, generalSettings);
+    set(settings, {
+      ...get(settings),
+      ...generalSettings,
+    });
   };
 
   return {
-    floatingPrecision,
+    floatingPrecision: uiFloatingPrecision,
     submitUsageAnalytics,
     ksmRpcEndpoint,
     dotRpcEndpoint,
+    beaconRpcEndpoint,
     balanceSaveFrequency,
     dateDisplayFormat,
-    currency,
+    currency: mainCurrency,
     currencySymbol,
     activeModules,
     btcDerivationGapLimit,
@@ -111,14 +72,17 @@ export const useGeneralSettingsStore = defineStore('settings/general', () => {
     queryRetryLimit,
     connectTimeout,
     readTimeout,
-    // return settings on development for state persistence
-    ...(checkIfDevelopment() ? { settings } : {}),
-    update
+    oraclePenaltyThresholdCount,
+    oraclePenaltyDuration,
+    autoDeleteCalendarEntries,
+    autoCreateCalendarReminders,
+    askUserUponSizeDiscrepancy,
+    autoDetectTokens,
+    csvExportDelimiter,
+    settings,
+    update,
   };
 });
 
-if (import.meta.hot) {
-  import.meta.hot.accept(
-    acceptHMRUpdate(useGeneralSettingsStore, import.meta.hot)
-  );
-}
+if (import.meta.hot)
+  import.meta.hot.accept(acceptHMRUpdate(useGeneralSettingsStore, import.meta.hot));

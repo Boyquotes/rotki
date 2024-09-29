@@ -1,13 +1,13 @@
 <script lang="ts" setup>
-import { type Location } from 'vue-router/types/router';
+import type { RouteLocationRaw } from 'vue-router';
 
 defineOptions({
-  inheritAttrs: false
+  inheritAttrs: false,
 });
 
 const props = withDefaults(
   defineProps<{
-    to: string | Location;
+    to: RouteLocationRaw;
     exact?: boolean;
     activeClass?: string;
     exactActiveClass?: string;
@@ -17,11 +17,9 @@ const props = withDefaults(
     exact: false,
     replace: false,
     activeClass: '',
-    exactActiveClass: ''
-  }
+    exactActiveClass: '',
+  },
 );
-
-const rootAttrs = useAttrs();
 </script>
 
 <template>
@@ -33,16 +31,33 @@ const rootAttrs = useAttrs();
     <a
       :class="{
         [`${activeClass}`]: isActive,
-        [`${exactActiveClass}`]: isExactActive
+        [`${exactActiveClass}`]: isExactActive,
       }"
       :href="href"
-      v-bind="rootAttrs"
+      v-bind="$attrs"
       @click.exact="navigate($event)"
       @click.meta.prevent
       @click.ctrl.prevent
       @click.shift.prevent
     >
-      <slot />
+      <RuiButton
+        variant="text"
+        color="primary"
+        :class="$style.button"
+      >
+        <slot />
+      </RuiButton>
     </a>
   </RouterLink>
 </template>
+
+<style lang="scss" module>
+.button {
+  @apply inline text-[1em] p-0 px-0.5 -mx-0.5 #{!important};
+  font-weight: inherit !important;
+
+  span {
+    @apply underline;
+  }
+}
+</style>

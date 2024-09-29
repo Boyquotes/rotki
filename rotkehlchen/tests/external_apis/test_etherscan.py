@@ -9,9 +9,12 @@ from rotkehlchen.chain.accounts import BlockchainAccountData
 from rotkehlchen.chain.ethereum.constants import ETHEREUM_GENESIS
 from rotkehlchen.chain.ethereum.etherscan import EthereumEtherscan
 from rotkehlchen.chain.evm.constants import GENESIS_HASH, ZERO_ADDRESS
+from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.db.dbhandler import DBHandler
 from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.db.filtering import EvmTransactionsFilterQuery
+from rotkehlchen.errors.misc import RemoteError
+from rotkehlchen.externalapis.etherscan import HasChainActivity
 from rotkehlchen.globaldb.migrations.migration1 import ILK_REGISTRY_ABI
 from rotkehlchen.serialization.deserialize import deserialize_evm_transaction
 from rotkehlchen.tests.utils.mock import MockResponse
@@ -44,23 +47,24 @@ def fixture_temp_etherscan(function_scope_messages_aggregator, tmpdir_factory, s
     if not api_key:
         api_key = '8JT7WQBB2VQP5C3416Y8X3S8GBA3CVZKP4'
 
-    db.add_external_service_credentials(credentials=[  # pylint: disable=no-value-for-parameter
-        ExternalServiceApiCredentials(service=ExternalService.ETHERSCAN, api_key=api_key),
-    ])
+    with db.user_write() as write_cursor:
+        db.add_external_service_credentials(
+            write_cursor=write_cursor,
+            credentials=[
+                ExternalServiceApiCredentials(service=ExternalService.ETHERSCAN, api_key=api_key),
+            ])
+
     etherscan = EthereumEtherscan(database=db, msg_aggregator=function_scope_messages_aggregator)
     return etherscan
 
 
-def patch_etherscan(etherscan):
+def patch_etherscan(etherscan, response_msg):
     count = 0
 
     def mock_requests_get(_url, timeout):  # pylint: disable=unused-argument
         nonlocal count
         if count == 0:
-            response = (
-                '{"status":"0","message":"NOTOK",'
-                '"result":"Max rate limit reached, please use API Key for higher rate limit"}'
-            )
+            response = f'{{"status":"0","message":"NOTOK","result":"{response_msg}"}}'
         else:
             response = '{"jsonrpc":"2.0","id":1,"result":"0x1337"}'
 
@@ -76,17 +80,32 @@ def test_maximum_rate_limit_reached(temp_etherscan, **kwargs):  # pylint: disabl
 
     Regression test for https://github.com/rotki/rotki/issues/772"
     """
-    etherscan = temp_etherscan
-
-    etherscan_patch = patch_etherscan(etherscan)
+    etherscan_patch = patch_etherscan(
+        etherscan=temp_etherscan,
+        response_msg='Max calls per sec rate limit reached (5/sec)',
+    )
 
     with etherscan_patch:
-        result = etherscan.eth_call(
+        result = temp_etherscan.eth_call(
             '0x4678f0a6958e4D2Bc4F1BAF7Bc52E8F3564f3fE4',
             '0xc455279100000000000000000000000027a2eaaa8bebea8d23db486fb49627c165baacb5',
         )
 
     assert result == '0x1337'
+
+
+def test_maximum_daily_rate_limit_reached(temp_etherscan, **kwargs):  # pylint: disable=unused-argument
+    """Test that etherscan's daily rate limit raises a RemoteError"""
+    etherscan_patch = patch_etherscan(
+        etherscan=temp_etherscan,
+        response_msg='Max daily rate limit reached. 110000 (100%) of 100000 day/limit',
+    )
+
+    with pytest.raises(RemoteError), etherscan_patch:
+        temp_etherscan.eth_call(
+            '0x4678f0a6958e4D2Bc4F1BAF7Bc52E8F3564f3fE4',
+            '0xc455279100000000000000000000000027a2eaaa8bebea8d23db486fb49627c165baacb5',
+        )
 
 
 def test_deserialize_transaction_from_etherscan():
@@ -144,6 +163,31 @@ def test_etherscan_get_transactions_genesis_block(eth_transactions):
             blockchain=SupportedBlockchain.ETHEREUM,
         )
 
+        assert dbtx.get_evm_internal_transactions(  # filter using from_address
+            parent_tx_hash=GENESIS_HASH,
+            blockchain=SupportedBlockchain.ETHEREUM,
+            from_address=ZERO_ADDRESS,
+        ) == dbtx.get_evm_internal_transactions(  # filter using to_address
+            parent_tx_hash=GENESIS_HASH,
+            blockchain=SupportedBlockchain.ETHEREUM,
+            to_address=string_to_evm_address('0xC951900c341aBbb3BAfbf7ee2029377071Dbc36A'),
+        ) == dbtx.get_evm_internal_transactions(  # filter using both from_address and to_address
+            parent_tx_hash=GENESIS_HASH,
+            blockchain=SupportedBlockchain.ETHEREUM,
+            from_address=ZERO_ADDRESS,
+            to_address=string_to_evm_address('0xC951900c341aBbb3BAfbf7ee2029377071Dbc36A'),
+        ) == internal_tx_in_db  # filter using none of from_address and to_address
+
+        assert dbtx.get_evm_internal_transactions(  # filter using different from_address
+            parent_tx_hash=GENESIS_HASH,
+            blockchain=SupportedBlockchain.ETHEREUM,
+            from_address=string_to_evm_address('0xC951900c341aBbb3BAfbf7ee2029377071Dbc36A'),
+        ) == dbtx.get_evm_internal_transactions(  # filter using different to_address
+            parent_tx_hash=GENESIS_HASH,
+            blockchain=SupportedBlockchain.ETHEREUM,
+            to_address=ZERO_ADDRESS,
+        ) == []
+
     assert regular_tx_in_db == [
         EvmTransaction(
             tx_hash=GENESIS_HASH,
@@ -181,7 +225,7 @@ def test_etherscan_get_transactions_genesis_block(eth_transactions):
             trace_id=0,
             from_address=ZERO_ADDRESS,
             to_address='0xC951900c341aBbb3BAfbf7ee2029377071Dbc36A',
-            value='327600000000000000000',
+            value=327600000000000000000,
         ),
     ]
 
@@ -192,3 +236,13 @@ def test_etherscan_get_contract_abi(temp_etherscan):
     abi = temp_etherscan.get_contract_abi('0x5a464C28D19848f44199D003BeF5ecc87d090F87')
     assert abi == json.loads(ILK_REGISTRY_ABI)
     assert temp_etherscan.get_contract_abi('0x9531C059098e3d194fF87FebB587aB07B30B1306') is None
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+def test_has_activity(temp_etherscan):
+    """Test to check if an address has any activity on ethereum mainnet"""
+    assert temp_etherscan.has_activity('0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5') == HasChainActivity.TRANSACTIONS  # noqa: E501
+    assert temp_etherscan.has_activity('0x725E35e01bbEDadd6ac13cE1c4a98bA4Cf00dF21') == HasChainActivity.TRANSACTIONS  # noqa: E501
+    assert temp_etherscan.has_activity('0x3C69Bc9B9681683890ad82953Fe67d13Cd91D5EE') == HasChainActivity.BALANCE  # noqa: E501
+    assert temp_etherscan.has_activity('0x014cd0535b2Ea668150a681524392B7633c8681c') == HasChainActivity.TOKENS  # noqa: E501
+    assert temp_etherscan.has_activity('0x6c66149E65c517605e0a2e4F707550ca342f9c1B') == HasChainActivity.NONE  # noqa: E501

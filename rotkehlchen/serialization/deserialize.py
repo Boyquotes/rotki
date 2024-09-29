@@ -4,11 +4,13 @@ from typing import TYPE_CHECKING, Any, Literal, Optional, TypeVar, overload
 
 from eth_utils import to_checksum_address
 
-from rotkehlchen.assets.asset import AssetWithOracles
-from rotkehlchen.assets.utils import get_crypto_asset_by_symbol
-from rotkehlchen.chain.optimism.types import OptimismTransaction
+from rotkehlchen.chain.evm.l2_with_l1_fees.types import (
+    L2_CHAINIDS_WITH_L1_FEES,
+    L2ChainIdsWithL1FeesType,
+    L2WithL1FeesTransaction,
+)
 from rotkehlchen.constants import ZERO
-from rotkehlchen.errors.asset import UnknownAsset, UnprocessableTradePair
+from rotkehlchen.errors.asset import UnprocessableTradePair
 from rotkehlchen.errors.serialization import ConversionError, DeserializationError
 from rotkehlchen.externalapis.utils import maybe_read_integer, read_hash, read_integer
 from rotkehlchen.fval import AcceptableFValInitInput, FVal
@@ -31,8 +33,8 @@ from rotkehlchen.types import (
 from rotkehlchen.utils.misc import convert_to_int, create_timestamp, iso8601ts_to_timestamp
 
 if TYPE_CHECKING:
+    from rotkehlchen.chain.evm.l2_with_l1_fees.node_inquirer import L2WithL1FeesInquirer
     from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer
-    from rotkehlchen.chain.optimism_superchain.node_inquirer import OptimismSuperchainInquirer
 
 
 logger = logging.getLogger(__name__)
@@ -56,7 +58,7 @@ def deserialize_fee(fee: str | None) -> Fee:
     return result
 
 
-def deserialize_timestamp(timestamp: int | (str | FVal)) -> Timestamp:
+def deserialize_timestamp(timestamp: float | (str | FVal)) -> Timestamp:
     """Deserializes a timestamp from a json entry. Given entry can either be a
     string or an int.
 
@@ -75,13 +77,13 @@ def deserialize_timestamp(timestamp: int | (str | FVal)) -> Timestamp:
             raise DeserializationError(
                 'Tried to deserialize a timestamp from a non-exact int FVal entry',
             ) from e
-    elif isinstance(timestamp, str):
+    elif isinstance(timestamp, (str | float)):
         try:
-            processed_timestamp = Timestamp(int(timestamp))
-        except ValueError as e:
+            processed_timestamp = Timestamp(FVal(timestamp).to_int(exact=True))
+        except (ValueError, ConversionError) as e:
             # String could not be turned to an int
             raise DeserializationError(
-                f'Failed to deserialize a timestamp entry from string {timestamp}',
+                f'Failed to deserialize a timestamp entry from string {timestamp} due to {e}',
             ) from e
     else:
         raise DeserializationError(
@@ -201,7 +203,7 @@ def deserialize_timestamp_from_intms(time: int) -> Timestamp:
     """
     if not isinstance(time, int):
         raise DeserializationError(
-            f'Failed to deserialize a timestamp entry from a {type(time)} entry in binance',
+            f'Failed to deserialize a timestamp entry from a {type(time)} entry',
         )
 
     return Timestamp(int(time / 1000))
@@ -218,22 +220,6 @@ def deserialize_fval(
         raise DeserializationError(f'Failed to deserialize value entry: {e!s} for {name} during {location}') from e  # noqa: E501
 
     return result
-
-
-def deserialize_optional_to_fval(
-        value: AcceptableFValInitInput | None,
-        name: str,
-        location: str,
-) -> FVal:
-    """
-    Deserializes an FVal from a field that was optional and if None raises DeserializationError
-    """
-    if value is None:
-        raise DeserializationError(
-            f'Failed to deserialize value entry for {name} during {location} since null was given',
-        )
-
-    return deserialize_fval(value=value, name=name, location=location)
 
 
 def deserialize_optional_to_optional_fval(
@@ -301,42 +287,11 @@ def _split_pair(pair: TradePair) -> tuple[str, str]:
     return assets[0], assets[1]
 
 
-def pair_get_assets(pair: TradePair) -> tuple[AssetWithOracles, AssetWithOracles]:
-    """Returns a tuple with the (base, quote) assets
-
-    May raise:
-    - UnprocessableTradePair
-    - UnknownAsset
-    """
-    base_str, quote_str = _split_pair(pair)
-    base_asset = get_crypto_asset_by_symbol(base_str)
-    if base_asset is None:
-        raise UnknownAsset(base_str)
-    quote_asset = get_crypto_asset_by_symbol(quote_str)
-    if quote_asset is None:
-        raise UnknownAsset(quote_str)
-    return base_asset, quote_asset
-
-
 def get_pair_position_str(pair: TradePair, position: str) -> str:
     """Get the string representation of an asset of a trade pair"""
     assert position in {'first', 'second'}
     base_str, quote_str = _split_pair(pair)
     return base_str if position == 'first' else quote_str
-
-
-def deserialize_trade_pair(pair: str) -> TradePair:
-    """Takes a trade pair string, makes sure it's valid, wraps it in proper type and returns it"""
-    try:
-        pair_get_assets(TradePair(pair))
-    except UnprocessableTradePair as e:
-        raise DeserializationError(str(e)) from e
-    except UnknownAsset as e:
-        raise DeserializationError(
-            f'Unknown asset {e.identifier} found while processing trade pair',
-        ) from e
-
-    return TradePair(pair)
 
 
 def deserialize_asset_movement_category(
@@ -481,6 +436,32 @@ def deserialize_int_from_hex_or_int(symbol: str | int, location: str) -> int:
     return result
 
 
+def deserialize_int(value: str | int) -> int:
+    """
+    Deserialize int from an entry that could be a string or an integer
+    May raise:
+    - DeserializationError if value is not a value that can be converted to integer
+    """
+    try:
+        result = int(value)
+    except ValueError as e:
+        raise DeserializationError(f'Could not transform to integer the {value=}') from e
+
+    return result
+
+
+def deserialize_str(value: Any) -> str:
+    """
+    Deserialize str from an entry
+    May raise:
+    - DeserializationError if value is not a string
+    """
+    if not isinstance(value, str):
+        raise DeserializationError(f'Could not deserialize {value} as string')
+
+    return value
+
+
 X = TypeVar('X')
 Y = TypeVar('Y')
 
@@ -530,10 +511,10 @@ def deserialize_evm_transaction(
 def deserialize_evm_transaction(  # type: ignore[misc]
         data: dict[str, Any],
         internal: Literal[False],
-        chain_id: Literal[ChainID.OPTIMISM, ChainID.BASE],
-        evm_inquirer: 'OptimismSuperchainInquirer',
+        chain_id: L2ChainIdsWithL1FeesType,
+        evm_inquirer: 'L2WithL1FeesInquirer',
         parent_tx_hash: Optional['EVMTxHash'] = None,
-) -> tuple[OptimismTransaction, dict[str, Any]]:
+) -> tuple[L2WithL1FeesTransaction, dict[str, Any]]:
     ...
 
 
@@ -606,11 +587,11 @@ def deserialize_evm_transaction(
             gas_used = read_integer(data, 'gasUsed', source)
         nonce = read_integer(data, 'nonce', source)
 
-        if chain_id in {ChainID.OPTIMISM, ChainID.BASE} and evm_inquirer is not None:
+        if chain_id in L2_CHAINIDS_WITH_L1_FEES and evm_inquirer is not None:
             if not raw_receipt_data:
                 raw_receipt_data = evm_inquirer.get_transaction_receipt(tx_hash)
             l1_fee = maybe_read_integer(raw_receipt_data, 'l1Fee', source)
-            return OptimismTransaction(
+            return L2WithL1FeesTransaction(
                 timestamp=timestamp,
                 chain_id=chain_id,
                 block_number=block_number,

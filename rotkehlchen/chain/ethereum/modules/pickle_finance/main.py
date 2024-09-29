@@ -11,12 +11,12 @@ from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.premium.premium import Premium
 from rotkehlchen.serialization.deserialize import deserialize_timestamp
 from rotkehlchen.types import ChecksumEvmAddress, Timestamp
-from rotkehlchen.user_messages import MessagesAggregator
 from rotkehlchen.utils.interfaces import EthereumModule
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.user_messages import MessagesAggregator
 
 
 class DillBalance(NamedTuple):
@@ -39,7 +39,7 @@ class PickleFinance(EthereumModule):
             ethereum_inquirer: 'EthereumInquirer',
             database: 'DBHandler',
             premium: Premium | None,
-            msg_aggregator: MessagesAggregator,
+            msg_aggregator: 'MessagesAggregator',
     ) -> None:
         self.ethereum = ethereum_inquirer
         self.database = database
@@ -75,7 +75,7 @@ class PickleFinance(EthereumModule):
         )
         reward_outputs, dill_outputs = outputs[:len(addresses)], outputs[len(addresses):]
 
-        pickle_price = Inquirer().find_usd_price(A_PICKLE)
+        pickle_price = Inquirer.find_usd_price(A_PICKLE)
         for idx, output in enumerate(reward_outputs):
             status_rewards, result = output
             status_dill, result_dill = dill_outputs[idx]

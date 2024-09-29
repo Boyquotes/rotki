@@ -1,15 +1,8 @@
 <script setup lang="ts">
-const props = defineProps<{
-  value: boolean;
+defineProps<{
   count: number;
 }>();
-
-const emit = defineEmits(['input']);
-
-const { value } = toRefs(props);
-const input = () => {
-  emit('input', !get(value));
-};
+const model = defineModel<boolean>({ required: true });
 
 const { t } = useI18n();
 </script>
@@ -21,7 +14,7 @@ const { t } = useI18n();
         color="primary"
         variant="indeterminate"
         circular
-        size="24"
+        size="20"
         thickness="2"
       />
       <div class="font-medium">
@@ -29,11 +22,21 @@ const { t } = useI18n();
       </div>
     </div>
 
-    <div>
-      <RuiButton variant="text" icon size="sm" @click="input()">
-        <RuiIcon v-if="value" name="arrow-up-s-line" />
-        <RuiIcon v-else name="arrow-down-s-line" />
-      </RuiButton>
-    </div>
+    <RuiButton
+      class="-m-1"
+      variant="text"
+      icon
+      size="sm"
+      @click="model = !model"
+    >
+      <RuiIcon
+        v-if="model"
+        name="arrow-up-s-line"
+      />
+      <RuiIcon
+        v-else
+        name="arrow-down-s-line"
+      />
+    </RuiButton>
   </div>
 </template>

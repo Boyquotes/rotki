@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from rotkehlchen.assets.asset import EvmToken
 from rotkehlchen.assets.utils import get_or_create_evm_token
@@ -35,14 +35,15 @@ if TYPE_CHECKING:
     from rotkehlchen.user_messages import MessagesAggregator
 
 
-BRIDGE_ADDRESS = string_to_evm_address('0x0000000000000000000000000000000000000064')
-L2_ERC20_GATEWAY = string_to_evm_address('0x09e9222E96E7B4AE2a407B98d48e330053351EEe')
-L2_GATEWAY_ROUTER = string_to_evm_address('0x5288c571Fd7aD117beA99bF60FE0846C4E84F933')
-TRANSFER_ROUTED = b'\x85)\x1d\xff!a\xa9</\x12\xc8\x19\xd3\x18\x89\xc9lc\x04!\x16\xf5\xbcZ Z\xa7\x01\xc2\xc4)\xf5'  # noqa: E501
-TOKEN_WITHDRAWAL_INITIATED = b'0s\xa7N\xcbr\x8d\x10\xbew\x9f\xe1\x9at\xa1B\x8e F\x8f[M\x16{\xf9\xc7=\x90g\x84}s'  # noqa: E501
-ETH_WITHDRAWAL_INITIATED = b'>z\xaf\xa7}\xbf\x18k\x7f\xd4\x88\x00k\xef\xf8\x93tL\xaa<Oo)\x9e\x8ap\x9f\xa2\x08st\xfc'  # noqa: E501
-DEPOSIT_TX_TYPE = 100  # A deposit of ETH from L1 to L2 via the Arbitrum bridge.
-ERC20_DEPOSIT_FINALIZED = b'\xc7\xf2\xe9\xc5\\@\xa5\x0f\xbc!}\xfcp\xcd9\xa2"\x94\r\xfab\x14Z\xa0\xcaI\xeb\x955\xd4\xfc\xb2'  # noqa: E501
+BRIDGE_ADDRESS: Final = string_to_evm_address('0x0000000000000000000000000000000000000064')
+L2_ERC20_GATEWAY: Final = string_to_evm_address('0x09e9222E96E7B4AE2a407B98d48e330053351EEe')
+L2_GATEWAY_ROUTER: Final = string_to_evm_address('0x5288c571Fd7aD117beA99bF60FE0846C4E84F933')
+TRANSFER_ROUTED: Final = b'\x85)\x1d\xff!a\xa9</\x12\xc8\x19\xd3\x18\x89\xc9lc\x04!\x16\xf5\xbcZ Z\xa7\x01\xc2\xc4)\xf5'  # noqa: E501
+TOKEN_WITHDRAWAL_INITIATED: Final = b'0s\xa7N\xcbr\x8d\x10\xbew\x9f\xe1\x9at\xa1B\x8e F\x8f[M\x16{\xf9\xc7=\x90g\x84}s'  # noqa: E501
+L2_TO_L1_TX: Final = b'>z\xaf\xa7}\xbf\x18k\x7f\xd4\x88\x00k\xef\xf8\x93tL\xaa<Oo)\x9e\x8ap\x9f\xa2\x08st\xfc'  # https://github.com/OffchainLabs/bold/blob/4c45c226da2662f357450fcce9270bb00324eb57/contracts/src/precompiles/ArbSys.sol#L113  # noqa: E501
+DEPOSIT_TX_TYPE: Final = 100  # A deposit of ETH from L1 to L2 via the Arbitrum bridge.
+ERC20_DEPOSIT_FINALIZED: Final = b'\xc7\xf2\xe9\xc5\\@\xa5\x0f\xbc!}\xfcp\xcd9\xa2"\x94\r\xfab\x14Z\xa0\xcaI\xeb\x955\xd4\xfc\xb2'  # noqa: E501
+WITHDRAW_ETH_METHOD: Final = b'%\xe1`c'
 
 
 L2_GATEWAY_ROUTE_CALCULATE_L2TOKEN_ABI = [{
@@ -137,7 +138,9 @@ class ArbitrumOneBridgeDecoder(ArbitrumDecoderInterface):
             from_token_address: ChecksumEvmAddress,
             to_asset: EvmToken,
     ) -> DecodingOutput:
-        """Decodes a withdraw bridging event. (Sending assets from arbitrum one)"""
+        """Decodes an event for depositing ERC20 tokens into the bridge.
+        (Sending assets from arbitrum one)
+        """
         from_token = self.base.get_or_create_evm_token(from_token_address)
         raw_amount = hex_or_bytes_to_int(context.tx_log.data[64:96])
         amount = asset_normalized_value(raw_amount, to_asset)
@@ -157,7 +160,7 @@ class ArbitrumOneBridgeDecoder(ArbitrumDecoderInterface):
             from_event_subtype=HistoryEventSubType.NONE,
             asset=from_token,
             amount=amount,
-            to_event_type=HistoryEventType.WITHDRAWAL,
+            to_event_type=HistoryEventType.DEPOSIT,
             to_event_subtype=HistoryEventSubType.BRIDGE,
             to_notes=notes,
             to_counterparty=CPT_ARBITRUM_ONE,
@@ -165,8 +168,11 @@ class ArbitrumOneBridgeDecoder(ArbitrumDecoderInterface):
         return DecodingOutput(action_items=[action_item])
 
     def _decode_eth_withdraw_event(self, context: DecoderContext) -> DecodingOutput:
-        """Decodes an eth withdrawal event (Removing ETH from arbitrum one)"""
-        if context.tx_log.topics[0] != ETH_WITHDRAWAL_INITIATED:
+        """Decodes an event for depositing ETH into the bridge (Removing ETH from arbitrum one)"""
+        if (
+            context.transaction.input_data[:4] != WITHDRAW_ETH_METHOD or
+            context.tx_log.topics[0] != L2_TO_L1_TX
+        ):
             return DEFAULT_DECODING_OUTPUT
 
         from_address = hex_or_bytes_to_address(context.tx_log.topics[1])
@@ -193,7 +199,7 @@ class ArbitrumOneBridgeDecoder(ArbitrumDecoderInterface):
                     amount=amount,
                     asset=self.eth,
                     expected_event_type=HistoryEventType.SPEND,
-                    new_event_type=HistoryEventType.WITHDRAWAL,
+                    new_event_type=HistoryEventType.DEPOSIT,
                     counterparty=ARBITRUM_ONE_CPT_DETAILS,
                 )
                 break
@@ -209,7 +215,7 @@ class ArbitrumOneBridgeDecoder(ArbitrumDecoderInterface):
             decoded_events: list['EvmEvent'],
             all_logs: list['EvmTxReceiptLog'],  # pylint: disable=unused-argument
     ) -> list['EvmEvent']:
-        """Decodes an ETH deposit bridging event (Receiving ETH to arbitrum one)
+        """Decodes an event for withdrawing ETH from the bridge (Receiving ETH to arbitrum one)
 
         An example that Dimitris tried is this: https://arbiscan.io/tx/0x30505174f2f82a6513f21eb5177e59935a6da95d057e4c1972e65da90ea1c547
 
@@ -227,7 +233,7 @@ class ArbitrumOneBridgeDecoder(ArbitrumDecoderInterface):
                     event.asset == A_ETH and
                     event.balance.amount == from_wei(FVal(transaction.value))
             ):
-                event.event_type = HistoryEventType.DEPOSIT
+                event.event_type = HistoryEventType.WITHDRAWAL
                 event.event_subtype = HistoryEventSubType.BRIDGE
                 event.counterparty = CPT_ARBITRUM_ONE
                 event.notes = (
@@ -244,7 +250,8 @@ class ArbitrumOneBridgeDecoder(ArbitrumDecoderInterface):
         return decoded_events
 
     def _decode_erc20_deposit_event(self, context: DecoderContext) -> DecodingOutput:
-        """Decodes an ERC20 deposit bridging event (Receiving ECR20 tokens to arbitrum one)
+        """Decodes an event for withdrawing ERC20 tokens from bridge
+        (Receiving ECR20 tokens to arbitrum one)
         """
         if context.tx_log.topics[0] != ERC20_DEPOSIT_FINALIZED:
             return DEFAULT_DECODING_OUTPUT
@@ -267,7 +274,7 @@ class ArbitrumOneBridgeDecoder(ArbitrumDecoderInterface):
                     event.address == ZERO_ADDRESS and
                     event.balance.amount == amount
             ):
-                event.event_type = HistoryEventType.DEPOSIT
+                event.event_type = HistoryEventType.WITHDRAWAL
                 event.event_subtype = HistoryEventSubType.BRIDGE
                 event.counterparty = CPT_ARBITRUM_ONE
                 event.notes = (

@@ -1,13 +1,12 @@
 import logging
 from typing import TYPE_CHECKING, Literal, cast
 
-from eth_typing import BlockNumber
-
 from rotkehlchen.chain.constants import DEFAULT_EVM_RPC_TIMEOUT
 from rotkehlchen.chain.evm.contracts import EvmContracts
+from rotkehlchen.chain.evm.l2_with_l1_fees.node_inquirer import L2WithL1FeesInquirer
 from rotkehlchen.chain.evm.types import string_to_evm_address
-from rotkehlchen.chain.optimism_superchain.node_inquirer import OptimismSuperchainInquirer
 from rotkehlchen.constants.assets import A_ETH
+from rotkehlchen.externalapis.blockscout import Blockscout
 from rotkehlchen.fval import FVal
 from rotkehlchen.greenlets.manager import GreenletManager
 from rotkehlchen.logging import RotkehlchenLogsAdapter
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
 
-class BaseInquirer(OptimismSuperchainInquirer):
+class BaseInquirer(L2WithL1FeesInquirer):
 
     def __init__(
             self,
@@ -55,15 +54,15 @@ class BaseInquirer(OptimismSuperchainInquirer):
             contract_multicall=contracts.contract(string_to_evm_address('0xeDF6D2a16e8081F777eB623EeB4411466556aF3d')),
             contract_scan=contracts.contract(string_to_evm_address('0x2d26d6b698f6494efdB908A2A4f11ae5Fee86099')),
             native_token=A_ETH.resolve_to_crypto_asset(),
+            blockscout=Blockscout(
+                blockchain=SupportedBlockchain.BASE,
+                database=database,
+                msg_aggregator=database.msg_aggregator,
+            ),
         )
         self.etherscan = cast(BaseEtherscan, self.etherscan)
 
     # -- Implementation of EvmNodeInquirer base methods --
-
-    def query_highest_block(self) -> BlockNumber:
-        block_number = self.etherscan.get_latest_block_number()
-        log.debug('Base highest block result', block=block_number)
-        return BlockNumber(block_number)
 
     def _get_pruned_check_tx_hash(self) -> EVMTxHash:
         return PRUNED_NODE_CHECK_TX_HASH

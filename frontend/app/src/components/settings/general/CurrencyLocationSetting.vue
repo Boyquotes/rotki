@@ -6,10 +6,11 @@ const { currencyLocation: location } = storeToRefs(useFrontendSettingsStore());
 
 const { t } = useI18n();
 
-const successMessage = (currencyLocation: CurrencyLocation) =>
-  t('general_settings.validation.currency_location.success', {
-    currencyLocation
+function successMessage(currencyLocation: CurrencyLocation) {
+  return t('general_settings.validation.currency_location.success', {
+    currencyLocation,
   });
+}
 
 onMounted(() => {
   set(currencyLocation, get(location));
@@ -24,23 +25,24 @@ onMounted(() => {
     :error-message="t('general_settings.validation.currency_location.error')"
     :success-message="successMessage"
   >
-    <VRadioGroup
+    <RuiRadioGroup
       v-model="currencyLocation"
-      class="general-settings__fields__currency-location"
+      color="primary"
+      class="general-settings__fields__currency-location mt-4"
       :label="t('general_settings.amount.label.currency_location')"
-      row
       :success-messages="success"
       :error-messages="error"
-      @change="update($event)"
+      inline
+      @update:model-value="update($event)"
     >
-      <VRadio
+      <RuiRadio
         :label="t('general_settings.amount.label.location_before')"
         value="before"
       />
-      <VRadio
+      <RuiRadio
         :label="t('general_settings.amount.label.location_after')"
         value="after"
       />
-    </VRadioGroup>
+    </RuiRadioGroup>
   </SettingsOption>
 </template>

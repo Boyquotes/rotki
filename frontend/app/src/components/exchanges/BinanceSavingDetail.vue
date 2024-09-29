@@ -1,16 +1,12 @@
 <script setup lang="ts">
-import { type DataTableHeader } from '@/types/vuetify';
 import { CURRENCY_USD } from '@/types/currencies';
-import {
-  type ExchangeSavingsCollection,
-  type ExchangeSavingsEvent,
-  type ExchangeSavingsRequestPayload,
-  type SupportedExchange
-} from '@/types/exchanges';
 import { Section } from '@/types/status';
+import type { AssetBalance } from '@rotki/common';
+import type { DataTableColumn, DataTableSortData } from '@rotki/ui-library';
+import type { ExchangeSavingsCollection, ExchangeSavingsEvent, ExchangeSavingsRequestPayload } from '@/types/exchanges';
 
 const props = defineProps<{
-  exchange: SupportedExchange.BINANCE | SupportedExchange.BINANCEUS;
+  exchange: 'binance' | 'binanceus';
 }>();
 
 const { t } = useI18n();
@@ -22,26 +18,28 @@ const loading = isSectionLoading(Section.EXCHANGE_SAVINGS);
 
 const { fetchExchangeSavings } = useExchangeBalancesStore();
 
-const extraParams = computed(() => ({
-  location: get(exchange).toString()
+const defaultParams = computed(() => ({
+  location: get(exchange).toString(),
 }));
 
-const defaultCollectionState = (): ExchangeSavingsCollection => ({
-  found: 0,
-  limit: 0,
-  data: [],
-  total: 0,
-  totalUsdValue: Zero,
-  assets: [],
-  received: []
-});
+function defaultCollectionState(): ExchangeSavingsCollection {
+  return {
+    found: 0,
+    limit: 0,
+    data: [],
+    total: 0,
+    totalUsdValue: Zero,
+    assets: [],
+    received: [],
+  };
+}
 
 const {
   isLoading,
   state: collection,
-  options,
+  pagination,
+  sort,
   fetchData,
-  setOptions
 } = usePaginationFilters<
   ExchangeSavingsEvent,
   ExchangeSavingsRequestPayload,
@@ -50,15 +48,14 @@ const {
 >(exchange, true, useEmptyFilter, fetchExchangeSavings, {
   defaultCollection: defaultCollectionState,
   defaultSortBy: {
-    ascending: [true]
+    ascending: [true],
   },
-  extraParams
+  defaultParams,
 });
 
 watch(loading, async (isLoading, wasLoading) => {
-  if (!isLoading && wasLoading) {
+  if (!isLoading && wasLoading)
     await fetchData();
-  }
 });
 
 onMounted(async () => {
@@ -66,50 +63,59 @@ onMounted(async () => {
 });
 
 const { currencySymbol } = storeToRefs(useGeneralSettingsStore());
-const tableHeaders = computed<DataTableHeader[]>(() => [
+
+const receivedTableSort = ref<DataTableSortData<AssetBalance>>({
+  column: 'usdValue',
+  direction: 'desc' as const,
+});
+
+const receivedTableHeaders = computed<DataTableColumn<AssetBalance>[]>(() => [
   {
-    text: t('common.datetime'),
-    value: 'timestamp'
+    label: t('common.asset'),
+    key: 'asset',
+    sortable: true,
   },
   {
-    text: t('common.asset'),
-    value: 'asset',
-    sortable: false
-  },
-  {
-    text: t('common.amount'),
-    value: 'amount',
-    align: 'end'
-  },
-  {
-    text: t('common.value_in_symbol', {
-      symbol: get(currencySymbol)
-    }),
-    value: 'usdValue',
+    label: t('common.amount'),
+    key: 'amount',
     align: 'end',
-    sortable: false
-  }
+    sortable: true,
+  },
+  {
+    label: t('common.value_in_symbol', {
+      symbol: get(currencySymbol),
+    }),
+    key: 'usdValue',
+    align: 'end',
+    sortable: true,
+  },
 ]);
 
-const receivedTableHeaders = computed<DataTableHeader[]>(() => [
+const tableHeaders = computed<DataTableColumn<ExchangeSavingsEvent>[]>(() => [
   {
-    text: t('common.asset'),
-    value: 'asset',
-    sortable: false
+    label: t('common.datetime'),
+    key: 'timestamp',
+    sortable: true,
   },
   {
-    text: t('common.amount'),
-    value: 'amount',
-    align: 'end'
+    label: t('common.asset'),
+    key: 'asset',
+    sortable: true,
   },
   {
-    text: t('common.value_in_symbol', {
-      symbol: get(currencySymbol)
-    }),
-    value: 'usdValue',
+    label: t('common.amount'),
+    key: 'amount',
     align: 'end',
-    sortable: false
-  }
+    sortable: true,
+  },
+  {
+    label: t('common.value_in_symbol', {
+      symbol: get(currencySymbol),
+    }),
+    key: 'usdValue',
+    align: 'end',
+    sortable: true,
+  },
 ]);
 </script>
 
@@ -120,37 +126,46 @@ const receivedTableHeaders = computed<DataTableHeader[]>(() => [
         {{ t('exchange_balances.received_interest') }}
       </template>
 
-      <DataTable
-        :headers="receivedTableHeaders"
-        :items="collection.received"
+      <RuiDataTable
+        v-model:sort="receivedTableSort"
+        outlined
+        dense
+        :cols="receivedTableHeaders"
+        :rows="collection.received"
         :loading="isLoading"
+        row-attr="asset"
       >
-        <template #item.asset="{ item }">
-          <AssetDetails opens-details hide-name :asset="item.asset" />
+        <template #item.asset="{ row }">
+          <AssetDetails
+            opens-details
+            hide-name
+            :asset="row.asset"
+          />
         </template>
-        <template #item.amount="{ item }">
-          <AmountDisplay :value="item.amount" />
+        <template #item.amount="{ row }">
+          <AmountDisplay :value="row.amount" />
         </template>
-        <template #item.usdValue="{ item }">
-          <AmountDisplay :value="item.usdValue" />
+        <template #item.usdValue="{ row }">
+          <AmountDisplay :value="row.usdValue" />
         </template>
         <template
           v-if="collection.received.length > 0"
-          #body.append="{ isMobile }"
+          #body.append
         >
           <RowAppend
             label-colspan="2"
             :label="t('common.total')"
-            :is-mobile="isMobile"
+            class="[&>td]:p-4"
           >
             <AmountDisplay
+              v-if="collection.totalUsdValue"
               :fiat-currency="CURRENCY_USD"
               :value="collection.totalUsdValue"
               show-currency="symbol"
             />
           </RowAppend>
         </template>
-      </DataTable>
+      </RuiDataTable>
     </RuiCard>
     <RuiCard>
       <template #header>
@@ -158,30 +173,34 @@ const receivedTableHeaders = computed<DataTableHeader[]>(() => [
       </template>
 
       <CollectionHandler :collection="collection">
-        <template #default="{ data, itemLength }">
-          <DataTable
-            :headers="tableHeaders"
-            :items="data"
+        <template #default="{ data }">
+          <RuiDataTable
+            v-model:sort="sort"
+            v-model:pagination.external="pagination"
+            outlined
+            dense
+            :cols="tableHeaders"
+            :rows="data"
+            row-attr="asset"
             :loading="isLoading"
-            :options="options"
-            :server-items-length="itemLength"
-            multi-sort
-            :must-sort="false"
-            @update:options="setOptions($event)"
           >
-            <template #item.asset="{ item }">
-              <AssetDetails opens-details hide-name :asset="item.asset" />
+            <template #item.asset="{ row }">
+              <AssetDetails
+                opens-details
+                hide-name
+                :asset="row.asset"
+              />
             </template>
-            <template #item.amount="{ item }">
-              <AmountDisplay :value="item.amount" />
+            <template #item.amount="{ row }">
+              <AmountDisplay :value="row.amount" />
             </template>
-            <template #item.usdValue="{ item }">
-              <AmountDisplay :value="item.usdValue" />
+            <template #item.usdValue="{ row }">
+              <AmountDisplay :value="row.usdValue" />
             </template>
-            <template #item.timestamp="{ item }">
-              <DateDisplay :timestamp="item.timestamp" />
+            <template #item.timestamp="{ row }">
+              <DateDisplay :timestamp="row.timestamp" />
             </template>
-          </DataTable>
+          </RuiDataTable>
         </template>
       </CollectionHandler>
     </RuiCard>

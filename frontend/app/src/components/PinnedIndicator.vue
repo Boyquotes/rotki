@@ -1,24 +1,21 @@
 <script setup lang="ts">
 const props = defineProps<{ visible: boolean }>();
 
-const emit = defineEmits<{ (e: 'visible:update', visible: boolean): void }>();
+const emit = defineEmits<{ (e: 'update:visible', visible: boolean): void }>();
 
 const { visible } = toRefs(props);
 const { pinned } = storeToRefs(useAreaVisibilityStore());
 const { t } = useI18n();
 
-const toggleVisibility = () => {
-  emit('visible:update', !get(visible));
-};
-
-const css = useCssModule();
+function toggleVisibility() {
+  emit('update:visible', !get(visible));
+}
 </script>
 
 <template>
   <MenuTooltipButton
     v-if="pinned"
     :tooltip="t('pinned.tooltip')"
-    class-name="secondary--text text--lighten-4"
     @click="toggleVisibility()"
   >
     <RuiBadge
@@ -29,7 +26,10 @@ const css = useCssModule();
       size="lg"
       class="flex items-center"
     >
-      <RuiIcon :class="{ [css.visible]: visible }" name="pushpin-line" />
+      <RuiIcon
+        :class="{ [$style.visible]: visible }"
+        name="pushpin-line"
+      />
     </RuiBadge>
   </MenuTooltipButton>
 </template>

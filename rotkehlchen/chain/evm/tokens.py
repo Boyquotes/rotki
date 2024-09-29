@@ -1,17 +1,17 @@
 import logging
-from abc import ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from rotkehlchen.assets.asset import EvmToken
+from rotkehlchen.assets.asset import EvmToken, Nft
 from rotkehlchen.chain.ethereum.utils import token_normalized_value
 from rotkehlchen.chain.evm.types import WeightedNode, asset_id_is_evm_token
 from rotkehlchen.fval import FVal
 from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.logging import RotkehlchenLogsAdapter
-from rotkehlchen.types import ChecksumEvmAddress, Price, Timestamp
+from rotkehlchen.types import ChecksumEvmAddress, Price, SupportedBlockchain, Timestamp
 from rotkehlchen.utils.misc import combine_dicts, get_chunks
 
 if TYPE_CHECKING:
@@ -115,7 +115,7 @@ def get_chunk_size_call_order(evm_inquirer: 'EvmNodeInquirer') -> tuple[int, lis
     return chunk_size, call_order
 
 
-class EvmTokens(metaclass=ABCMeta):
+class EvmTokens(ABC):
     def __init__(
             self,
             database: 'DBHandler',
@@ -248,12 +248,13 @@ class EvmTokens(metaclass=ABCMeta):
                     cursor=cursor,
                     address=address,
                     blockchain=self.evm_inquirer.blockchain,
+                    token_exceptions=self._per_chain_token_exceptions(),
                 )
 
         return addresses_info
 
     def _query_new_tokens(self, addresses: Sequence[ChecksumEvmAddress]) -> None:
-        all_tokens = GlobalDBHandler().get_evm_tokens(
+        all_tokens = GlobalDBHandler.get_evm_tokens(
             chain_id=self.evm_inquirer.chain_id,
             exceptions=self._get_token_exceptions(),
         )
@@ -339,11 +340,23 @@ class EvmTokens(metaclass=ABCMeta):
                     cursor=cursor,
                     address=address,
                     blockchain=self.evm_inquirer.blockchain,
+                    token_exceptions=self._per_chain_token_exceptions(),
                 )
                 if saved_list is None:
                     continue  # Do not query if we know the address has no tokens
-                all_tokens.update(saved_list)
-                addresses_to_tokens[address] = saved_list
+
+                # get NFT tokens for address and ignore them from the query to avoid duplicates
+                cursor.execute(
+                    'SELECT identifier, blockchain FROM nfts WHERE owner_address=?',
+                    (address,),
+                )
+                excluded_addresses = {
+                    Nft(row[0]).evm_address for row in cursor
+                    if SupportedBlockchain.deserialize(row[1]) == self.evm_inquirer.blockchain
+                }
+                token_list = [x for x in saved_list if x.evm_address not in excluded_addresses]
+                all_tokens.update(token_list)
+                addresses_to_tokens[address] = token_list
 
         multicall_chunks = generate_multicall_chunks(
             addresses_to_tokens=addresses_to_tokens,
@@ -357,9 +370,7 @@ class EvmTokens(metaclass=ABCMeta):
             for address, balances in new_balances.items():
                 addresses_to_balances[address].update(balances)
 
-        token_usd_price: dict[EvmToken, Price] = {}
-        for token in all_tokens:
-            token_usd_price[token] = Inquirer.find_usd_price(asset=token)
+        token_usd_price: dict[EvmToken, Price] = {token: Inquirer.find_usd_price(asset=token) for token in all_tokens}  # noqa: E501
 
         return dict(addresses_to_balances), token_usd_price
 
@@ -387,7 +398,7 @@ class EvmTokens(metaclass=ABCMeta):
         """
 
 
-class EvmTokensWithDSProxy(EvmTokens, metaclass=ABCMeta):
+class EvmTokensWithDSProxy(EvmTokens, ABC):
     def __init__(
             self,
             database: 'DBHandler',
@@ -431,6 +442,7 @@ class EvmTokensWithDSProxy(EvmTokens, metaclass=ABCMeta):
                         cursor=cursor,
                         address=proxy_address,
                         blockchain=self.evm_inquirer.blockchain,
+                        token_exceptions=self._per_chain_token_exceptions(),
                     )
 
                     if proxy_detected_tokens is not None:

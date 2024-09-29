@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 import requests
 
 from rotkehlchen.accounting.structures.balance import Balance
+from rotkehlchen.api.websockets.typedefs import WSMessageType
 from rotkehlchen.assets.asset import AssetWithOracles
 from rotkehlchen.db.filtering import (
     AssetMovementsFilterQuery,
@@ -34,6 +35,7 @@ from rotkehlchen.utils.mixins.lockable import LockableQueryMixIn, protect_with_l
 if TYPE_CHECKING:
     from rotkehlchen.db.dbhandler import DBHandler
     from rotkehlchen.history.events.structures.base import HistoryEvent
+    from rotkehlchen.user_messages import MessagesAggregator
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
@@ -75,6 +77,7 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
             api_key: ApiKey,
             secret: ApiSecret,
             database: 'DBHandler',
+            msg_aggregator: 'MessagesAggregator',
     ):
         assert isinstance(api_key, T_ApiKey), (
             f'api key for {name} should be a string'
@@ -88,6 +91,7 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
         self.db = database
         self.api_key = api_key
         self.secret = secret
+        self.msg_aggregator = msg_aggregator
         self.first_connection_made = False
         self.session = requests.session()
         set_user_agent(self.session)
@@ -263,6 +267,7 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
                     end_ts=end_ts,
                 )
 
+            log.debug(f'Found query ranges {ranges_to_query=} for {location_string}')
             for query_start_ts, query_end_ts in ranges_to_query:
                 # If we have a time frame we have not asked the exchange for trades then
                 # go ahead and do that now
@@ -277,7 +282,7 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
 
                 # make sure to add them to the DB
                 with self.db.user_write() as write_cursor:
-                    if new_trades != []:
+                    if len(new_trades) != 0:
                         self.db.add_trades(write_cursor=write_cursor, trades=new_trades)
 
                     # and also set the used queried timestamp range for the exchange
@@ -366,6 +371,36 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
         an actual exchange query.
         """
         log.debug(f'Querying deposits/withdrawals history for {self.name} exchange')
+        if only_cache is False:
+            ranges = DBQueryRanges(self.db)
+            location_string = f'{self.location!s}_asset_movements_{self.name}'
+            with self.db.conn.read_ctx() as cursor:
+                ranges_to_query = ranges.get_location_query_ranges(
+                    cursor=cursor,
+                    location_string=location_string,
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                )
+
+            for query_start_ts, query_end_ts in ranges_to_query:
+                log.debug(
+                    f'Querying online deposits/withdrawals for {self.name} between '
+                    f'{query_start_ts} and {query_end_ts}',
+                )
+                new_movements = self.query_online_deposits_withdrawals(
+                    start_ts=query_start_ts,
+                    end_ts=query_end_ts,
+                )
+                with self.db.user_write() as write_cursor:
+                    if len(new_movements) != 0:
+                        self.db.add_asset_movements(write_cursor, new_movements)
+                    ranges.update_used_query_range(
+                        write_cursor=write_cursor,
+                        location_string=location_string,
+                        queried_ranges=[(query_start_ts, query_end_ts)],
+                    )
+
+        # Read all asset movements from the DB
         filter_query = AssetMovementsFilterQuery.make(
             from_ts=start_ts,
             to_ts=end_ts,
@@ -375,39 +410,8 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
             asset_movements = self.db.get_asset_movements(
                 cursor=cursor,
                 filter_query=filter_query,
-                has_premium=True,  # is okay since the returned trades don't make it to the user
+                has_premium=True,  # is okay since the returned events don't make it to the user
             )
-            if only_cache:
-                return asset_movements
-
-            ranges = DBQueryRanges(self.db)
-            location_string = f'{self.location!s}_asset_movements_{self.name}'
-            ranges_to_query = ranges.get_location_query_ranges(
-                cursor=cursor,
-                location_string=location_string,
-                start_ts=start_ts,
-                end_ts=end_ts,
-            )
-
-        for query_start_ts, query_end_ts in ranges_to_query:
-            log.debug(
-                f'Querying online deposits/withdrawals for {self.name} between '
-                f'{query_start_ts} and {query_end_ts}',
-            )
-            new_movements = self.query_online_deposits_withdrawals(
-                start_ts=query_start_ts,
-                end_ts=query_end_ts,
-            )
-
-            with self.db.user_write() as write_cursor:
-                if len(new_movements) != 0:
-                    self.db.add_asset_movements(write_cursor, new_movements)
-                ranges.update_used_query_range(
-                    write_cursor=write_cursor,
-                    location_string=location_string,
-                    queried_ranges=[(query_start_ts, query_end_ts)],
-                )
-            asset_movements.extend(new_movements)
 
         return asset_movements
 
@@ -424,41 +428,38 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
         an actual exchange query.
         """
         db = DBHistoryEvents(self.db)
+        if only_cache is False:
+            ranges = DBQueryRanges(self.db)
+            location_string = f'{self.location!s}_history_events_{self.name}'
+            with self.db.conn.read_ctx() as cursor:
+                ranges_to_query = ranges.get_location_query_ranges(
+                    cursor=cursor,
+                    location_string=location_string,
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                )
+
+            for query_start_ts, query_end_ts in ranges_to_query:
+                new_events = self.query_online_income_loss_expense(
+                    start_ts=query_start_ts,
+                    end_ts=query_end_ts,
+                )
+                with self.db.user_write() as write_cursor:
+                    if len(new_events) != 0:
+                        db.add_history_events(write_cursor, new_events)
+                    ranges.update_used_query_range(
+                        write_cursor=write_cursor,
+                        location_string=location_string,
+                        queried_ranges=[(query_start_ts, query_end_ts)],
+                    )
+
         filter_query = HistoryEventFilterQuery.make(
             from_ts=start_ts,
             to_ts=end_ts,
             location=self.location,
         )
         with self.db.conn.read_ctx() as cursor:
-            # has_premium True is fine here since the result of this is not user facing atm
             events = db.get_history_events(cursor, filter_query=filter_query, has_premium=True)
-            if only_cache:
-                return events  # type: ignore[return-value]  # HistoryBaseEntry vs HistoryEvent
-
-            ranges = DBQueryRanges(self.db)
-            location_string = f'{self.location!s}_history_events_{self.name}'
-            ranges_to_query = ranges.get_location_query_ranges(
-                cursor=cursor,
-                location_string=location_string,
-                start_ts=start_ts,
-                end_ts=end_ts,
-            )
-
-        for query_start_ts, query_end_ts in ranges_to_query:
-            new_events = self.query_online_income_loss_expense(
-                start_ts=query_start_ts,
-                end_ts=query_end_ts,
-            )
-            with self.db.user_write() as write_cursor:
-                if len(new_events) != 0:
-                    db.add_history_events(write_cursor, new_events)
-                ranges.update_used_query_range(
-                    write_cursor=write_cursor,
-                    location_string=location_string,
-                    queried_ranges=[(query_start_ts, query_end_ts)],
-                )
-            events.extend(new_events)
-
         return events  # type: ignore[return-value]  # HistoryBaseEntry vs HistoryEvent
 
     def query_history_with_callbacks(
@@ -497,7 +498,7 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
                 only_cache=False,
             )
             if new_step_data is not None:
-                new_step_callback(f'Querying {exchange_name} ledger actions history')
+                new_step_callback(f'Querying {exchange_name} events history')
             self.query_income_loss_expense(
                 start_ts=start_ts,
                 end_ts=end_ts,
@@ -510,3 +511,25 @@ class ExchangeInterface(CacheableMixIn, LockableQueryMixIn):
             )
         except RemoteError as e:
             fail_callback(str(e))
+
+    def send_unknown_asset_message(
+            self,
+            asset_identifier: str,
+            details: str,
+    ) -> None:
+        """Log warning and send WS message to notify user of unknown asset found on an exchange.
+        Args:
+            asset_identifier (str): Asset identifier of the unknown asset.
+            details (str): Details about what type of event was being processed
+                when the unknown asset was encountered.
+        """
+        log.warning(f'Found unknown {self.location.serialize()} {self.name} asset {asset_identifier} in {details}.')  # noqa: E501
+        self.msg_aggregator.add_message(
+            message_type=WSMessageType.EXCHANGE_UNKNOWN_ASSET,
+            data={
+                'location': self.location.serialize(),
+                'name': self.name,
+                'identifier': asset_identifier,
+                'details': details,
+            },
+        )

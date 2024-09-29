@@ -1,31 +1,14 @@
-import { type MaybeRef } from '@vueuse/core';
-import { type ComputedRef, type Ref } from 'vue';
-import { type AssetInfo } from '../data';
-import { type LpType, type ProfitLossModel } from '../defi';
-import {
-  type BalancerBalance,
-  type BalancerProfitLoss
-} from '../defi/balancer';
-import {
-  type XswapBalance,
-  type XswapPool,
-  type XswapPoolProfit
-} from '../defi/xswap';
-import { type AssetBalanceWithPrice, type BigNumber } from '../index';
-import {
-  type DebugSettings,
-  type FrontendSettingsPayload,
-  type Theme,
-  type Themes,
-  type TimeUnit
-} from '../settings';
-import {
-  type LocationData,
-  type NetValue,
-  type OwnedAssets,
-  type TimedAssetBalances,
-  type TimedBalances
-} from '../statistics';
+import type { Theme, Themes } from '../settings/themes';
+import type { DebugSettings, FrontendSettingsPayload, TimeUnit } from '../settings/frontend';
+import type { LpType, ProfitLossModel } from '../defi/common';
+import type { MaybeRef } from '@vueuse/core';
+import type { ComputedRef, Ref } from 'vue';
+import type { AssetInfo } from '../data';
+import type { BalancerBalance, BalancerProfitLoss } from '../defi/balancer';
+import type { XswapBalance, XswapPool, XswapPoolProfit } from '../defi/xswap';
+import type { BigNumber } from '../numbers';
+import type { AssetBalanceWithPrice } from '../balances';
+import type { LocationData, NetValue, OwnedAssets, TimedAssetBalances, TimedBalances } from '../statistics';
 
 export interface PremiumInterface {
   readonly useHostComponents: boolean;
@@ -35,29 +18,24 @@ export interface PremiumInterface {
 }
 
 export interface StatisticsApi {
-  assetValueDistribution(): Promise<TimedAssetBalances>;
-  locationValueDistribution(): Promise<LocationData>;
-  ownedAssets(): Promise<OwnedAssets>;
-  timedBalances(
-    asset: string,
-    start: number,
-    end: number,
-    collectionId?: number
-  ): Promise<TimedBalances>;
-  fetchNetValue(): Promise<void>;
+  assetValueDistribution: () => Promise<TimedAssetBalances>;
+  locationValueDistribution: () => Promise<LocationData>;
+  ownedAssets: () => Promise<OwnedAssets>;
+  timedBalances: (asset: string, start: number, end: number, collectionId?: number) => Promise<TimedBalances>;
+  fetchNetValue: () => Promise<void>;
   netValue: (startingData: number) => Ref<NetValue>;
 }
 
 export interface DateUtilities {
-  epoch(): number;
-  format(date: string, oldFormat: string, newFormat: string): string;
-  now(format: string): string;
-  epochToFormat(epoch: number, format: string): string;
-  dateToEpoch(date: string, format: string): number;
-  epochStartSubtract(amount: number, unit: TimeUnit): number;
-  toUserSelectedFormat(timestamp: number): string;
-  getDateInputISOFormat(format: string): string;
-  convertToTimestamp(date: string, dateFormat?: string): number;
+  epoch: () => number;
+  format: (date: string, oldFormat: string, newFormat: string) => string;
+  now: (format: string) => string;
+  epochToFormat: (epoch: number, format: string) => string;
+  dateToEpoch: (date: string, format: string) => number;
+  epochStartSubtract: (amount: number, unit: TimeUnit) => number;
+  toUserSelectedFormat: (timestamp: number) => string;
+  getDateInputISOFormat: (format: string) => string;
+  convertToTimestamp: (date: string, dateFormat?: string) => number;
 }
 
 export interface CompoundApi {
@@ -73,7 +51,6 @@ export interface BalancerApi {
   balancerPools: Ref<XswapPool[]>;
   balancerAddresses: Ref<string[]>;
   fetchBalancerBalances: (refresh: boolean) => Promise<void>;
-  fetchBalancerEvents: (refresh: boolean) => Promise<void>;
 }
 
 export interface SushiApi {
@@ -93,14 +70,14 @@ export interface BalancesApi {
 }
 
 export interface AssetsApi {
-  assetInfo(identifier: MaybeRef<string>): ComputedRef<AssetInfo | null>;
-  assetSymbol(identifier: MaybeRef<string>): ComputedRef<string>;
-  tokenAddress(identifier: MaybeRef<string>): ComputedRef<string>;
+  assetInfo: (identifier: MaybeRef<string>) => ComputedRef<AssetInfo | null>;
+  assetSymbol: (identifier: MaybeRef<string>) => ComputedRef<string>;
+  tokenAddress: (identifier: MaybeRef<string>) => ComputedRef<string>;
 }
 
 export interface UtilsApi {
-  truncate(text: string, length: number): string;
-  getPoolName(type: LpType, assets: string[]): string;
+  truncate: (text: string, length: number) => string;
+  getPoolName: (type: LpType, assets: string[]) => string;
 }
 
 export interface DataUtilities {
@@ -128,29 +105,30 @@ export interface UserSettingsApi {
 }
 
 export interface SettingsApi {
-  update(settings: FrontendSettingsPayload): Promise<void>;
-  defaultThemes(): Themes;
-  themes(): Themes;
+  update: (settings: FrontendSettingsPayload) => Promise<void>;
+  defaultThemes: () => Themes;
+  themes: () => Themes;
+  isDark: ComputedRef<boolean>;
   user: UserSettingsApi;
   i18n: {
-    t: (
-      key: string,
-      values?: Record<string, unknown>,
-      choice?: number
-    ) => string;
-    /**
-     * @deprecated
-     */
-    tc: (
-      key: string,
-      choice?: number,
-      values?: Record<string, unknown>
-    ) => string;
+    t: (key: string, values?: Record<string, unknown>, choice?: number) => string;
+    te: (key: string) => boolean;
   };
 }
+
+export type GraphApi = (canvasId: string) => {
+  getCanvasCtx: () => CanvasRenderingContext2D;
+  baseColor: ComputedRef<string>;
+  gradient: ComputedRef<CanvasGradient>;
+  secondaryColor: ComputedRef<string>;
+  backgroundColor: ComputedRef<string>;
+  fontColor: ComputedRef<string>;
+  gridColor: ComputedRef<string>;
+};
 
 export interface PremiumApi {
   readonly date: DateUtilities;
   readonly data: DataUtilities;
   readonly settings: SettingsApi;
+  readonly graphs: GraphApi;
 }

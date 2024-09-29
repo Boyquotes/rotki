@@ -1,10 +1,10 @@
-import { rest } from 'msw';
+import process from 'node:process';
+import { HttpResponse, http } from 'msw';
 import historyEventProducts from '../../fixtures/history-event-products.json';
 
 const backendUrl = process.env.VITE_BACKEND_URL;
 
-export default [
-  rest.get(`${backendUrl}/api/1/history/events/products`, (req, res, ctx) =>
-    res(ctx.status(200), ctx.json(historyEventProducts))
-  )
+export const historyEventProductsHandlers = [
+  http.get(`${backendUrl}/api/1/history/events/products`, () =>
+    HttpResponse.json(historyEventProducts, { status: 200 })),
 ];

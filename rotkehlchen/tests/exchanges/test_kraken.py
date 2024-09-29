@@ -2,6 +2,7 @@ import warnings as test_warnings
 from contextlib import ExitStack
 from http import HTTPStatus
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 
 import gevent
@@ -10,8 +11,9 @@ import requests
 
 from rotkehlchen.accounting.mixins.event import AccountingEventType
 from rotkehlchen.accounting.structures.balance import Balance
+from rotkehlchen.api.websockets.typedefs import WSMessageType
 from rotkehlchen.assets.asset import Asset
-from rotkehlchen.assets.converters import KRAKEN_TO_WORLD, asset_from_kraken
+from rotkehlchen.assets.converters import asset_from_kraken
 from rotkehlchen.constants import ONE, ZERO
 from rotkehlchen.constants.assets import (
     A_ADA,
@@ -39,12 +41,13 @@ from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.exchanges.data_structures import Trade
 from rotkehlchen.exchanges.kraken import KRAKEN_DELISTED, Kraken
 from rotkehlchen.fval import FVal
+from rotkehlchen.history.events.structures.base import HistoryEvent
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.serialization.deserialize import deserialize_timestamp_from_floatstr
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
 )
 from rotkehlchen.tests.utils.constants import (
     A_AUD,
@@ -62,12 +65,20 @@ from rotkehlchen.tests.utils.constants import (
     A_WAVES,
     A_XTZ,
 )
-from rotkehlchen.tests.utils.exchanges import kraken_to_world_pair, try_get_first_exchange
+from rotkehlchen.tests.utils.exchanges import (
+    get_exchange_asset_symbols,
+    kraken_to_world_pair,
+    try_get_first_exchange,
+)
 from rotkehlchen.tests.utils.history import TEST_END_TS, prices
+from rotkehlchen.tests.utils.kraken import MockKraken
 from rotkehlchen.tests.utils.mock import MockResponse
 from rotkehlchen.tests.utils.pnl_report import query_api_create_and_get_report
-from rotkehlchen.types import AssetMovementCategory, Location, Timestamp, TradeType
+from rotkehlchen.types import AssetMovementCategory, Location, Timestamp, TimestampMS, TradeType
 from rotkehlchen.utils.misc import ts_now
+
+if TYPE_CHECKING:
+    from rotkehlchen.api.server import APIServer
 
 
 def _check_trade_history_events_order(db, expected):
@@ -88,9 +99,11 @@ def test_name():
     assert exchange.name == 'kraken1'
 
 
-def test_coverage_of_kraken_balances(kraken):
-    got_assets = set(kraken.online_api_query('Assets').keys())
-    expected_assets = (set(KRAKEN_TO_WORLD.keys()) - set(KRAKEN_DELISTED))
+def test_coverage_of_kraken_balances():
+    response = requests.get('https://api.kraken.com/0/public/Assets')
+    got_assets = set(response.json()['result'].keys())
+    expected_assets = get_exchange_asset_symbols(Location.KRAKEN) - set(KRAKEN_DELISTED)
+
     # Special/staking assets and which assets they should map to
     special_assets = {
         'XTZ.S': Asset('XTZ'),
@@ -113,7 +126,7 @@ def test_coverage_of_kraken_balances(kraken):
         'ALGO.S': Asset('ALGO'),
         'DOT.P': A_DOT,
         'MINA.S': Asset('MINA'),
-        'TRX.S': strethaddress_to_identifier('0xf230b790E05390FC8295F4d3F60332c93BEd42e2'),
+        'TRX.S': strethaddress_to_identifier('0x50327c6c5a14DCaDE707ABad2E27eB517df87AB5'),
         'LUNA.S': strethaddress_to_identifier('0xd2877702675e6cEb975b4A1dFf9fb7BAF4C91ea9'),
         'SCRT.S': Asset('SCRT'),
         'MATIC.S': strethaddress_to_identifier('0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0'),
@@ -201,9 +214,8 @@ def test_querying_rate_limit_exhaustion(kraken, database):
             return MockResponse(200, text)
         if 'AssetPairs' in url:
             dir_path = Path(__file__).resolve().parent.parent
-            filepath = dir_path / 'data' / 'assets_kraken.json'
-            with open(filepath, encoding='utf8') as f:
-                return MockResponse(200, f.read())
+            return MockResponse(200, (dir_path / 'data' / 'assets_kraken.json').read_text(encoding='utf8'))  # noqa: E501
+
         # else
         raise AssertionError(f'Unexpected url in kraken query: {url}')
 
@@ -288,9 +300,10 @@ def test_kraken_to_world_pair(kraken):
         kraken_to_world_pair('GABOOBABOO')
 
 
+@pytest.mark.parametrize('function_scope_initialize_mock_rotki_notifier', [True])
 def test_kraken_query_balances_unknown_asset(kraken):
     """Test that if a kraken balance query returns unknown asset no exception
-    is raised and a warning is generated"""
+    is raised and a message is generated"""
     kraken.random_balance_data = False
     balances, msg = kraken.query_balances()
 
@@ -301,9 +314,10 @@ def test_kraken_query_balances_unknown_asset(kraken):
     assert balances[A_ETH].amount == FVal('10.0')
     assert balances[A_ETH].usd_value == FVal('15.0')
 
-    warnings = kraken.msg_aggregator.consume_warnings()
-    assert len(warnings) == 1
-    assert 'unsupported/unknown kraken asset NOTAREALASSET' in warnings[0]
+    messages = kraken.msg_aggregator.rotki_notifier.messages
+    assert len(messages) == 1
+    assert messages[0].message_type == WSMessageType.EXCHANGE_UNKNOWN_ASSET
+    assert messages[0].data['identifier'] == 'NOTAREALASSET'
 
 
 @pytest.mark.parametrize('use_clean_caching_directory', [True])
@@ -364,12 +378,12 @@ def test_kraken_query_deposit_withdrawals_unknown_asset(kraken):
 
     # first normal deposit should have no problem
     assert len(movements) == 2
-    assert movements[0].asset == A_EUR
-    assert movements[0].amount == FVal('4000000')
-    assert movements[0].category == AssetMovementCategory.DEPOSIT
-    assert movements[1].asset == A_ETH
-    assert movements[1].amount == FVal('1')
-    assert movements[1].category == AssetMovementCategory.WITHDRAWAL
+    assert movements[0].asset == A_ETH
+    assert movements[0].amount == FVal('1')
+    assert movements[0].category == AssetMovementCategory.WITHDRAWAL
+    assert movements[1].asset == A_EUR
+    assert movements[1].amount == FVal('4000000')
+    assert movements[1].category == AssetMovementCategory.DEPOSIT
     errors = kraken.msg_aggregator.consume_errors()
     assert len(errors) == 1
 
@@ -639,7 +653,6 @@ def test_trade_from_kraken_unexpected_data(kraken):
 
     def query_kraken_and_test(input_trades, expected_warnings_num, expected_errors_num):
         # delete kraken history entries so they get requeried
-        cursor = kraken.history_events_db.db.conn.cursor()
         with kraken.history_events_db.db.user_write() as cursor:
             location = Location.KRAKEN
             cursor.execute(
@@ -733,6 +746,7 @@ def test_timestamp_deserialization():
 
 
 @pytest.mark.parametrize('have_decoders', [True])
+@pytest.mark.parametrize('number_of_eth_accounts', [0])
 @pytest.mark.parametrize('added_exchanges', [(Location.KRAKEN,)])
 @pytest.mark.parametrize('mocked_price_queries', [prices])
 @pytest.mark.parametrize('start_with_valid_premium', [False, True])
@@ -825,7 +839,7 @@ def test_kraken_staking(rotkehlchen_api_server_with_exchanges, start_with_valid_
             'stakingresource',
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 0
 
     with rotki.data.db.user_write() as write_cursor:
@@ -851,7 +865,7 @@ def test_kraken_staking(rotkehlchen_api_server_with_exchanges, start_with_valid_
         },
     )
 
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     events = result['entries']
 
     assert len(events) == 3
@@ -887,7 +901,7 @@ def test_kraken_staking(rotkehlchen_api_server_with_exchanges, start_with_valid_
             'limit': 1,
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries_found'] == 1
     assert set(result['assets']) == {'ETH', 'ETH2', 'XTZ'}
 
@@ -903,7 +917,7 @@ def test_kraken_staking(rotkehlchen_api_server_with_exchanges, start_with_valid_
             'asset': 'ETH2',
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 1
     assert len(result['received']) == 1
 
@@ -919,7 +933,7 @@ def test_kraken_staking(rotkehlchen_api_server_with_exchanges, start_with_valid_
             'event_subtypes': ['reward'],
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 3
 
     response = requests.post(
@@ -936,7 +950,7 @@ def test_kraken_staking(rotkehlchen_api_server_with_exchanges, start_with_valid_
             ],
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 4
 
     # test that sorting for a non-existing column is handled correctly
@@ -975,7 +989,7 @@ def test_kraken_staking(rotkehlchen_api_server_with_exchanges, start_with_valid_
             'order_by_attributes': ['event_type'],
         },
     )
-    assert_proper_response_with_result(response)
+    assert_proper_sync_response_with_result(response)
 
     _, without_eth2_staking_report_result, _ = query_api_create_and_get_report(
         server=rotkehlchen_api_server_with_exchanges,
@@ -1002,3 +1016,62 @@ def test_kraken_staking(rotkehlchen_api_server_with_exchanges, start_with_valid_
     assert FVal('0.000069900000').is_close(
         FVal(with_eth2_staking_overview.get(str(AccountingEventType.STAKING))['taxable']),
     )
+
+
+@pytest.mark.parametrize('have_decoders', [True])
+@pytest.mark.parametrize('added_exchanges', [(Location.KRAKEN,)])
+def test_kraken_informational_fees(rotkehlchen_api_server_with_exchanges: 'APIServer'):
+    """Test that we correctly ignore fees in events that we currently ignore as margin trades"""
+    rotki = rotkehlchen_api_server_with_exchanges.rest_api.rotkehlchen
+    kraken = cast(MockKraken, try_get_first_exchange(rotki.exchange_manager, Location.KRAKEN))
+    input_ledger = """
+    {
+        "ledger":{
+            "XXX": {
+                "aclass": "currency",
+                "amount": "1.0000",
+                "asset": "ZEUR",
+                "balance": "25.2825",
+                "fee": "0.0710",
+                "refid": "XXXXXXXXXXXX",
+                "time": 1636738550.7562,
+                "type": "margin",
+                "subtype": ""
+            }
+        },
+        "count": 1
+    }
+    """
+
+    target = 'rotkehlchen.tests.utils.kraken.KRAKEN_GENERAL_LEDGER_RESPONSE'
+    kraken.random_ledgers_data = False
+    with patch(target, new=input_ledger), rotki.data.db.conn.read_ctx() as cursor:
+        kraken.query_kraken_ledgers(
+            cursor=cursor,
+            start_ts=1636737550,
+            end_ts=1636739550,
+        )
+
+    with rotki.data.db.conn.read_ctx() as cursor:
+        events = DBHistoryEvents(rotki.data.db).get_history_events(
+            cursor=cursor,
+            filter_query=HistoryEventFilterQuery.make(),
+            has_premium=True,
+            group_by_event_ids=False,
+        )
+
+    assert events == [
+        HistoryEvent(
+            identifier=1,
+            event_identifier='XXXXXXXXXXXX',
+            sequence_index=0,
+            timestamp=TimestampMS(1636738550756),
+            location=Location.KRAKEN,
+            event_type=HistoryEventType.INFORMATIONAL,
+            event_subtype=HistoryEventSubType.NONE,
+            asset=A_EUR,
+            balance=Balance(amount=ONE),
+            location_label='mockkraken',
+            notes='margin',
+        ),
+    ]

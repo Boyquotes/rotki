@@ -1,27 +1,26 @@
 import warnings as test_warnings
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from rotkehlchen.chain.ethereum.defi.zerionsdk import KNOWN_ZERION_PROTOCOL_NAMES, ZerionSDK
 from rotkehlchen.fval import FVal
-from rotkehlchen.tests.utils.ethereum import (
-    ETHEREUM_TEST_PARAMETERS,
-    wait_until_all_nodes_connected,
-)
+from rotkehlchen.tests.utils.ethereum import INFURA_ETH_NODE, wait_until_all_nodes_connected
+from rotkehlchen.types import ChainID
 
 
-@pytest.mark.parametrize(*ETHEREUM_TEST_PARAMETERS)
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('ethereum_manager_connect_at_start', [(INFURA_ETH_NODE,)])
 @pytest.mark.parametrize('mocked_current_prices', [{
     'SNX': FVal('1'),
     'cUSDT': FVal('1'),
     'USDT': FVal('1'),
 }])
 def test_query_all_protocol_balances_for_account(
-        ethereum_inquirer,
+        ethereum_manager,
         function_scope_messages_aggregator,
-        inquirer,  # pylint: disable=unused-argument
+        inquirer,
         ethereum_manager_connect_at_start,
-        call_order,  # pylint: disable=unused-argument
         database,
 ):
     """Simple test that we can get balances for various defi protocols via zerion
@@ -35,10 +34,15 @@ def test_query_all_protocol_balances_for_account(
     """
     wait_until_all_nodes_connected(
         connect_at_start=ethereum_manager_connect_at_start,
-        evm_inquirer=ethereum_inquirer,
+        evm_inquirer=ethereum_manager.node_inquirer,
     )
-    zerion = ZerionSDK(ethereum_inquirer, function_scope_messages_aggregator, database)
-    balances = zerion.all_balances_for_account('0xf753beFE986e8Be8EBE7598C9d2b6297D9DD6662')
+    inquirer.inject_evm_managers(((ChainID.ETHEREUM, ethereum_manager),))
+    zerion = ZerionSDK(ethereum_manager.node_inquirer, function_scope_messages_aggregator, database)  # noqa: E501
+    with patch(
+        'rotkehlchen.chain.evm.decoding.curve.curve_cache._query_curve_data_from_api',
+        new=MagicMock(return_value=[]),
+    ):
+        balances = zerion.all_balances_for_account('0xf753beFE986e8Be8EBE7598C9d2b6297D9DD6662')
 
     if len(balances) == 0:
         test_warnings.warn(UserWarning('Test account for DeFi balances has no balances'))
@@ -51,6 +55,7 @@ def test_query_all_protocol_balances_for_account(
     assert len(warnings) == 0
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 def test_protocol_names_are_known(
         ethereum_inquirer,
         function_scope_messages_aggregator,

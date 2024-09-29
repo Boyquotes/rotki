@@ -14,8 +14,8 @@ from rotkehlchen.tests.utils.api import (
     assert_ok_async_response,
     assert_proper_response,
     assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     wait_for_async_task,
-    wait_for_async_task_with_result,
 )
 from rotkehlchen.tests.utils.ens import ENS_BRUNO, ENS_BRUNO_KSM_ADDR
 from rotkehlchen.tests.utils.substrate import (
@@ -48,7 +48,7 @@ def test_add_ksm_blockchain_account_invalid(rotkehlchen_api_server):
     )
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('number_of_eth_accounts', [0])
 @pytest.mark.parametrize('kusama_manager_connect_at_start', [(KusamaNodeName.OWN,)])
 @pytest.mark.parametrize('ksm_rpc_endpoint', [KUSAMA_TEST_RPC_ENDPOINT], ids=['KUSAMA_TEST_RPC_ENDPOINT'])  # setting ids to rename the argument to be processed by vcr since its value can contain characters that are illegal in windows. Affects all other similar fixtures in this file # noqa: E501
@@ -83,7 +83,7 @@ def test_add_ksm_blockchain_account(rotkehlchen_api_server, kusama_manager_conne
         'named_blockchain_balances_resource',
         blockchain=kusama_chain_key,
     ))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
 
     # Check per account
     account_balances = result['per_account'][kusama_chain_key][SUBSTRATE_ACC1_KSM_ADDR]
@@ -99,7 +99,7 @@ def test_add_ksm_blockchain_account(rotkehlchen_api_server, kusama_manager_conne
     assert FVal(total_ksm['usd_value']) >= ZERO
 
 
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('number_of_eth_accounts', [0])
 @pytest.mark.parametrize('ksm_accounts', [[SUBSTRATE_ACC1_KSM_ADDR, SUBSTRATE_ACC2_KSM_ADDR]])
 @pytest.mark.parametrize('kusama_manager_connect_at_start', [(KusamaNodeName.OWN,)])
@@ -126,7 +126,7 @@ def test_remove_ksm_blockchain_account(rotkehlchen_api_server):
             'async_query': False,
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
 
     # Check per account
     assert SUBSTRATE_ACC2_KSM_ADDR not in result['per_account'][kusama_chain_key]
@@ -194,11 +194,11 @@ def test_add_ksm_blockchain_account_ens_domain(rotkehlchen_api_server):
             'async_query': async_query,
         },
     )
-    if async_query:
-        task_id = assert_ok_async_response(response)
-        result = wait_for_async_task_with_result(rotkehlchen_api_server, task_id)
-    else:
-        result = assert_proper_response_with_result(response)
+    result = assert_proper_response_with_result(
+        response=response,
+        rotkehlchen_api_server=rotkehlchen_api_server,
+        async_query=async_query,
+    )
 
     assert result == [ENS_BRUNO_KSM_ADDR]
     assert set(rotki.chains_aggregator.accounts.ksm) == {ENS_BRUNO_KSM_ADDR}

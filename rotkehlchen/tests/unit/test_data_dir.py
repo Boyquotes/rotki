@@ -1,6 +1,8 @@
 import pytest
 
 from rotkehlchen.constants.misc import (
+    AIRDROPSDIR_NAME,
+    AIRDROPSPOAPDIR_NAME,
     AVATARIMAGESDIR_NAME,
     CUSTOMASSETIMAGESDIR_NAME,
     GLOBALDB_NAME,
@@ -26,6 +28,7 @@ def _create_old_directory_structure(data_dir):
     global_data.mkdir(parents=True, exist_ok=True)
     (global_data / GLOBALDB_NAME).touch()
 
+    (data_dir / 'cryptocompare_coinlist.json').touch()  # add coinlist to see it deleted
     for user in USERS:
         user_dir = data_dir / user
         user_dir.mkdir(parents=True, exist_ok=True)
@@ -35,7 +38,7 @@ def _create_old_directory_structure(data_dir):
     misc_data.mkdir(parents=True, exist_ok=True)
     (misc_data / MISC_FILE).touch()
 
-    for name in ('airdrops', 'airdrops_poap'):
+    for name in (AIRDROPSDIR_NAME, AIRDROPSPOAPDIR_NAME):
         subdir = data_dir / name
         subdir.mkdir(parents=True, exist_ok=True)
         for filename in AIRDROPS:
@@ -71,8 +74,7 @@ def _create_old_directory_structure(data_dir):
 
 def _assert_dir_matches(directory, expected):
     contents = set()
-    for x in directory.iterdir():
-        contents.add(x.name)
+    contents.update(x.name for x in directory.iterdir())
 
     assert contents == set(expected)
 
@@ -81,6 +83,8 @@ def _assert_directory_structure(data_dir):
     """Asserts that the directory structure has been properly migrated"""
     for x in data_dir.iterdir():
         assert x.is_dir() and x.name in ('users', 'app', 'global', 'images', 'restructuring_remnants')  # noqa: E501
+
+    assert not (data_dir / 'cryptocompare_coinlist.json').exists()
 
     # assert the proper directory structure for users
     users_dir = data_dir / 'users'
@@ -99,7 +103,7 @@ def _assert_directory_structure(data_dir):
     app_dir = data_dir / 'app'
     users = set()
     for x in app_dir.iterdir():
-        if x.name in ('airdrops', 'airdrops_poap'):
+        if x.name in (AIRDROPSDIR_NAME, AIRDROPSPOAPDIR_NAME):
             _assert_dir_matches(x, AIRDROPS)
         elif x.name == MISCDIR_NAME:
             assert (x / MISC_FILE).exists()

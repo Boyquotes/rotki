@@ -2,12 +2,21 @@
 import { TaskType } from '@/types/task-type';
 import { Routes } from '@/router/routes';
 import { Module } from '@/types/modules';
+import { DashboardTableType } from '@/types/settings/frontend-settings';
+import { NoteLocation } from '@/types/notes';
+
+definePage({
+  name: 'dashboard',
+  meta: {
+    noteLocation: NoteLocation.DASHBOARD,
+  },
+});
 
 const { t } = useI18n();
 const { isTaskRunning } = useTaskStore();
 
 const { balances, liabilities } = useAggregatedBalances();
-const { blockchainTotals } = useAccountBalances();
+const { blockchainTotals } = storeToRefs(useBlockchainStore());
 const aggregatedBalances = balances();
 const aggregatedLiabilities = liabilities();
 
@@ -22,9 +31,7 @@ const isQueryingBlockchain = isTaskRunning(TaskType.QUERY_BLOCKCHAIN_BALANCES);
 const isLoopringLoading = isTaskRunning(TaskType.L2_LOOPRING);
 const isTokenDetecting = isTaskRunning(TaskType.FETCH_DETECTED_TOKENS);
 
-const isBlockchainLoading = computed<boolean>(
-  () => get(isQueryingBlockchain) || get(isLoopringLoading)
-);
+const isBlockchainLoading = computed<boolean>(() => get(isQueryingBlockchain) || get(isLoopringLoading));
 
 const isExchangeLoading = isTaskRunning(TaskType.QUERY_EXCHANGE_BALANCES);
 
@@ -32,30 +39,27 @@ const isAllBalancesLoading = isTaskRunning(TaskType.QUERY_BALANCES);
 
 const isManualBalancesLoading = isTaskRunning(TaskType.MANUAL_BALANCES);
 
-const isAnyLoading = logicOr(
-  isBlockchainLoading,
-  isExchangeLoading,
-  isAllBalancesLoading
-);
+const isAnyLoading = logicOr(isBlockchainLoading, isExchangeLoading, isAllBalancesLoading);
 
 const { refreshBalance } = useRefresh();
 
 const { isModuleEnabled } = useModules();
 const nftEnabled = isModuleEnabled(Module.NFTS);
 
-const { dashboardMessage } = useDynamicMessages();
-const dismissedMessage = useSessionStorage(
-  'rotki.messages.dash.dismissed',
-  false
-);
+const { activeDashboardMessages } = useDynamicMessages();
+const dismissedMessage = useSessionStorage('rotki.messages.dash.dismissed', false);
+const Type = DashboardTableType;
 </script>
 
 <template>
-  <div class="pb-6" data-cy="dashboard">
+  <div
+    class="pb-6"
+    data-cy="dashboard"
+  >
     <DynamicMessageDisplay
-      v-if="dashboardMessage && !dismissedMessage"
-      class="!-mt-4"
-      :message="dashboardMessage"
+      v-if="activeDashboardMessages.length > 0 && !dismissedMessage"
+      class="!-mt-6 mb-4"
+      :messages="activeDashboardMessages"
       @dismiss="dismissedMessage = true"
     />
     <div class="container">
@@ -74,11 +78,19 @@ const dismissedMessage = useSessionStorage(
             >
               <SummaryCardCreateButton
                 v-if="exchanges.length === 0"
-                :to="`#${Routes.API_KEYS_EXCHANGES}?add=true`"
+                :to="{
+                  path: '/api-keys/exchanges',
+                  query: {
+                    add: 'true',
+                  },
+                }"
               >
                 {{ t('dashboard.exchange_balances.add') }}
               </SummaryCardCreateButton>
-              <div v-else data-cy="exchange-balances">
+              <div
+                v-else
+                data-cy="exchange-balances"
+              >
                 <ExchangeBox
                   v-for="exchange in exchanges"
                   :key="exchange.location"
@@ -101,11 +113,19 @@ const dismissedMessage = useSessionStorage(
               </template>
               <SummaryCardCreateButton
                 v-if="blockchainTotals.length === 0"
-                :to="`#${Routes.ACCOUNTS_BALANCES}?add=true`"
+                :to="{
+                  path: '/balances',
+                  query: {
+                    add: 'true',
+                  },
+                }"
               >
                 {{ t('dashboard.blockchain_balances.add') }}
               </SummaryCardCreateButton>
-              <div v-else data-cy="blockchain-balances">
+              <div
+                v-else
+                data-cy="blockchain-balances"
+              >
                 <BlockchainBalanceCardList
                   v-for="total in blockchainTotals"
                   :key="total.chain"
@@ -121,15 +141,23 @@ const dismissedMessage = useSessionStorage(
               :is-loading="isManualBalancesLoading"
               can-refresh
               :navigates-to="Routes.ACCOUNTS_BALANCES_MANUAL"
-              @refresh="fetchManualBalances()"
+              @refresh="fetchManualBalances(true)"
             >
               <SummaryCardCreateButton
                 v-if="manualBalanceByLocation.length === 0"
-                :to="`#${Routes.ACCOUNTS_BALANCES_MANUAL}?add=true`"
+                :to="{
+                  path: '/balances/manual',
+                  query: {
+                    add: 'true',
+                  },
+                }"
               >
                 {{ t('dashboard.manual_balances.add') }}
               </SummaryCardCreateButton>
-              <div v-else data-cy="manual-balances">
+              <div
+                v-else
+                data-cy="manual-balances"
+              >
                 <ManualBalanceCardList
                   v-for="manualBalance in manualBalanceByLocation"
                   :key="manualBalance.location"
@@ -146,7 +174,7 @@ const dismissedMessage = useSessionStorage(
       </div>
       <DashboardAssetTable
         :title="t('common.assets')"
-        table-type="ASSETS"
+        :table-type="Type.ASSETS"
         :loading="isAnyLoading"
         :balances="aggregatedBalances"
       />
@@ -154,7 +182,7 @@ const dismissedMessage = useSessionStorage(
       <DashboardAssetTable
         v-if="aggregatedLiabilities.length > 0"
         class="mt-8"
-        table-type="LIABILITIES"
+        :table-type="Type.LIABILITIES"
         :title="t('dashboard.liabilities.title')"
         :loading="isAnyLoading"
         :balances="aggregatedLiabilities"

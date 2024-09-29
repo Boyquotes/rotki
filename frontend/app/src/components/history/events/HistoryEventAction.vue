@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { type HistoryEventEntry } from '@/types/history/events';
+import type { HistoryEventEntry } from '@/types/history/events';
 
 const props = defineProps<{
   event: HistoryEventEntry;
@@ -11,48 +11,59 @@ const { event } = toRefs(props);
 
 const { t } = useI18n();
 
-const onEditRule = () => {
+function onEditRule() {
   const entry = get(event);
 
   const data = {
     eventSubtype: entry.eventSubtype,
     eventType: entry.eventType,
-    counterparty: ''
+    counterparty: '',
   };
 
-  if ('counterparty' in entry) {
+  if ('counterparty' in entry)
     data.counterparty = entry.counterparty ?? '';
-  }
 
   vueRouter.push({
     path: '/settings/accounting',
-    query: { 'edit-rule': 'true', ...data }
+    query: { 'edit-rule': 'true', ...data },
   });
-};
+}
 </script>
 
 <template>
   <div class="flex items-center">
-    <VMenu
-      max-width="250px"
-      min-width="200px"
-      left
-      offset-y
-      transition="slide-y-transition"
+    <RuiMenu
+      menu-class="max-w-[15rem]"
+      :popper="{ placement: 'bottom-end' }"
+      close-on-content-click
     >
-      <template #activator="{ on }">
-        <RuiButton class="!p-2" icon size="sm" variant="text" v-on="on">
-          <RuiIcon name="more-2-fill" size="20" />
+      <template #activator="{ attrs }">
+        <RuiButton
+          icon
+          variant="text"
+          class="!p-2.5"
+          v-bind="attrs"
+        >
+          <RuiIcon
+            name="more-2-fill"
+            size="20"
+          />
         </RuiButton>
       </template>
-      <VList>
-        <VListItem class="gap-4" link @click="onEditRule()">
-          <RuiIcon class="text-rui-text-secondary" name="pencil-line" />
-          <VListItemContent>
-            {{ t('accounting_settings.rule.edit') }}
-          </VListItemContent>
-        </VListItem>
-      </VList>
-    </VMenu>
+      <div class="py-2">
+        <RuiButton
+          variant="list"
+          @click="onEditRule()"
+        >
+          <template #prepend>
+            <RuiIcon
+              class="text-rui-text-secondary"
+              name="pencil-line"
+            />
+          </template>
+          {{ t('accounting_settings.rule.edit') }}
+        </RuiButton>
+      </div>
+    </RuiMenu>
   </div>
 </template>

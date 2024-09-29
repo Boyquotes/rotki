@@ -2,7 +2,7 @@ import warnings as test_warnings
 from unittest.mock import patch
 
 from rotkehlchen.assets.asset import Asset
-from rotkehlchen.assets.converters import UNSUPPORTED_OKX_ASSETS, asset_from_okx
+from rotkehlchen.assets.converters import asset_from_okx
 from rotkehlchen.constants.assets import A_ETH, A_SOL, A_USDC, A_USDT
 from rotkehlchen.errors.asset import UnknownAsset, UnsupportedAsset
 from rotkehlchen.exchanges.data_structures import AssetMovement, Trade
@@ -27,11 +27,9 @@ def test_name():
     assert exchange.name == 'okx1'
 
 
-def test_assets_are_known(mock_okx: Okx):
-    okx_assets = set()
+def test_assets_are_known(mock_okx: Okx, globaldb):
     currencies = mock_okx._api_query('currencies')
-    for currency in currencies['data']:
-        okx_assets.add(currency['ccy'])
+    okx_assets = {currency['ccy'] for currency in currencies['data']}
 
     for okx_asset in okx_assets:
         try:
@@ -42,7 +40,7 @@ def test_assets_are_known(mock_okx: Okx):
                 f'Support for it has to be added',
             ))
         except UnsupportedAsset as e:
-            if okx_asset not in UNSUPPORTED_OKX_ASSETS:
+            if globaldb.is_asset_symbol_unsupported(Location.OKX, okx_asset) is False:
                 test_warnings.warn(UserWarning(
                     f'Found unsupported asset {e.identifier} in OKX. '
                     f'Support for it has to be added',
@@ -134,7 +132,7 @@ def test_okx_query_balances(mock_okx: Okx):
                "eq":"0.00000065312",
                "eqUsd":"0.00000065312",
                "fixedBal":"0",
-               "frozenBal":"0",
+               "frozenBal":"50",
                "interest":"",
                "isoEq":"0",
                "isoLiab":"",
@@ -175,7 +173,7 @@ def test_okx_query_balances(mock_okx: Okx):
     assert len(balances) == 3
     assert (balances[A_XMR.resolve_to_asset_with_oracles()]).amount == FVal('0.027846')
     assert (balances[A_SOL.resolve_to_asset_with_oracles()]).amount == FVal('299.9920000068')
-    assert (balances[A_USDT.resolve_to_asset_with_oracles()]).amount == FVal('6.5312E-7')
+    assert (balances[A_USDT.resolve_to_asset_with_oracles()]).amount == FVal('50.00000065312')
 
     warnings = mock_okx.msg_aggregator.consume_warnings()
     errors = mock_okx.msg_aggregator.consume_errors()
@@ -539,7 +537,7 @@ def test_okx_query_trades(mock_okx: Okx):
         Trade(
             timestamp=Timestamp(1665846604),
             location=Location.OKX,
-            base_asset=Asset('eip155:1/erc20:0xf230b790E05390FC8295F4d3F60332c93BEd42e2'),
+            base_asset=Asset('eip155:1/erc20:0x50327c6c5a14DCaDE707ABad2E27eB517df87AB5'),
             quote_asset=A_USDT,
             trade_type=TradeType.SELL,
             amount=AssetAmount(FVal(30009.966)),
@@ -552,39 +550,39 @@ def test_okx_query_trades(mock_okx: Okx):
         Trade(
             timestamp=Timestamp(1665641177),
             location=Location.OKX,
-            base_asset=Asset('eip155:1/erc20:0xf230b790E05390FC8295F4d3F60332c93BEd42e2'),
+            base_asset=Asset('eip155:1/erc20:0x50327c6c5a14DCaDE707ABad2E27eB517df87AB5'),
             quote_asset=A_USDT,
             trade_type=TradeType.BUY,
             amount=AssetAmount(FVal(10)),
             rate=Price(FVal(0.06174)),
             fee=Fee(FVal(0.01)),
-            fee_currency=Asset('eip155:1/erc20:0xf230b790E05390FC8295F4d3F60332c93BEd42e2'),
+            fee_currency=Asset('eip155:1/erc20:0x50327c6c5a14DCaDE707ABad2E27eB517df87AB5'),
             link='555555555555555555',
             notes=None,
         ),
         Trade(
             timestamp=Timestamp(1665641133),
             location=Location.OKX,
-            base_asset=Asset('eip155:1/erc20:0xf230b790E05390FC8295F4d3F60332c93BEd42e2'),
+            base_asset=Asset('eip155:1/erc20:0x50327c6c5a14DCaDE707ABad2E27eB517df87AB5'),
             quote_asset=A_USDT,
             trade_type=TradeType.BUY,
             amount=AssetAmount(FVal(24)),
             rate=Price(FVal(0.06174)),
             fee=Fee(FVal(0.024)),
-            fee_currency=Asset('eip155:1/erc20:0xf230b790E05390FC8295F4d3F60332c93BEd42e2'),
+            fee_currency=Asset('eip155:1/erc20:0x50327c6c5a14DCaDE707ABad2E27eB517df87AB5'),
             link='555555555555555555',
             notes=None,
         ),
         Trade(
             timestamp=Timestamp(1665641100),
             location=Location.OKX,
-            base_asset=Asset('eip155:1/erc20:0xf230b790E05390FC8295F4d3F60332c93BEd42e2'),
+            base_asset=Asset('eip155:1/erc20:0x50327c6c5a14DCaDE707ABad2E27eB517df87AB5'),
             quote_asset=A_USDT,
             trade_type=TradeType.BUY,
             amount=AssetAmount(FVal(30000)),
             rate=Price(FVal(0.06174)),
             fee=Fee(FVal(24)),
-            fee_currency=Asset('eip155:1/erc20:0xf230b790E05390FC8295F4d3F60332c93BEd42e2'),
+            fee_currency=Asset('eip155:1/erc20:0x50327c6c5a14DCaDE707ABad2E27eB517df87AB5'),
             link='555555555555555555',
             notes=None,
         ),
@@ -746,7 +744,7 @@ def test_okx_query_deposits_withdrawals(mock_okx: Okx):
             location=Location.OKX,
             category=AssetMovementCategory.DEPOSIT,
             timestamp=Timestamp(1669963555),
-            address='0xaab27b150451726ec7738aa1d0a94505c8729bd1',
+            address='0xAAB27b150451726EC7738aa1d0A94505c8729bd1',
             transaction_id='0xfd12f8850218dc9d1d706c2dbd6c38f495988109c220bf8833255697b85c92db',
             asset=A_USDT,
             amount=FVal(2500.180327),
@@ -758,7 +756,7 @@ def test_okx_query_deposits_withdrawals(mock_okx: Okx):
             location=Location.OKX,
             category=AssetMovementCategory.DEPOSIT,
             timestamp=Timestamp(1669405596),
-            address='0xaab27b150451726ec7738aa1d0a94505c8729bd1',
+            address='0xAAB27b150451726EC7738aa1d0A94505c8729bd1',
             transaction_id='0xcea993d53b2c1f79430a003fb8facb5cd6b83b6cb6a502b6233d83eb338ba8ba',
             asset=A_USDC,
             amount=FVal(990.795352),
@@ -784,7 +782,7 @@ def test_okx_query_deposits_withdrawals(mock_okx: Okx):
             location=Location.OKX,
             category=AssetMovementCategory.WITHDRAWAL,
             timestamp=Timestamp(1670953159),
-            address='0x388c818ca8b9251b393131c08a736a67ccb19297',
+            address='0x388C818CA8B9251b393131C08a736A67ccB19297',
             transaction_id='0x9444b018c33c5adb58ee171bc18e61c56078495e37ae88833007a46c02b4552f',
             asset=A_USDT,
             amount=FVal(421.169831),

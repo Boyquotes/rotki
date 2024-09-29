@@ -1,10 +1,10 @@
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
-from eth_abi import encode_abi
-from eth_utils import to_checksum_address, to_normalized_address
+from eth_abi import encode as encode_abi
+from eth_utils import to_checksum_address, to_hex
 from web3 import Web3
-from web3.exceptions import BadFunctionCallOutput
+from web3.exceptions import Web3Exception
 
 from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.assets.asset import EvmToken
@@ -14,13 +14,13 @@ from rotkehlchen.chain.ethereum.interfaces.ammswap.utils import (
     TokenDetails,
     update_asset_price_in_lp_balances,
 )
-from rotkehlchen.chain.ethereum.modules.uniswap.v3.types import (
-    AddressToUniswapV3LPBalances,
-    NFTLiquidityPool,
-)
 from rotkehlchen.chain.ethereum.oracles.uniswap import UniswapV3Oracle
 from rotkehlchen.chain.ethereum.utils import generate_address_via_create2
 from rotkehlchen.chain.evm.contracts import EvmContract
+from rotkehlchen.chain.evm.decoding.uniswap.v3.types import (
+    AddressToUniswapV3LPBalances,
+    NFTLiquidityPool,
+)
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import A_USDC
@@ -210,7 +210,7 @@ def uniswap_v3_lp_token_balances(
                 tokens_a.append(token1_info)
                 token2_info = ethereum.get_erc20_contract_info(to_checksum_address(position[3]))
                 tokens_b.append(token2_info)
-            except (BadFunctionCallOutput, ValueError) as e:
+            except (Web3Exception, ValueError) as e:
                 log.error(
                     f'Error retrieving contract information for address: {position[2]} '
                     f'due to: {e!s}',
@@ -347,7 +347,7 @@ def _compute_pool_address(
 
     return generate_address_via_create2(
         address=uniswap_v3_factory_address,
-        salt=Web3.toHex(Web3.keccak(encode_abi(['address', 'address', 'uint24'], parameters))),
+        salt=to_hex(Web3.keccak(encode_abi(['address', 'address', 'uint24'], parameters))),
         init_code=POOL_INIT_CODE_HASH,
         is_init_code_hashed=True,
     )
@@ -474,7 +474,7 @@ def _decode_uniswap_v3_result(
 
     Edge cases whereby a token does not conform to ERC20 standard,the user balance is set to ZERO.
     """
-    nft_id = NFT_DIRECTIVE + to_normalized_address(uniswap_v3_nft_manager_address) + '_' + str(data[0])  # noqa: E501
+    nft_id = NFT_DIRECTIVE + to_checksum_address(uniswap_v3_nft_manager_address) + '_' + str(data[0])  # noqa: E501
     pool_token = data[1]
     token0 = _decode_uniswap_v3_token(data[4])
     token1 = _decode_uniswap_v3_token(data[5])
@@ -537,7 +537,7 @@ def get_unknown_asset_price_chain(
             price, _ = oracle.query_current_price(from_token, A_USDC.resolve_to_asset_with_oracles(), False)  # noqa: E501
             asset_price[from_token.evm_address] = price
         except (PriceQueryUnsupportedAsset, RemoteError) as e:
-            log.error(
+            log.debug(
                 f'Failed to find price for {from_token!s}/{A_USDC!s} LP using '
                 f'Uniswap V3 oracle due to: {e!s}.',
             )

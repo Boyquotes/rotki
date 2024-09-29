@@ -32,14 +32,14 @@ from rotkehlchen.history.events.structures.evm_event import EvmEvent
 from rotkehlchen.history.events.structures.types import HistoryEventSubType
 from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.logging import RotkehlchenLogsAdapter
-from rotkehlchen.premium.premium import Premium
+from rotkehlchen.premium.premium import Premium, has_premium_check
 from rotkehlchen.tasks.utils import query_missing_prices_of_base_entries
 from rotkehlchen.types import ChainID, ChecksumEvmAddress, EvmTokenKind, Timestamp
-from rotkehlchen.user_messages import MessagesAggregator
 
 if TYPE_CHECKING:
     from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
     from rotkehlchen.db.dbhandler import DBHandler
+    from rotkehlchen.user_messages import MessagesAggregator
 
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ class AMMSwapPlatform:
             ethereum_inquirer: 'EthereumInquirer',
             database: 'DBHandler',
             premium: Premium | None,
-            msg_aggregator: MessagesAggregator,
+            msg_aggregator: 'MessagesAggregator',
     ) -> None:
         self.counterparties = counterparties
         self.ethereum = ethereum_inquirer
@@ -86,7 +86,7 @@ class AMMSwapPlatform:
         asset_price: AssetToPrice = {}
 
         for known_asset in known_assets:
-            asset_usd_price = Inquirer().find_usd_price(known_asset)
+            asset_usd_price = Inquirer.find_usd_price(known_asset)
 
             if asset_usd_price != ZERO_PRICE:
                 asset_price[known_asset.evm_address] = asset_usd_price
@@ -206,7 +206,7 @@ class AMMSwapPlatform:
                 events = db.get_history_events(
                     cursor=cursor,
                     filter_query=dbfilter,
-                    has_premium=self.premium is not None,
+                    has_premium=has_premium_check(self.premium),
                     group_by_event_ids=False,
                 )
 
@@ -266,7 +266,7 @@ class AMMSwapPlatform:
                 # Otherwise keep existing price (zero)
                 total_user_balance = ZERO
                 for asset in lp.assets:
-                    asset_usd_price = Inquirer().find_usd_price(asset.token)
+                    asset_usd_price = Inquirer.find_usd_price(asset.token)
                     # Update <LiquidityPoolAsset> if asset USD price exists
                     if asset_usd_price != ZERO_PRICE:
                         asset.usd_price = asset_usd_price

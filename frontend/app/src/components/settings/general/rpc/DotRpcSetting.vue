@@ -6,14 +6,14 @@ const dotRpcEndpoint = ref(Defaults.DOT_RPC_ENDPOINT);
 
 const { dotRpcEndpoint: dotRpc } = storeToRefs(useGeneralSettingsStore());
 
-const dotSuccessMessage = (endpoint: string) => {
+function dotSuccessMessage(endpoint: string) {
   if (endpoint) {
     return t('general_settings.validation.dot_rpc.success_set', {
-      endpoint
+      endpoint,
     });
   }
   return t('general_settings.validation.dot_rpc.success_unset');
-};
+}
 
 onBeforeMount(() => {
   set(dotRpcEndpoint, get(dotRpc) || Defaults.DOT_RPC_ENDPOINT);
@@ -27,9 +27,10 @@ onBeforeMount(() => {
     :error-message="t('general_settings.validation.dot_rpc.error')"
     :success-message="dotSuccessMessage"
   >
-    <VTextField
+    <RuiTextField
       v-model="dotRpcEndpoint"
-      outlined
+      variant="outlined"
+      color="primary"
       class="general-settings__fields__dot-rpc-endpoint"
       :label="t('general_settings.labels.dot_rpc_endpoint')"
       type="text"
@@ -38,7 +39,7 @@ onBeforeMount(() => {
       clearable
       @paste="update($event.clipboardData.getData('text'))"
       @click:clear="update('')"
-      @change="update($event)"
+      @update:model-value="update($event)"
     />
   </SettingsOption>
 </template>

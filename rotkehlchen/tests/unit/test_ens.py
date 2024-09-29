@@ -70,7 +70,7 @@ def test_ens_lookup(ethereum_inquirer, call_order, ethereum_manager_connect_at_s
     # Test invalid name
     with pytest.raises(InputError) as e:
         ethereum_inquirer.ens_lookup('fl00_id.loopring.eth', call_order=call_order)
-    assert "fl00_id.loopring.eth is an invalid name, because Codepoint U+005F not allowed at position 5 in 'fl00_id.loopring.eth'" in str(e.value)  # noqa: E501
+    assert "Underscores '_' may only occur at the start of a label: 'fl00_id'" in str(e.value)
 
     result = ethereum_inquirer.ens_lookup('ishouldprobablynotexist.eth', call_order=call_order)
     assert result is None
@@ -207,7 +207,7 @@ def test_ens_reverse_lookup(ethereum_inquirer):
         'call_contract',
         wraps=ethereum_inquirer.call_contract,
     )
-    # The patch is just to to check that chunking works correctly
+    # The patch is just to check that chunking works correctly
     # We do 2 requests - first without splitting in chunks and in the second one addresses
     # should be split. We confirm it by checking call_count attribute of the call contract patch.
     addrs_in_chunk_patch = patch(

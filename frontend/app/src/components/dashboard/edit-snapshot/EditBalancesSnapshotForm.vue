@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { type BigNumber } from '@rotki/common';
 import { helpers, required } from '@vuelidate/validators';
-import { type BalanceSnapshotPayload } from '@/types/snapshots';
 import { toMessages } from '@/utils/validation';
+import type { BigNumber } from '@rotki/common';
+import type { BalanceSnapshotPayload } from '@/types/snapshots';
 
 interface BalanceSnapshotPayloadAndLocation extends BalanceSnapshotPayload {
   location: string;
@@ -18,8 +18,8 @@ const props = withDefaults(
   {
     edit: false,
     locations: () => [],
-    previewLocationBalance: null
-  }
+    previewLocationBalance: null,
+  },
 );
 
 const emit = defineEmits<{
@@ -33,82 +33,115 @@ const { currencySymbol } = storeToRefs(useGeneralSettingsStore());
 
 const assetType = ref<string>('token');
 
-const updateForm = (partial: Partial<BalanceSnapshotPayloadAndLocation>) => {
-  emit('update:form', {
-    ...get(form),
-    ...partial
-  });
-};
+const category = usePropVModel(props, 'form', 'category', emit);
+const assetIdentifier = usePropVModel(props, 'form', 'assetIdentifier', emit);
+const amount = usePropVModel(props, 'form', 'amount', emit);
+const usdValue = usePropVModel(props, 'form', 'usdValue', emit);
+const location = usePropVModel(props, 'form', 'location', emit);
+const price = ref<string>('1');
 
-const checkAssetType = () => {
+const usdValueInputFocused = ref<boolean>(false);
+
+function checkAssetType() {
   const formVal = get(form);
-  if (isNft(formVal.assetIdentifier)) {
+  if (isNft(formVal.assetIdentifier))
     set(assetType, 'nft');
+}
+
+function updatePrice(forceUpdate = false) {
+  const value = get(usdValue);
+  const amountVal = get(amount);
+  if (value && amountVal && (get(usdValueInputFocused) || forceUpdate)) {
+    set(
+      price,
+      bigNumberify(get(usdValue))
+        .div(bigNumberify(get(amount)))
+        .toFixed(),
+    );
   }
-};
+}
+
+function calculateValue(forceUpdate = false) {
+  const priceVal = get(price);
+  const amountVal = get(amount);
+  if (priceVal && amountVal && (!get(usdValueInputFocused) || forceUpdate)) {
+    set(
+      usdValue,
+      bigNumberify(get(price))
+        .multipliedBy(bigNumberify(get(amount)))
+        .toFixed(),
+    );
+  }
+}
+
+watchImmediate(form, () => {
+  checkAssetType();
+});
 
 onBeforeMount(() => {
-  checkAssetType();
+  updatePrice(true);
 });
 
-watch(form, () => {
-  checkAssetType();
+watch(amount, () => {
+  updatePrice();
+  calculateValue();
 });
 
-watch(assetType, assetType => {
-  if (assetType === 'nft') {
-    updateForm({ amount: '1' });
-  }
+watch(price, () => {
+  calculateValue();
+});
+
+watch(usdValue, () => {
+  updatePrice();
+});
+
+watch(assetType, (assetType) => {
+  if (assetType === 'nft')
+    set(amount, '1');
 });
 
 const rules = {
   category: {
-    required: helpers.withMessage(
-      t('dashboard.snapshot.edit.dialog.balances.rules.category').toString(),
-      required
-    )
+    required: helpers.withMessage(t('dashboard.snapshot.edit.dialog.balances.rules.category'), required),
   },
   assetIdentifier: {
-    required: helpers.withMessage(
-      t('dashboard.snapshot.edit.dialog.balances.rules.asset').toString(),
-      required
-    )
+    required: helpers.withMessage(t('dashboard.snapshot.edit.dialog.balances.rules.asset'), required),
   },
   amount: {
-    required: helpers.withMessage(
-      t('dashboard.snapshot.edit.dialog.balances.rules.amount').toString(),
-      required
-    )
+    required: helpers.withMessage(t('dashboard.snapshot.edit.dialog.balances.rules.amount'), required),
+  },
+  price: {
+    required: helpers.withMessage(t('dashboard.snapshot.edit.dialog.balances.rules.price'), required),
   },
   usdValue: {
-    required: helpers.withMessage(
-      t('dashboard.snapshot.edit.dialog.balances.rules.value').toString(),
-      required
-    )
-  }
+    required: helpers.withMessage(t('dashboard.snapshot.edit.dialog.balances.rules.value'), required),
+  },
 };
 
 const { setValidation } = useEditBalancesSnapshotForm();
 
-const v$ = setValidation(rules, form, {
-  $autoDirty: true
-});
+const v$ = setValidation(
+  rules,
+  computed(() => ({ ...get(form), price })),
+  {
+    $autoDirty: true,
+  },
+);
 
-const updateAsset = (asset: string) => {
+function updateAsset(asset: string) {
   emit('update:asset', asset);
-};
+}
 </script>
 
 <template>
   <form class="flex flex-col gap-2">
     <BalanceTypeInput
-      :value="form.category"
+      v-model="category"
       :label="t('common.category')"
       :error-messages="toMessages(v$.category)"
-      @input="updateForm({ category: $event })"
     />
     <div>
-      <div class="text--secondary text-caption">
+      <div class="text-rui-text-secondary text-caption">
         {{ t('common.asset') }}
       </div>
       <div>
@@ -118,32 +151,29 @@ const updateAsset = (asset: string) => {
           inline
           :disabled="edit"
         >
-          <template #default>
-            <RuiRadio
-              :label="t('dashboard.snapshot.edit.dialog.balances.token')"
-              internal-value="token"
-            />
-            <RuiRadio
-              :label="t('dashboard.snapshot.edit.dialog.balances.nft')"
-              internal-value="nft"
-            />
-          </template>
+          <RuiRadio
+            :label="t('dashboard.snapshot.edit.dialog.balances.token')"
+            value="token"
+          />
+          <RuiRadio
+            :label="t('dashboard.snapshot.edit.dialog.balances.nft')"
+            value="nft"
+          />
         </RuiRadioGroup>
         <AssetSelect
           v-if="assetType === 'token'"
-          :value="form.assetIdentifier"
+          v-model="assetIdentifier"
           outlined
           :disabled="edit"
           :show-ignored="true"
           :label="t('common.asset')"
           :enable-association="false"
           :error-messages="toMessages(v$.assetIdentifier)"
-          @input="updateForm({ assetIdentifier: $event })"
           @change="updateAsset($event)"
         />
         <RuiTextField
           v-else-if="assetType === 'nft'"
-          :value="form.assetIdentifier"
+          v-model="assetIdentifier"
           :label="t('common.asset')"
           variant="outlined"
           color="primary"
@@ -151,38 +181,40 @@ const updateAsset = (asset: string) => {
           class="mb-1.5"
           :error-messages="toMessages(v$.assetIdentifier)"
           :hint="t('dashboard.snapshot.edit.dialog.balances.nft_hint')"
-          @input="updateForm({ assetIdentifier: $event })"
-          @blur="updateAsset($event.target.value)"
         />
+        <!-- @blur="updateAsset($event.target.value)" temporarily removed until we figure out what's wrong -->
       </div>
     </div>
-    <div class="grid md:grid-cols-2 gap-x-4 gap-y-2">
-      <AmountInput
-        :disabled="assetType === 'nft'"
-        :value="form.amount"
-        outlined
-        :label="t('common.amount')"
-        :error-messages="toMessages(v$.amount)"
-        @input="updateForm({ amount: $event })"
-      />
-      <AmountInput
-        :value="form.usdValue"
-        outlined
-        :label="
-          t('common.value_in_symbol', {
-            symbol: currencySymbol
-          })
-        "
-        :error-messages="toMessages(v$.usdValue)"
-        @input="updateForm({ usdValue: $event })"
-      />
-    </div>
+    <AmountInput
+      v-model="amount"
+      :disabled="assetType === 'nft'"
+      variant="outlined"
+      :label="t('common.amount')"
+      :error-messages="toMessages(v$.amount)"
+    />
+
+    <TwoFieldsAmountInput
+      v-model:primary-value="price"
+      v-model:secondary-value="usdValue"
+      data-cy="trade-rate"
+      :label="{
+        primary: t('common.price'),
+        secondary: t('common.value_in_symbol', {
+          symbol: currencySymbol,
+        }),
+      }"
+      :error-messages="{
+        primary: toMessages(v$.price),
+        secondary: toMessages(v$.usdValue),
+      }"
+      @update:reversed="usdValueInputFocused = $event"
+    />
 
     <EditBalancesSnapshotLocationSelector
-      :value="form.location"
+      v-model="location"
+      optional-show-existing
       :locations="locations"
       :preview-location-balance="previewLocationBalance"
-      @input="updateForm({ location: $event })"
     />
   </form>
 </template>

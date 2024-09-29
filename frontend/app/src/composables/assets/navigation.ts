@@ -1,14 +1,17 @@
-import { Routes } from '@/router/routes';
+interface UseAssetPageNavigationReturn { navigateToDetails: () => Promise<void> }
 
-export const useAssetPageNavigation = (asset: Ref<string>) => {
+export function useAssetPageNavigation(asset: Ref<string>): UseAssetPageNavigationReturn {
   const router = useRouter();
-  const navigateToDetails = async () => {
+  const navigateToDetails = async (): Promise<void> => {
     await router.push({
-      path: Routes.ASSETS.replace(':identifier', encodeURIComponent(get(asset)))
+      name: '/assets/[identifier]',
+      params: {
+        identifier: get(asset),
+      },
     });
   };
 
   return {
-    navigateToDetails
+    navigateToDetails,
   };
-};
+}

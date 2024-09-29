@@ -1,229 +1,112 @@
 import { BigNumber } from '@rotki/common';
-import { type Theme, ThemeColors } from '@rotki/common/lib/settings';
-import {
-  type TimeFramePeriod,
-  type TimeFrameSetting
-} from '@rotki/common/lib/settings/graphs';
-import { getBnFormat } from '@/data/amount_formatter';
+import { getBnFormat } from '@/data/amount-formatter';
 import { snakeCaseTransformer } from '@/services/axios-tranformers';
-import { type CurrencyLocation } from '@/types/currency-location';
-import { type DateFormat } from '@/types/date-format';
 import {
-  type BlockchainRefreshButtonBehaviour,
-  type DashboardTablesVisibleColumns,
-  type ExplorersSettings,
   FrontendSettings,
   type FrontendSettingsPayload,
-  type ProfitLossTimeframe,
-  type RefreshPeriod,
-  type RoundingMode,
-  SupportedLanguage
 } from '@/types/settings/frontend-settings';
-import { type ActionStatus } from '@/types/action';
-import {
-  type BaseSuggestion,
-  type SavedFilterLocation
-} from '@/types/filtering';
-import {
-  CURRENT_DEFAULT_THEME_VERSION,
-  DARK_COLORS,
-  DEFAULT_THEME_HISTORIES,
-  LIGHT_COLORS
-} from '@/plugins/theme';
+import type { ActionStatus } from '@/types/action';
 
 export const useFrontendSettingsStore = defineStore('settings/frontend', () => {
-  const settings = reactive(FrontendSettings.parse({}));
-  const defiSetupDone: ComputedRef<boolean> = computed(
-    () => settings.defiSetupDone
-  );
-  const language: ComputedRef<SupportedLanguage> = computed(
-    () => settings.language
-  );
-  const timeframeSetting: ComputedRef<TimeFrameSetting> = computed(
-    () => settings.timeframeSetting
-  );
-  const visibleTimeframes: ComputedRef<TimeFrameSetting[]> = computed(
-    () => settings.visibleTimeframes
-  );
-  const lastKnownTimeframe: ComputedRef<TimeFramePeriod> = computed(
-    () => settings.lastKnownTimeframe
-  );
-  const queryPeriod: ComputedRef<number> = computed(() => settings.queryPeriod);
-  const profitLossReportPeriod: ComputedRef<ProfitLossTimeframe> = computed(
-    () => settings.profitLossReportPeriod
-  );
-  const thousandSeparator: ComputedRef<string> = computed(
-    () => settings.thousandSeparator
-  );
-  const decimalSeparator: ComputedRef<string> = computed(
-    () => settings.decimalSeparator
-  );
-  const currencyLocation: ComputedRef<CurrencyLocation> = computed(
-    () => settings.currencyLocation
-  );
-  const abbreviateNumber: ComputedRef<boolean> = computed(
-    () => settings.abbreviateNumber
-  );
-  const refreshPeriod: ComputedRef<RefreshPeriod> = computed(
-    () => settings.refreshPeriod
-  );
-  const explorers: ComputedRef<ExplorersSettings> = computed(
-    () => settings.explorers
-  );
-  const itemsPerPage: ComputedRef<number> = computed(
-    () => settings.itemsPerPage
-  );
-  const amountRoundingMode: ComputedRef<RoundingMode> = computed(
-    () => settings.amountRoundingMode
-  );
-  const valueRoundingMode: ComputedRef<RoundingMode> = computed(
-    () => settings.valueRoundingMode
-  );
-  const selectedTheme: ComputedRef<Theme> = computed(
-    () => settings.selectedTheme
-  );
-  const lightTheme: ComputedRef<ThemeColors> = computed(
-    () => settings.lightTheme
-  );
-  const darkTheme: ComputedRef<ThemeColors> = computed(
-    () => settings.darkTheme
-  );
-  const defaultThemeVersion: ComputedRef<number> = computed(
-    () => settings.defaultThemeVersion
-  );
-  const graphZeroBased: ComputedRef<boolean> = computed(
-    () => settings.graphZeroBased
-  );
-  const showGraphRangeSelector: ComputedRef<boolean> = computed(
-    () => settings.showGraphRangeSelector
-  );
-  const nftsInNetValue: ComputedRef<boolean> = computed(
-    () => settings.nftsInNetValue
-  );
-  const renderAllNftImages: ComputedRef<boolean> = computed(
-    () => settings.renderAllNftImages
-  );
-  const whitelistedDomainsForNftImages: ComputedRef<string[]> = computed(
-    () => settings.whitelistedDomainsForNftImages
-  );
-  const dashboardTablesVisibleColumns: ComputedRef<DashboardTablesVisibleColumns> =
-    computed(() => settings.dashboardTablesVisibleColumns);
-  const dateInputFormat: ComputedRef<DateFormat> = computed(
-    () => settings.dateInputFormat
-  );
-  const versionUpdateCheckFrequency: ComputedRef<number> = computed(
-    () => settings.versionUpdateCheckFrequency
-  );
-  const enableAliasNames: ComputedRef<boolean> = computed(
-    () => settings.enableAliasNames
-  );
-  const blockchainRefreshButtonBehaviour: ComputedRef<BlockchainRefreshButtonBehaviour> =
-    computed(() => settings.blockchainRefreshButtonBehaviour);
+  const settings = ref<FrontendSettings>(markRaw(FrontendSettings.parse({})));
 
-  const savedFilters: ComputedRef<{
-    [key in SavedFilterLocation]?: BaseSuggestion[][];
-  }> = computed(() => settings.savedFilters);
+  const defiSetupDone = useComputedRef(settings, 'defiSetupDone');
+  const language = useComputedRef(settings, 'language');
+  const timeframeSetting = useComputedRef(settings, 'timeframeSetting');
+  const visibleTimeframes = useComputedRef(settings, 'visibleTimeframes');
+  const lastKnownTimeframe = useComputedRef(settings, 'lastKnownTimeframe');
+  const queryPeriod = useComputedRef(settings, 'queryPeriod');
+  const profitLossReportPeriod = useComputedRef(settings, 'profitLossReportPeriod');
+  const thousandSeparator = useComputedRef(settings, 'thousandSeparator');
+  const decimalSeparator = useComputedRef(settings, 'decimalSeparator');
+  const currencyLocation = useComputedRef(settings, 'currencyLocation');
+  const abbreviateNumber = useComputedRef(settings, 'abbreviateNumber');
+  const minimumDigitToBeAbbreviated = useComputedRef(settings, 'minimumDigitToBeAbbreviated');
+  const refreshPeriod = useComputedRef(settings, 'refreshPeriod');
+  const explorers = useComputedRef(settings, 'explorers');
+  const itemsPerPage = useComputedRef(settings, 'itemsPerPage');
+  const amountRoundingMode = useComputedRef(settings, 'amountRoundingMode');
+  const valueRoundingMode = useComputedRef(settings, 'valueRoundingMode');
+  const selectedTheme = useComputedRef(settings, 'selectedTheme');
+  const lightTheme = useComputedRef(settings, 'lightTheme');
+  const darkTheme = useComputedRef(settings, 'darkTheme');
+  const defaultThemeVersion = useComputedRef(settings, 'defaultThemeVersion');
+  const graphZeroBased = useComputedRef(settings, 'graphZeroBased');
+  const showGraphRangeSelector = useComputedRef(settings, 'showGraphRangeSelector');
+  const nftsInNetValue = useComputedRef(settings, 'nftsInNetValue');
+  const renderAllNftImages = useComputedRef(settings, 'renderAllNftImages');
+  const whitelistedDomainsForNftImages = useComputedRef(settings, 'whitelistedDomainsForNftImages');
+  const dashboardTablesVisibleColumns = useComputedRef(settings, 'dashboardTablesVisibleColumns');
+  const dateInputFormat = useComputedRef(settings, 'dateInputFormat');
+  const versionUpdateCheckFrequency = useComputedRef(settings, 'versionUpdateCheckFrequency');
+  const enableAliasNames = useComputedRef(settings, 'enableAliasNames');
+  const blockchainRefreshButtonBehaviour = useComputedRef(settings, 'blockchainRefreshButtonBehaviour');
+  const shouldRefreshValidatorDailyStats = useComputedRef(settings, 'shouldRefreshValidatorDailyStats');
+  const unifyAccountsTable = useComputedRef(settings, 'unifyAccountsTable');
+  const savedFilters = useComputedRef(settings, 'savedFilters');
+
+  const globalItemsPerPage = useItemsPerPage();
 
   const api = useSettingsApi();
+  const { checkMachineLanguage, forceUpdateMachineLanguage } = useLastLanguage();
 
-  const update = (update: FrontendSettings): void => {
-    Object.assign(settings, update);
-    checkMachineLanguage();
-  };
+  function update(update: FrontendSettings): void {
+    set(settings, {
+      ...get(settings),
+      ...update,
+    });
+    checkMachineLanguage(language);
+    const itemsPerPage = get(settings, 'itemsPerPage');
+    if (itemsPerPage !== get(globalItemsPerPage))
+      set(globalItemsPerPage, itemsPerPage);
+  }
 
-  async function updateSetting(
-    payload: FrontendSettingsPayload
-  ): Promise<ActionStatus> {
+  async function updateSetting(payload: FrontendSettingsPayload): Promise<ActionStatus> {
     const props = Object.keys(payload);
     assert(props.length > 0, 'Payload must be not-empty');
     try {
-      const updatedSettings = { ...settings, ...payload };
+      const updatedSettings = { ...get(settings), ...payload };
       const { other } = await api.setSettings({
-        frontendSettings: JSON.stringify(snakeCaseTransformer(updatedSettings))
+        frontendSettings: JSON.stringify(snakeCaseTransformer(updatedSettings)),
       });
 
       update(updatedSettings);
 
       if (payload.thousandSeparator || payload.decimalSeparator) {
         BigNumber.config({
-          FORMAT: getBnFormat(
-            other.frontendSettings.thousandSeparator,
-            other.frontendSettings.decimalSeparator
-          )
+          FORMAT: getBnFormat(other.frontendSettings.thousandSeparator, other.frontendSettings.decimalSeparator),
         });
       }
 
       return {
-        success: true
+        success: true,
       };
-    } catch (e: any) {
+    }
+    catch (error: any) {
       return {
         success: false,
-        message: e.message
+        message: error.message,
       };
     }
   }
 
-  const { lastLanguage, forceUpdateMachineLanguage } = useLastLanguage();
-
-  const checkMachineLanguage = (): void => {
-    if (get(forceUpdateMachineLanguage) === 'true') {
-      set(lastLanguage, get(language));
-    } else {
-      set(lastLanguage, SupportedLanguage.EN);
-    }
-  };
-
   watch([language, forceUpdateMachineLanguage], () => {
-    checkMachineLanguage();
+    checkMachineLanguage(get(language));
   });
 
-  const checkDefaultThemeVersion = () => {
-    const defaultThemeVersionSetting = get(defaultThemeVersion);
-    if (defaultThemeVersionSetting < CURRENT_DEFAULT_THEME_VERSION) {
-      const historicDefaultTheme = DEFAULT_THEME_HISTORIES.find(
-        ({ version }) => version === defaultThemeVersionSetting
-      );
+  watchDebounced(globalItemsPerPage, async (value, oldValue) => {
+    if (oldValue === undefined || value === oldValue)
+      return;
 
-      if (historicDefaultTheme) {
-        const newLightTheme: ThemeColors = { ...LIGHT_COLORS };
-        const newDarkTheme: ThemeColors = { ...DARK_COLORS };
-        const savedLightTheme = get(lightTheme);
-        const savedDarkTheme = get(darkTheme);
-
-        const accentColors = Object.keys(ThemeColors.shape);
-
-        const isKeyOfThemeColors = (key: string): key is keyof ThemeColors =>
-          accentColors.includes(key);
-
-        accentColors.forEach(key => {
-          if (!isKeyOfThemeColors(key)) {
-            return;
-          }
-
-          // If saved theme isn't the same with the default theme at that version, do not replace with new default.
-          if (historicDefaultTheme.lightColors[key] !== savedLightTheme[key]) {
-            newLightTheme[key] = savedLightTheme[key];
-          }
-
-          if (historicDefaultTheme.darkColors[key] !== savedDarkTheme[key]) {
-            newDarkTheme[key] = savedDarkTheme[key];
-          }
-        });
-
-        startPromise(
-          updateSetting({
-            lightTheme: newLightTheme,
-            darkTheme: newDarkTheme,
-            defaultThemeVersion: CURRENT_DEFAULT_THEME_VERSION
-          })
-        );
-      }
+    try {
+      await updateSetting({ itemsPerPage: value });
     }
-  };
+    catch (error: any) {
+      logger.error(error);
+    }
+  }, { debounce: 800, maxWait: 1200 });
 
   return {
-    forceUpdateMachineLanguage,
     defiSetupDone,
     language,
     timeframeSetting,
@@ -235,6 +118,8 @@ export const useFrontendSettingsStore = defineStore('settings/frontend', () => {
     decimalSeparator,
     currencyLocation,
     abbreviateNumber,
+    defaultThemeVersion,
+    minimumDigitToBeAbbreviated,
     refreshPeriod,
     explorers,
     itemsPerPage,
@@ -253,17 +138,14 @@ export const useFrontendSettingsStore = defineStore('settings/frontend', () => {
     versionUpdateCheckFrequency,
     enableAliasNames,
     blockchainRefreshButtonBehaviour,
+    shouldRefreshValidatorDailyStats,
+    unifyAccountsTable,
     savedFilters,
-    // return settings on development for state persistence
-    ...(checkIfDevelopment() ? { settings } : {}),
+    settings,
     updateSetting,
     update,
-    checkDefaultThemeVersion
   };
 });
 
-if (import.meta.hot) {
-  import.meta.hot.accept(
-    acceptHMRUpdate(useFrontendSettingsStore, import.meta.hot)
-  );
-}
+if (import.meta.hot)
+  import.meta.hot.accept(acceptHMRUpdate(useFrontendSettingsStore, import.meta.hot));

@@ -1,10 +1,8 @@
 import { createPinia } from 'pinia';
 
-const createCustomPinia = () => {
+export function createCustomPinia() {
   const pinia = createPinia();
   pinia.use(StoreResetPlugin);
 
   return pinia;
-};
-
-export default createCustomPinia;
+}

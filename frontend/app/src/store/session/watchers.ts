@@ -8,36 +8,32 @@ export const useWatchersStore = defineStore('session/watchers', () => {
   const loanWatchers = computed(() => {
     const loanWatcherTypes = [WatcherType];
 
-    return get(watchers).filter(watcher =>
-      loanWatcherTypes.includes(watcher.type)
-    );
+    return get(watchers).filter(watcher => loanWatcherTypes.includes(watcher.type));
   });
 
-  const { premium } = storeToRefs(usePremiumStore());
+  const premium = usePremium();
   const { notify } = useNotificationsStore();
   const api = useWatchersApi();
 
   const fetchWatchers = async (): Promise<void> => {
-    if (!get(premium)) {
+    if (!get(premium))
       return;
-    }
 
     try {
       set(watchers, await api.watchers());
-    } catch (e: any) {
+    }
+    catch (error: any) {
       notify({
         title: t('actions.session.fetch_watchers.error.title').toString(),
         message: t('actions.session.fetch_watchers.error.message', {
-          message: e.message
+          message: error.message,
         }).toString(),
-        display: true
+        display: true,
       });
     }
   };
 
-  const addWatchers = async (
-    newWatchers: Omit<Watcher, 'identifier'>[]
-  ): Promise<void> => {
+  const addWatchers = async (newWatchers: Omit<Watcher, 'identifier'>[]): Promise<void> => {
     set(watchers, await api.addWatcher(newWatchers));
   };
 
@@ -55,10 +51,9 @@ export const useWatchersStore = defineStore('session/watchers', () => {
     fetchWatchers,
     addWatchers,
     editWatchers,
-    deleteWatchers
+    deleteWatchers,
   };
 });
 
-if (import.meta.hot) {
+if (import.meta.hot)
   import.meta.hot.accept(acceptHMRUpdate(useWatchersStore, import.meta.hot));
-}

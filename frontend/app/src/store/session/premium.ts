@@ -1,46 +1,38 @@
-import { type PremiumCredentialsPayload } from '@/types/session';
-import { type ActionStatus } from '@/types/action';
 import { ApiValidationError, type ValidationErrors } from '@/types/api/errors';
+import type { PremiumCredentialsPayload } from '@/types/session';
+import type { ActionStatus } from '@/types/action';
 
 export const usePremiumStore = defineStore('session/premium', () => {
   const premium = ref(false);
   const premiumSync = ref(false);
-  const componentsReady = ref(false);
-
-  const showComponents = computed(() => get(premium) && get(componentsReady));
 
   const api = usePremiumCredentialsApi();
 
   const setup = async ({
     apiKey,
     apiSecret,
-    username
-  }: PremiumCredentialsPayload): Promise<
-    ActionStatus<string | ValidationErrors>
-  > => {
+    username,
+  }: PremiumCredentialsPayload): Promise<ActionStatus<string | ValidationErrors>> => {
     try {
-      const success = await api.setPremiumCredentials(
-        username,
-        apiKey,
-        apiSecret
-      );
+      const success = await api.setPremiumCredentials(username, apiKey, apiSecret);
 
-      if (success) {
+      if (success)
         set(premium, true);
-      }
+
       return { success };
-    } catch (e: any) {
-      let errors: string | ValidationErrors = e.message;
-      if (e instanceof ApiValidationError) {
-        errors = e.getValidationErrors({
+    }
+    catch (error: any) {
+      let errors: string | ValidationErrors = error.message;
+      if (error instanceof ApiValidationError) {
+        errors = error.getValidationErrors({
           apiKey,
-          apiSecret
+          apiSecret,
         });
       }
 
       return {
         success: false,
-        message: errors
+        message: errors,
       };
     }
   };
@@ -48,14 +40,15 @@ export const usePremiumStore = defineStore('session/premium', () => {
   const deletePremium = async (): Promise<ActionStatus> => {
     try {
       const success = await api.deletePremiumCredentials();
-      if (success) {
+      if (success)
         set(premium, false);
-      }
+
       return { success };
-    } catch (e: any) {
+    }
+    catch (error: any) {
       return {
         success: false,
-        message: e.message
+        message: error.message,
       };
     }
   };
@@ -63,13 +56,10 @@ export const usePremiumStore = defineStore('session/premium', () => {
   return {
     premium,
     premiumSync,
-    componentsReady,
-    showComponents,
     setup,
-    deletePremium
+    deletePremium,
   };
 });
 
-if (import.meta.hot) {
+if (import.meta.hot)
   import.meta.hot.accept(acceptHMRUpdate(usePremiumStore, import.meta.hot));
-}

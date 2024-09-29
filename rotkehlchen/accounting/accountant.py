@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -9,12 +10,12 @@ from rotkehlchen.accounting.constants import FREE_PNL_EVENTS_LIMIT
 from rotkehlchen.accounting.export.csv import CSVExporter
 from rotkehlchen.accounting.pot import AccountingPot
 from rotkehlchen.accounting.structures.types import ActionType
-from rotkehlchen.accounting.types import MissingPrice
+from rotkehlchen.accounting.types import EventAccountingRuleStatus, MissingPrice
 from rotkehlchen.chain.evm.accounting.aggregator import EVMAccountingAggregators
 from rotkehlchen.db.reports import DBAccountingReports
 from rotkehlchen.db.settings import DBSettings
 from rotkehlchen.errors.asset import UnknownAsset, UnprocessableTradePair, UnsupportedAsset
-from rotkehlchen.errors.misc import RemoteError
+from rotkehlchen.errors.misc import AccountingError, RemoteError
 from rotkehlchen.errors.price import NoPriceForGivenTimestamp, PriceQueryUnsupportedAsset
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.premium.premium import Premium
@@ -65,9 +66,12 @@ class Accountant:
         self.currently_processing_timestamp = Timestamp(-1)
         self.first_processed_timestamp = Timestamp(-1)
         self.premium = premium
-        self.processable_events_cache: LRUCacheWithRemove[int, bool] = LRUCacheWithRemove(maxsize=PROCESSABLE_EVENTS_CACHE_SIZE)  # noqa: E501
+        # cache to know what events will be processed or not during accounting
+        self.processable_events_cache: LRUCacheWithRemove[int, EventAccountingRuleStatus] = LRUCacheWithRemove(maxsize=PROCESSABLE_EVENTS_CACHE_SIZE)  # noqa: E501
         # map event rules signatures to a list of event identifiers affected by them
+        # used to know which events need to be invalidated when updating a rule
         self.processable_events_cache_signatures: DefaultLRUCache[int, list[int]] = DefaultLRUCache(default_factory=list, maxsize=PROCESSABLE_EVENTS_CACHE_SIZE)  # noqa: E501
+        self.ignored_asset_ids: set[str] = set()  # populated in process_history so that we load them in memory once during accounting and not reload them from the DB for every single event processing  # noqa: E501
 
     def activate_premium_status(self, premium: Premium) -> None:
         self.premium = premium
@@ -86,7 +90,7 @@ class Accountant:
     def _process_skipping_exception(
             self,
             exception: Exception,
-            events: list['AccountingEventMixin'],
+            events: Sequence['AccountingEventMixin'],
             count: int,
             reason: str,
     ) -> int:
@@ -109,7 +113,7 @@ class Accountant:
             self,
             start_ts: Timestamp,
             end_ts: Timestamp,
-            events: list['AccountingEventMixin'],
+            events: Sequence['AccountingEventMixin'],
     ) -> int:
         """Processes the entire history of cryptoworld actions in order to determine
         the price and time at which every asset was obtained and also
@@ -135,6 +139,7 @@ class Accountant:
         # same settings through the entire task
         with self.db.conn.read_ctx() as cursor:
             db_settings = self.db.get_settings(cursor)
+            self.ignored_asset_ids = self.db.get_ignored_asset_ids(cursor)
             # Create a new pnl report in the DB to be used to save each event generated
             dbpnl = DBAccountingReports(self.db)
             first_ts = Timestamp(0) if len(events) == 0 else events[0].get_timestamp()
@@ -197,6 +202,10 @@ class Accountant:
                     reason='inability to reach an external service at that point in time',
                 )
                 continue
+            except AccountingError as e:
+                log.error(f'Found critical error {e} when processing history. Stopping.')
+                e.report_id = report_id
+                raise
 
             if processed_events_num == 0:
                 break  # we reached the period end
@@ -227,6 +236,7 @@ class Accountant:
         for pot in self.pots:  # delete rules stored in memory since they won't be needed and can be queried again from the db  # noqa: E501
             pot.events_accountant.rules_manager.clean_rules()
 
+        self.ignored_asset_ids.clear()  # clean ignored assets from memory once PnL report run concludes  # noqa: E501
         return report_id
 
     def _process_event(
@@ -249,8 +259,6 @@ class Accountant:
         - RemoteError if there is a problem reaching the price oracle server
         or with reading the response returned by the server
         """
-        with self.db.conn.read_ctx() as cursor:
-            ignored_asset_ids = self.db.get_ignored_asset_ids(cursor)
         event = next(events_iterator, None)
         if event is None:
             return 0, prev_time
@@ -288,7 +296,7 @@ class Accountant:
             )
             return 1, prev_time
 
-        if any(x.identifier in ignored_asset_ids for x in event_assets):
+        if any(x.identifier in self.ignored_asset_ids for x in event_assets):
             log.debug(
                 'Ignoring event with ignored asset',
                 event_type=event.get_accounting_event_type(),

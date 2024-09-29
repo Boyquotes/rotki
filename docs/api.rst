@@ -165,7 +165,7 @@ Handling user creation, sign-in, log-out and querying
    :resjson object result: For successful requests, result contains the currently connected exchanges, and the user's settings. For details on the user settings refer to the `Getting or modifying settings`_ section.
    :statuscode 200: Adding the new user was successful
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User already exists. Another user is already logged in. Given Premium API credentials are invalid. Permission error while trying to access the directory where rotki saves data.
+   :statuscode 409: Another user is already logged in. User already exists. Given Premium API credentials are invalid. Permission error while trying to access the directory where rotki saves data.
    :statuscode 500: Internal rotki error
 
 .. http:post:: /api/(version)/users/(username)
@@ -242,7 +242,7 @@ Handling user creation, sign-in, log-out and querying
 
    :statuscode 400: Provided JSON is in some way malformed
    :statuscode 401: Provided password is wrong for the user or some other authentication error.
-   :statuscode 409: Another user is already logged in. User does not exist. There was a fatal error during the upgrade of the DB. Permission error while trying to access the directory where rotki saves data.
+   :statuscode 409: User does not exist.  Another user is already logged in. There was a fatal error during the upgrade of the DB. Permission error while trying to access the directory where rotki saves data.
    :statuscode 500: Generic internal rotki error
    :statuscode 542: Internal rotki error relating to the database. Check message for more details.
 
@@ -318,7 +318,7 @@ Handling user creation, sign-in, log-out and querying
    :resjson bool result: The result field in this response is a simple boolean value indicating success or failure.
    :statuscode 200: API key/secret set successfully
    :statuscode 400: Provided JSON is in some way malformed. For example invalid API key format
-   :statuscode 401: Provided API key/secret does not authenticate.
+   :statuscode 403: Provided API key/secret does not authenticate.
    :statuscode 409: User is not logged in, or user does not exist
    :statuscode 500: Internal rotki error
 
@@ -348,6 +348,7 @@ Handling user creation, sign-in, log-out and querying
    :resjson bool result: The result field in this response is a simple boolean value indicating success or failure.
    :statuscode 200: API key/secret deleted successfully
    :statuscode 400: Provided call is in some way malformed.
+   :statuscode 403: Logged in User does not have premium.
    :statuscode 409: User is not logged in, or user does not exist, or db operation error
    :statuscode 500: Internal rotki error
 
@@ -362,7 +363,7 @@ Handling user creation, sign-in, log-out and querying
 
    .. http:example:: curl wget httpie python-requests
 
-      DELETE /api/1/premium/sync HTTP/1.1
+      PUT /api/1/premium/sync HTTP/1.1
       Host: localhost:5042
       Content-Type: application/json;charset=UTF-8
 
@@ -424,9 +425,9 @@ Modify user password
       }
 
    :resjson bool result: The result field in this response is a simple boolean value indicating success or failure.
-   :statuscode 200: Password changed successfully
-   :statuscode 401: Password mismatch
+   :statuscode 200: Password changed successful
    :statuscode 400: Provided call is in some way malformed. For example a user who is not logged in has been specified.
+   :statuscode 401: Password mismatch
    :statuscode 409: User is not logged in, or user does not exist, or db operation error
    :statuscode 500: Internal rotki error
 
@@ -462,14 +463,15 @@ Getting or modifying external services API credentials
                "arbitrum_one": {"api_key":"key3"}
             },
             "cryptocompare": {"api_key":"boooookey"},
-            "opensea": {"api_key":"goooookey"}
+            "opensea": {"api_key":"goooookey"},
+            "monerium": {"username":"Ben", "password":"secure"}
          },
          "message":""
       }
 
-   :resjson object result: The result object contains as many entries as the external services. Each entry's key is the name and the value is another object of the form ``{"api_key": "foo"}``. For etherscan services all are grouped under the ``etherscan`` key. If there are no etherscan services this key won't be present.
+   :resjson object result: The result object contains as many entries as the external services. Each entry's key is the name and the value is another object of the form ``{"api_key": "foo"}``. For etherscan services all are grouped under the ``etherscan`` key. If there are no etherscan services this key won't be present. The ``monerium`` service has a different structure than the rest. Has ``username`` and ``password`` keys. The  ``gnosis_pay`` service at the moment is hacky. Need to provide the auth js session token in place of the api key.
    :statuscode 200: Querying of external service credentials was successful
-   :statuscode 409: There is no logged in user
+   :statuscode 401: There is no logged in user
    :statuscode 500: Internal rotki error
 
 .. http:put:: /api/(version)/external_services
@@ -477,6 +479,8 @@ Getting or modifying external services API credentials
    By doing a PUT on the external services endpoint you can save credentials
    for external services such as etherscan, cryptocompare e.t.c.
    If a credential already exists for a service it is overwritten.
+
+   Some credentials like monerium can't be input if the user is not premium.
 
    Returns external service entries after the additions.
 
@@ -493,8 +497,10 @@ Getting or modifying external services API credentials
       }
 
    :reqjson list services: The services parameter is a list of services along with their api keys.
-   :reqjsonarr string name: Each entry in the list should have a name for the service. Valid ones are ``"etherscan"``, ``"cryptocompare"``, ``"beaconchain"``, ``"loopring"``, ``"covalent"``, ``"opensea"`` and ``blockscout``.
-   :reqjsonarr string api_key: Each entry in the list should have an api_key entry
+   :reqjsonarr string name: Each entry in the list should have a name for the service. Valid ones are ``"etherscan"``, ``"cryptocompare"``, ``"beaconchain"``, ``"loopring"``, ``"opensea"``, ``blockscout``, ``monerium``.
+   :reqjsonarr string[optional] api_key: Each entry in the list should have an api_key entry except for monerium.
+   :reqjsonarr string[optional] username: The monerium entry should have a username key. For monerium the user should have premium.
+   :reqjsonarr string[optional] password: The monerium entry should have a password key. For monerium the user should have premium.
 
    **Example Response**:
 
@@ -511,10 +517,11 @@ Getting or modifying external services API credentials
           "message": ""
       }
 
-   :resjson object result: The result object contains as many entries as the external services. Each entry's key is the name and the value is another object of the form ``{"api_key": "foo"}``
+   :resjson object result: The result object contains as many entries as the external services.
    :statuscode 200: Saving new external service credentials was successful
    :statuscode 400: Provided JSON is in some way malformed, of invalid value provided.
-   :statuscode 409: There is no logged in user
+   :statuscode 401: There is no logged in user
+   :statuscode 403: Logged in user does not have premium and requested to add credentials that can only work for premium.
    :statuscode 500: Internal rotki error
 
 .. http:delete:: /api/(version)/external_services
@@ -607,9 +614,13 @@ Getting or modifying settings
               "ssf_graph_multiplier": 2,
               "non_sync_exchanges": [{"location": "binance", "name": "binance1"}],
               "cost_basis_method": "fifo",
+              "oracle_penalty_threshold_count": 5,
+              "oracle_penalty_duration": 1800,
+              "auto_create_calendar_reminders": true,
               "address_name_priority": ["private_addressbook", "blockchain_account",
                                         "global_addressbook", "ethereum_tokens",
                                         "hardcoded_mappings", "ens_names"],
+              "ask_user_upon_size_discrepancy": true,
           },
           "message": ""
       }
@@ -641,6 +652,10 @@ Getting or modifying settings
    :resjson int query_retry_limit: The number of times to retry a query to external services before giving up. Default is 5.
    :resjson int connect_timeout: The number of seconds to wait before giving up on establishing a connection to an external service. Default is 30.
    :resjson int read_timeout: The number of seconds to wait for the first byte after a connection to an external service has been established. Default is 30.
+   :resjson int oracle_penalty_threshold_count: The number of failures after which an oracle is penalized. Default is 5.
+   :resjson int oracle_penalty_duration: The duration in seconds for which an oracle is penalized. Default is 1800.
+   :resjson bool auto_create_calendar_reminders: A boolean denoting whether reminders are created automatically for calendar entries based on the decoded history events. Default is ``true``.
+   :resjson bool ask_user_upon_size_discrepancy: A boolean denoting whether to prompt the user for confirmation each time the remote database is bigger than the local one or directly force push. Default is ``true``.
 
    :statuscode 200: Querying of settings was successful
    :statuscode 409: There is no logged in user
@@ -673,17 +688,23 @@ Getting or modifying settings
    :reqjson bool[optional] include_gas_costs: A boolean denoting whether gas costs should be counted as loss in profit/loss calculation.
    :reqjson string[optional] ksm_rpc_endpoint: A URL denoting the rpc endpoint for the Kusama node to use when contacting the Kusama blockchain. If it can not be reached or if it is invalid any default public node (e.g. Parity) is used instead.
    :reqjson string[optional] dot_rpc_endpoint: A URL denoting the rpc endpoint for the Polkadot node to use when contacting the Polkadot blockchain. If it can not be reached or if it is invalid any default public node (e.g. Parity) is used instead.
+   :reqjson string[optional] beacon_rpc_endpoint: A URL denoting the rpc endpoint for the ethereum consensus layer beacon node to use when contacting the consensus layer. If it can not be reached or if it is invalid beaconcha.in is used.
    :reqjson string[optional] main_currency: The FIAT currency to use for all profit/loss calculation. USD by default.
    :reqjson string[optional] date_display_format: The format in which to display dates in the UI. Default is ``"%d/%m/%Y %H:%M:%S %Z"``.
    :reqjson bool[optional] submit_usage_analytics: A boolean denoting whether or not to submit anonymous usage analytics to the rotki server.
    :reqjson list active_module: A list of strings denoting the active modules with which rotki should run.
    :reqjson list current_price_oracles: A list of strings denoting the price oracles rotki should query in specific order for requesting current prices.
    :reqjson list historical_price_oracles: A list of strings denoting the price oracles rotki should query in specific order for requesting historical prices.
+   :reqjson list non_syncing_exchanges: A list of objects with the keys ``name`` and ``location`` of the exchange. These exchanges will be ignored when querying the trades. Example: ``[{"name": "my_exchange", "location": "binance"}]``.
    :resjson int ssf_graph_multiplier: A multiplier to the snapshot saving frequency for zero amount graphs. Originally 0 by default. If set it denotes the multiplier of the snapshot saving frequency at which to insert 0 save balances for a graph between two saved values.
    :resjson bool infer_zero_timed_balances: A boolean denoting whether to infer zero timed balances for assets that have no balance at a specific time. This is useful for showing zero balance periods in graphs.
    :resjson int query_retry_limit: The number of times to retry a query to external services before giving up. Default is 5.
    :resjson int connect_timeout: The number of seconds to wait before giving up on establishing a connection to an external service. Default is 30.
    :resjson int read_timeout: The number of seconds to wait for the first byte after a connection to an external service has been established. Default is 30.
+   :resjson int oracle_penalty_threshold_count: The number of failures after which an oracle is penalized. Default is 5.
+   :resjson int oracle_penalty_duration: The duration in seconds for which an oracle is penalized. Default is 1800.
+   :resjson bool[optional] auto_create_calendar_reminders: A boolean denoting whether reminders are created automatically for calendar entries based on the decoded history events.
+   :resjson bool[optional] ask_user_upon_size_discrepancy: A boolean denoting whether to prompt the user for confirmation each time the remote database is bigger than the local one or directly force push.
 
    **Example Response**:
 
@@ -714,6 +735,8 @@ Getting or modifying settings
               "historical_price_oracles": ["coingecko", "cryptocompare"],
               "ssf_graph_multiplier": 2,
               "non_sync_exchanges": [{"location": "binance", "name": "binance1"}]
+              "auto_create_calendar_reminders": true,
+              "ask_user_upon_size_discrepancy": true,
           },
           "message": ""
       }
@@ -722,7 +745,8 @@ Getting or modifying settings
 
    :statuscode 200: Modifying settings was successful
    :statuscode 400: Provided JSON is in some way malformed, of invalid value for a setting.
-   :statuscode 409: No user is logged in or tried to set eth rpc endpoint that could not be reached.
+   :statuscode 401: No user is logged in.
+   :statuscode 409: Tried to set eth rpc endpoint that could not be reached.
    :statuscode 500: Internal rotki error
 
 Getting backend arguments
@@ -877,7 +901,7 @@ Adding information for web3 nodes
    :resjson string active: True if the node should be used or false if it shouldn't.
 
    :statuscode 200: Insertion was successful.
-   :statuscode 409: No user is logged or entrie couldn't be created.
+   :statuscode 409: No user is logged or entry couldn't be created.
    :statuscode 500: Internal rotki error
 
 .. http:patch:: /api/(version)/blockchains/(blockchain)/nodes
@@ -909,7 +933,7 @@ Adding information for web3 nodes
    :resjson string active: True if the node should be used or false if it shouldn't.
 
    :statuscode 200: Update was successful.
-   :statuscode 409: No user is logged or entrie couldn't be updated.
+   :statuscode 409: No user is logged or entry couldn't be updated.
    :statuscode 500: Internal rotki error
 
 .. http:delete:: /api/(version)/blockchains/(blockchain)/nodes
@@ -1047,10 +1071,47 @@ Query the result of an ongoing backend task
 
    :statuscode 200: The task's outcome is successfully returned or pending
    :statuscode 400: Provided JSON is in some way malformed
+   :statuscode 401: No user is currently logged in
    :statuscode 404: There is no task with the given task id
-   :statuscode 409: No user is currently logged in
    :statuscode 500: Internal rotki error
    :statuscode 502: Problem contacting a remote service
+
+
+Cancel ongoing async tasks
+=============================
+
+   .. http:delete:: /api/(version)/tasks/(task_id)
+
+      By calling this endpoint with a particular task identifier you can cancel the ongoing task with that identifier. Keep in mind that this may leave stuff half-finished since the canceled task may be stopped in the middle.
+
+      **Example Request**:
+
+      .. http:example:: curl wget httpie python-requests
+
+	 DELETE /api/1/tasks/42 HTTP/1.1
+	 Host: localhost:5042
+
+      **Example Response**:
+
+      The following is an example response of a succesfully canceled task
+
+      .. sourcecode:: http
+
+	 HTTP/1.1 200 OK
+	 Content-Type: application/json
+
+	 {
+	     "result": true, "message": ""
+	 }
+
+      :resjson bool result: True if the task was canceled and false otherwise.
+
+      :statuscode 200: The task was successfully canceled.
+      :statuscode 400: Provided JSON is in some way malformed.
+      :statuscode 401: No user is currently logged in
+      :statuscode 404: There is no task with the given task id.
+      :statuscode 500: Internal rotki error
+
 
 Query the latest price of assets
 ===================================
@@ -1227,7 +1288,7 @@ Get all manually input latest prices
 
    :resjson object result: A list of results with the prices along their `from_asset` and `to_asset`.
    :statuscode 200: Successful query
-   :statuscode 409: No user is logged in.
+   :statuscode 401: No user is logged in.
    :statuscode 500: Internal rotki error
 
 
@@ -1634,7 +1695,7 @@ Get a list of setup exchanges
 
    :resjson list result: A list of exchange location/name pairs that have been setup for the logged in user.
    :statuscode 200: The exchanges list has been successfully setup
-   :statuscode 409: No user is logged in.
+   :statuscode 401: No user is logged in.
    :statuscode 500: Internal rotki error
 
 Setup or remove an exchange
@@ -1677,7 +1738,8 @@ Setup or remove an exchange
    :resjson bool result: A boolean indicating success or failure
    :statuscode 200: The exchange has been successfully setup
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: No user is logged in. The exchange has already been registered. The API key/secret is invalid or some other error.
+   :statuscode 401: No user is logged in
+   :statuscode 409: The exchange has already been registered. The API key/secret is invalid or some other error.
    :statuscode 500: Internal rotki error
 
 .. http:delete:: /api/(version)/exchanges
@@ -1712,7 +1774,8 @@ Setup or remove an exchange
    :resjson bool result: A boolean indicating success or failure
    :statuscode 200: The exchange has been successfully deleted
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: No user is logged in. The exchange is not registered or some other error
+   :statuscode 401: No user is logged in.
+   :statuscode 409: The exchange is not registered or some other error
    :statuscode 500: Internal rotki error
 
 Edit an exchange entry
@@ -1755,7 +1818,8 @@ Edit an exchange entry
    :resjson bool result: A boolean indicating success if all went well. If there is an error then the usual result: null and message having a value format is followed.
    :statuscode 200: The exchange has been successfully edited
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: No user is logged in. The exchange can not be found. The new exchange credentials were invalid.
+   :statuscode 401: No user is logged in.
+   :statuscode 409: The exchange can not be found. The new exchange credentials were invalid.
    :statuscode 500: Internal rotki error
 
 Querying the balances of exchanges
@@ -1801,7 +1865,8 @@ Querying the balances of exchanges
    :resjson object result: If successful contains the balances of each asset held in the exchange. Each key of the object is an asset's symbol. Then the value is another object.  In the ``"amount"`` key of that object is the amount held in the asset. And in the ``"usd_value"`` key is the equivalent $ value as of this moment.
    :statuscode 200: Balances successfully queried.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in.Exchange is not registered or some other exchange query error. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Exchange is not registered or some other exchange query error. Check error message for details.
    :statuscode 500: Internal rotki error
 
 .. http:get:: /api/(version)/exchanges/balances/
@@ -1846,7 +1911,8 @@ Querying the balances of exchanges
    :resjson object result: If successful contains the balances of each asset held in the exchange. Each key of the object is an asset's symbol. Then the value is another object.  In the ``"amount"`` key of that object is the amount held in the asset. And in the ``"usd_value"`` key is the equivalent $ value as of this moment.
    :statuscode 200: Balances successfully queried.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in. Some exchange query error. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some exchange query error. Check error message for details.
    :statuscode 500: Internal rotki error
 
 
@@ -1880,27 +1946,29 @@ Purging locally saved data for exchanges
 
    :statuscode 200: Data successfully purged.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in. Exchange is not registered or some other error. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Exchange is not registered or some other error. Check error message for details.
    :statuscode 500: Internal rotki error
 
-Purging locally saved evm transactions
-===========================================
+Deleting locally saved blockchain transactions
+=================================================
 
-.. http:delete:: /api/(version)/blockchains/evm/transactions
+.. http:delete:: /api/(version)/blockchains/transactions
 
-   Doing a DELETE on the evm transactions endpoint will purge all locally saved transaction data. Optionally can specify the evm chain to only purge transactions of that chain. Next time transactions are queried all of them will be queried again for all addresses and may take some time.
+   Doing a DELETE on the blockchain transactions endpoint will either delete locally saved transaction data. If nothing is given all transaction data will be deleted. Can specify the chain to only delete all transactions of that chain. Or even further chain and tx_hash to delete only a specific transaction's data.
 
    **Example Request**:
 
    .. http:example:: curl wget httpie python-requests
 
-      DELETE /api/1/blockchains/evm/transactions HTTP/1.1
+      DELETE /api/1/blockchains/transactions HTTP/1.1
       Host: localhost:5042
       Content-Type: application/json;charset=UTF-8
 
-      {"evm_chain": "optimism"}
+      {"chain": "eth", "tx_hash": "0x6826b8646578ff457ba01bfe6a2cc77e3d6e40a849e45a97ca12dfd9150cd901"}
 
-   :reqjson string evm_chain: Optional. The name of the evm chain for which to purge transaction. ``"ethereum"``, ``"optimism"`` etc. If not given all transactions for all chains are purged.
+   :reqjson string chain: Optional. The name of the chain for which to delete transaction. ``"eth"``, ``"optimism"``, ``"zksync_lite"`` etc. If not given all transactions for all chains are purged. This is using the backend's SupportedBlockchain with the limitation being only chains for which we save transactions.
+   :reqjson string tx_hash: Optional. The transaction to delete. If given only the specific transaction is deleted. This should always be given in combination with the chain argument.
 
    **Example Response**:
 
@@ -1913,16 +1981,17 @@ Purging locally saved evm transactions
 
    :statuscode 200: Data successfully purged.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in or some other error. Check error message for details.
+   :statuscode 401: User is not logged.
+   :statuscode 409: Other error. Check error message for details.
    :statuscode 500: Internal rotki error
 
 
 Decode transactions that haven't been decoded yet
 =================================================
 
-.. http:post:: /api/(version)/blockchains/evm/transactions/decode
+.. http:post:: /api/(version)/blockchains/(chaintype)/transactions/decode
 
-   Doing a POST on the transactions decoding endpoint will start the decoding process for all the transactions that haven't been decoded yet for the given chain and addresses combination. Transactions already decoded won't be re-decoded.
+   Doing a POST on the transactions decoding endpoint will start the decoding process for all the transactions that haven't been decoded yet for the given chain and addresses combination. Transactions already decoded won't be re-decoded unless ignore_cache is set to true . ``chaintype`` can be either ``evm`` or ``evmlike``
 
    .. note::
       This endpoint can also be queried asynchronously by using ``"async_query": true``
@@ -1937,10 +2006,12 @@ Decode transactions that haven't been decoded yet
 
       {
           "async_query": false,
-          "evm_chains": ["ethereum", "optimism"]
+	  "ignore_cache": false,
+          "chains": ["ethereum", "optimism"]
       }
 
-   :reqjson list evm_chains: A list specifying the evm chains for which to decode tx_hashes. The possible values are limited to the chains with evm transactions. If the list is not provided all transactions from all the chains will be decoded. 
+   :reqjson bool ignore_cache: Defaults to false. If set to true then all events will be redecoded, not only those that have not yet been decoded.
+   :reqjson list chains: A list specifying the evm/evmlike chains for which to decode tx_hashes. The possible values are limited to the chains with evm transactions for evm and to zksynclite for evmlike. If the list is not provided all transactions from all the chains will be decoded.
 
    **Example Response**:
 
@@ -1953,12 +2024,13 @@ Decode transactions that haven't been decoded yet
 
    :resjson object decoded_tx_number: A mapping of how many transactions were decoded per requested chain. If a chain was not requested no key will exist in the mapping.
    :statuscode 200: Transactions successfully decoded.
-   :statuscode 409: User is not logged in or some other error. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some other error. Check error message for details.
    :statuscode 500: Internal rotki error
 
-.. http:get:: /api/(version)/blockchains/evm/transactions/decode
+.. http:get:: /api/(version)/blockchains/(chaintype)/transactions/decode
 
-   Doing a GET on the transactions decoding endpoint will return a breakdown of the number of transactions that are not decoded. 
+   Doing a GET on the transactions decoding endpoint will return a breakdown of the number of transactions that are not decoded. ``chaintype`` can be either ``evm`` or ``evmlike``
 
    .. note::
       This endpoint can also be queried asynchronously by using ``"async_query": true``
@@ -1980,12 +2052,13 @@ Decode transactions that haven't been decoded yet
       HTTP/1.1 200 OK
       Content-Type: application/json
 
-      { "result": {"ethereum": 2, "optimism": 1, "base": 1}, "message": "" }
+      {"result": {"ethereum": {"undecoded": 1, "total": 2}, "optimism": {"undecoded": 1, "total": 1}, "base": {"undecoded": 1, "total": 1}}, "message": "" }
 
-   :resjson object result: A mapping of the EVM chain name to the number of transactions missing the decoding.
+   :resjson object result: A mapping of the chain name to the number of transactions missing the decoding and the total number of transactions. If a chain doesn't have undecoded transactions it doesn't appear on the mapping.
 
    :statuscode 200: Transactions successfully counted.
-   :statuscode 409: User is not logged in. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Other error. Check error message for details.
    :statuscode 500: Internal rotki error
 
 
@@ -2006,7 +2079,7 @@ Purging locally saved data for ethereum modules
 
       {}
 
-   :reqjson string name: The name of the module whose data to delete. Can be one of the supported ethereum modules. The name can be omitted by doing a ``DELETE`` on ``/api/(version)/blockchains/eth/modules/data`` in which case all module data will be purged.
+   :reqjson string name: The name of the module whose data to delete. Can be one of the supported ethereum modules. The name can be omitted by doing a ``DELETE`` on ``/api/(version)/blockchains/eth/modules/data`` in which case all module data will be purged. Apart from the standard modules we have 2 virtual modules for purging DB data. They are "gnosis_pay" and "cowswap".
 
 
    **Example Response**:
@@ -2020,7 +2093,8 @@ Purging locally saved data for ethereum modules
 
    :statuscode 200: Data successfully purged.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in or some other error. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some other error. Check error message for details.
    :statuscode 500: Internal rotki error
 
 
@@ -2140,6 +2214,13 @@ Getting all supported chains
                     "native_token": "XDAI",
                     "image": "gnosis.svg",
                     "evm_chain_name": "gnosis"
+                },
+                {
+                    "id": "zksync_lite",
+                    "name": "zksync",
+                    "type": "evmlike",
+                    "native_token": "ETH",
+                    "image": "zksync_lite.svg",
                 }
             ],
             "message": ""
@@ -2186,7 +2267,8 @@ Request creation of oracle price cache
 
    :statuscode 200: Cache successfully created.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in or some other error. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some other error. Check error message for details.
    :statuscode 500: Internal rotki error
    :statuscode 502: The oracle could not be queried due to an error on their side.
 
@@ -2223,7 +2305,8 @@ Delete an oracle price cache
 
    :statuscode 200: Cache successfully delete.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in or some other error. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some other error. Check error message for details.
    :statuscode 500: Internal rotki error
 
 Get oracle price cache data
@@ -2279,7 +2362,8 @@ Get oracle price cache data
 
    :statuscode 200: Cache successfully delete.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in or some other error. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some other error. Check error message for details.
    :statuscode 500: Internal rotki error
 
 Get supported oracles
@@ -2373,7 +2457,8 @@ Query supported ethereum modules
    :resjson object result: A list of all supported module each with its id and human readable name
 
    :statuscode 200: Data successfully purged.
-   :statuscode 409: User is not logged in or some other error. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some other error. Check error message for details.
    :statuscode 500: Internal rotki error
 
 Querying evm transactions
@@ -2384,7 +2469,7 @@ Querying evm transactions
    .. note::
       This endpoint can also be queried asynchronously by using ``"async_query": true``
 
-   Doing a POST on the evm transactions endpoint will query all evm transactions for all the tracked user addresses. Caller can also specify a chain and/or an address to further filter the query. Also they can limit the queried transactions by timestamps and can filter transactions by related event's properties (asset, counterparties and whether to exclude transactions with ignored assets). If the user is not premium and has more than the transaction limit then the returned transaction will be limited to that number. Any filtering will also be limited. Transactions are returned most recent first.
+   Doing a POST on the evm transactions endpoint will query all evm transactions for all the tracked user addresses and save them to the DB. Caller can also specify a chain and/or an address to further filter the query.
 
    **Example Request**:
 
@@ -2402,21 +2487,13 @@ Querying evm transactions
               "address": "0xF2Eb18a344b2a9dC769b1914ad035Cbb614Fd238"
           }],
           "from_timestamp": 1514764800,
-          "to_timestamp": 1572080165,
-          "only_cache": false
+          "to_timestamp": 1572080165
       }
 
-   :reqjson int limit: This signifies the limit of records to return as per the `sql spec <https://www.sqlite.org/lang_select.html#limitoffset>`__.
-   :reqjson int offset: This signifies the offset from which to start the return of records per the `sql spec <https://www.sqlite.org/lang_select.html#limitoffset>`__.
-   :reqjson list[string] order_by_attributes: This is the list of attributes of the transaction by which to order the results.
-   :reqjson list[bool] ascending: Should the order be ascending? This is the default. If set to false, it will be on descending order.
    :reqjson list[string] accounts: List of accounts to filter by. Each account contains an ``"address"`` key which is required and is an evm address. It can also contains an ``"evm_chain"`` field which is the specific chain for which to limit the address.
    :reqjson int from_timestamp: The timestamp after which to return transactions. If not given zero is considered as the start.
    :reqjson int to_timestamp: The timestamp until which to return transactions. If not given all transactions from ``from_timestamp`` until now are returned.
-   :reqjson bool only_cache: If true then only the ethereum transactions in the DB are queried.
    :reqjson string evm_chain: Optional. The name of the evm chain by which to filter all transactions. ``"ethereum"``, ``"optimism"`` etc.
-   :reqjson string asset: Optional. Serialized asset to filter by.
-   :reqjson bool exclude_ignored_assets: Optional. Whether to exclude transactions with ignored assets. Default true.
 
 
    **Example Response**:
@@ -2427,88 +2504,29 @@ Querying evm transactions
       Content-Type: application/json
 
       {
-        "result": {
-          "entries": [{
-            "entry": {
-              "tx_hash": "0x18807cd818b2b50a2284bda2dfc39c9f60607ccfa25b1a01143e934280675eb8",
-              "evm_chain":"ethereum",
-              "timestamp": 1598006527,
-              "block_number": 10703085,
-              "from_address": "0x3CAdbeB58CB5162439908edA08df0A305b016dA8",
-              "to_address": "0xF9986D445ceD31882377b5D6a5F58EaEa72288c3",
-              "value": "0",
-              "gas": "61676",
-              "gas_price": "206000000000",
-              "gas_used": "37154",
-              "input_data": "0xa9059cbb0000000000000000000000001934aa5cdb0677aaa12850d763bf8b60e7a3dbd4000000000000000000000000000000000000000000000179b9b29a80ae20ca00",
-              "nonce": 2720
-            },
-            "ignored_in_accounting": false,
-            }, {
-              "entry": {
-                "tx_hash": "0x867119d6c66cab26561ccc5775c9cd215389efb2e3832e54baed2a0a34498c4b",
-                "evm_chain": "optimism",
-                "timestamp": 1661993636,
-                "block_number": 15449856,
-                "from_address": "0xF2Eb18a344b2a9dC769b1914ad035Cbb614Fd238",
-                "to_address": "0x4f9Fbb3f1E99B56e0Fe2892e623Ed36A76Fc605d",
-                "value": "0",
-                "gas": "118197",
-                "gas_price": "17961480822",
-                "gas_used": "111201",
-                "input_data": "0xa694fc3a0000000000000000000000000000000000000000000000162069b9d8ad5c348a",
-                "nonce": 88
-              },
-	      "ignored_in_accounting" true,
-
-            }, {
-            "entry": {
-              "tx_hash": "0x19807cd818b2b50a2284bda2dfc39c9f60607ccfa25b1a01143e934280635eb7",
-              "evm_chain": "ethereum",
-              "timestamp": 1588006528,
-              "block_number": 10700085,
-              "from_address": "0x1CAdbe158CB5162439901edA08df0A305b016dA1",
-              "to_address": "0xA9916D445ce1318A2377b3D6a5F58EaEa72288a1",
-              "value": "56000300000000000000000",
-              "gas": "610676",
-              "gas_price": "106000000000",
-              "gas_used": "270154",
-              "input_data": "0x",
-              "nonce": 55
-            },
-            "ignored_in_accounting": false,
-            }],
-          "entries_found": 95,
-          "entries_limit": 500,
-          "entries_total": 1000
-
-      },
+        "result": true,
         "message": ""
       }
 
-   :resjson object result: A list of transaction entries to return for the given filter.
-   :resjson object entry: A single transaction entry
-   :resjson bool ignored_in_accounting: A boolean indicating whether this transaction should be ignored in accounting or not
-   :resjson int entries_found: The number of entries found for the current filter. Ignores pagination.
-   :resjson int entries_limit: The limit of entries if free version. -1 for premium.
-   :resjson int entries_total: The number of total entries ignoring all filters.
+   :resjson object result: true for success
 
    :statuscode 200: Transactions successfully queried
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in or some other error. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some other error. Check error message for details.
    :statuscode 500: Internal rotki error
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
 
-Request transactions event decoding
-=======================================
+Request specific EVM transaction repulling and event decoding
+===================================================================
 
 .. http:put:: /api/(version)/blockchains/evm/transactions
 
    .. note::
       This endpoint can also be queried asynchronously by using ``"async_query": true``
 
-   Doing a PUT on the evm transactions endpoint will request a decoding of the given transactions and generation of decoded events. That basically entails querying the transaction receipts for each transaction hash and then decoding all events. If events are already queried and ignore_cache is true they will be deleted and re-queried.
+   Doing a PUT on the evm transactions endpoint will request a decoding of the given transaction and generation of decoded events. That basically entails deleting and re-querying all the transaction data. Transaction, internal transactions, receipts and all log for each hash and then decoding all events. Also requeries prices for assets involved in these events.
 
    **Example Request**:
 
@@ -2520,19 +2538,15 @@ Request transactions event decoding
 
       {
           "async_query": true,
-          "data": [{
-              "evm_chain": "ethereum",
-              "tx_hashes": ["0xe33041d0ae336cd4c588a313b7f8649db07b79c5107424352b9e52a6ea7a9742", "0xed6e64021f960bb40f11f1c00ec1d5ca910471e75a080e42b347ba5af7e73516"]
-          }, {
-              "evm_chain": "optimism",
-              "tx_hashes": ["0x13344150ae236c54c588c313b7f8600d007b79c5107424352b9e52a6ea712741"]
-          }],
-          "ignore_cache": false
+          "evm_chain": "ethereum",
+          "tx_hash": "0xe33041d0ae336cd4c588a313b7f8649db07b79c5107424352b9e52a6ea7a9742",
+          "delete_custom": true
       }
 
-   :reqjson list data[optional]: A list of data to decode. Each data entry consists of an ``"evm_chain"`` key specifying the evm chain for which to decode tx_hashes and a ``"tx_hashes"`` key which is an optional list of transaction hashes to request decoding for in that chain. If the list of transaction hashes is not passed then all transactions for that chain are decoded. Passing an empty list is not allowed.
+   :reqjson str evm_chain: A string specifying the evm chain for which the transaction is.
+   :reqjson str tx_hash: The transaction hash whose data to repull and redecode events
+   :reqjson bool delete_custom: Boolean denoting whether to delete any customized events of the transaction or not. Default is false
    :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not
-   :reqjson bool ignore_cache: Boolean denoting whether to ignore the cache for this query or not. This is always false by default. If true is given then the decoded events will be deleted and re-queried.
 
 
    **Example Response**:
@@ -2547,9 +2561,57 @@ Request transactions event decoding
       }
 
 
-   :statuscode 200: Transactions successfully decoded.
+   :statuscode 200: Transaction successfully repulled and decoded.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: One of the given hashes does not correspond to a transaction according to the nodes we contacted.
+   :statuscode 409: The given hashe does not correspond to a transaction according to the nodes we contacted.
+   :statuscode 500: Internal rotki error
+   :statuscode 502: Problem contacting a remote service
+
+Request specific EVMlike transaction repulling and event decoding
+===================================================================
+
+.. http:put:: /api/(version)/blockchains/evmlike/transactions
+
+   .. note::
+      This endpoint can also be queried asynchronously by using ``"async_query": true``
+
+   Doing a PUT on the evmlike transactions endpoint will request a decoding of the given transactions and generation of decoded events. Transaction data will also be deleted and requeried and events redecoded.
+
+   **Example Request**:
+
+   .. http:example:: curl wget httpie python-requests
+
+      PUT /api/1/blockchains/evm/transactions HTTP/1.1
+      Host: localhost:5042
+      Content-Type: application/json;charset=UTF-8
+
+      {
+          "async_query": true,
+          "chain": "zksync_lite",
+          "tx_hash": "0xe33041d0ae336cd4c588a313b7f8649db07b79c5107424352b9e52a6ea7a9742"
+      }
+
+   :reqjson list data[optional]: A list of data to decode. Each data entry consists of a ``"chain"`` key specifying the evmlike chain for which to decode tx_hashes and a ``"tx_hashes"`` key which is an optional list of transaction hashes to request decoding for in that chain. If the list of transaction hashes is not passed then all transactions for that chain are decoded. Passing an empty list is not allowed.
+   :reqjson str evm_chain: A string specifying the chain for which the transaction is. Can only be zksync lite for now.
+   :reqjson str tx_hash: The transaction hash whose data to repull and redecode events
+   :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not
+
+
+   **Example Response**:
+
+   .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      { "result": true,
+        "message": ""
+      }
+
+
+   :statuscode 200: Transaction successfully decoded.
+   :statuscode 400: Provided JSON is in some way malformed
+   :statuscode 409: Given hash does not correspond to a transaction according to the nodes we contacted.
    :statuscode 500: Internal rotki error
    :statuscode 502: Problem contacting a remote service
 
@@ -2601,7 +2663,8 @@ Querying tags
    :resjson string foreground_color: The foreground color to render the tag in the frontend with.
 
    :statuscode 200: Tags successfully queried.
-   :statuscode 409: User is not logged in.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some other error. Check error message for details.
    :statuscode 500: Internal rotki error
 
 Adding new tags
@@ -2668,7 +2731,8 @@ Adding new tags
 
    :statuscode 200: Tag successfully created.
    :statuscode 400: Provided request JSON is in some way malformed.
-   :statuscode 409: User is not logged in. Tag with the same name already exists.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Tag with the same name already exists.
    :statuscode 500: Internal rotki error
 
 Editing a tag
@@ -2735,7 +2799,8 @@ Editing a tag
 
    :statuscode 200: Tag successfully created.
    :statuscode 400: Provided request JSON is in some way malformed. Or no field to edit was given.
-   :statuscode 409: User is not logged in. Tag with the given name does not exist.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Tag with the given name does not exist.
    :statuscode 500: Internal rotki error
 
 Deleting a tag
@@ -2790,7 +2855,8 @@ Deleting a tag
 
    :statuscode 200: Tag successfully removed.
    :statuscode 400: Provided request JSON is in some way malformed.
-   :statuscode 409: User is not logged in. Tag with the given name does not exist.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Tag with the given name does not exist.
    :statuscode 500: Internal rotki error
 
 Querying onchain balances
@@ -2898,7 +2964,8 @@ Querying onchain balances
 
    :statuscode 200: Balances successfully queried.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in. Invalid blockchain, or problems querying the given blockchain
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Invalid blockchain, or problems querying the given blockchain
    :statuscode 500: Internal rotki error
    :statuscode 502: An external service used in the query such as etherscan or blockchain.info could not be reached or returned unexpected response.
 
@@ -2996,7 +3063,7 @@ Querying all balances
    :resjson object result: The result object has two main subkeys. Assets and liabilities. Both assets and liabilities value is another object with the following keys. ``"amount"`` is the amount owned in total for that asset or owed in total as a liablity. ``"percentage_of_net_value"`` is the percentage the user's net worth that this asset or liability represents. And finally ``"usd_value"`` is the total $ value this asset/liability is worth as of this query. There is also a ``"location"`` key in the result. In there are the same results as the rest but divided by location as can be seen by the example response above.
    :statuscode 200: Balances successfully queried.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in.
+   :statuscode 401: User is not logged in.
    :statuscode 500: Internal rotki error
 
 Querying all supported assets
@@ -3034,6 +3101,7 @@ Querying all supported assets
    :reqjson string evm_chain: The name for the evm chain to be used to filter the result data. Possible values are ``ethereum``, ``optimism``, ``gnosis``, ``celo``, etc. Optional.
    :reqjson string address: The address of the evm asset to be used to filter the result data. Optional.
    :reqjson bool show_user_owned_assets_only: A flag to specify if only user owned assets should be returned. Defaults to ``"false"``. Optional.
+   :reqjson bool show_whitelisted_assets_only: If set to true then only whitelisted spam tokens are queried.
    :reqjson string ignored_assets_handling: A flag to specify how to handle ignored assets. Possible values are `'none'`, `'exclude'` and `'show_only'`. You can write 'none' in order to not handle them in any special way (meaning to show them too). This is the default. You can write 'exclude' if you want to exclude them from the result. And you can write 'show_only' if you want to only see the ignored assets in the result.
    :reqjson list[string] identifiers: A list of asset identifiers to filter by. Optional.
 
@@ -3174,7 +3242,9 @@ Get asset identifiers mappings
               "name": "0xBitcoin",
               "symbol": "0xBTC",
               "asset_type": "evm token",
-              "collection_id": "0"
+              "collection_id": "0",
+              "coingecko": "oxbitcoin",
+              "cryptocompare": "0XBTC"
             },
             "DCR": {
               "name": "Decred",
@@ -3211,6 +3281,8 @@ Get asset identifiers mappings
    :resjson string symbol: Symbol of the asset. Will only exist for non-nft assets.
    :resjson int chain_id: This value might not be included in all the results. Chain id of the chain where the asset is located if the asset is an EVM token.
    :resjson string custom_asset_type: This value might not be included in all the results. It represents the custom asset type for a custom asset.
+   :resjson string coingecko: This value might not be included in all the results. It is the coingecko identifier for the asset.
+   :resjson string cryptocompare: This value might not be included in all the results. It is the cryptocompare identifier for the asset.
    :resjson string collection_name: Only included for NFTs. May be null if nft has no collection. If it does then this is its name.
    :resjson string image_url: Only included for NFTs. May be null if nft has no image. If it does this is a url to the image.
    :statuscode 200: Assets successfully queried.
@@ -3310,12 +3382,17 @@ Search for assets(Levenshtein)
       }
 
    :reqjson int limit: This signifies the limit of records to return as per the `sql spec <https://www.sqlite.org/lang_select.html#limitoffset>`__.
-   :reqjson string value: A string to be used to search the assets. Required.
+   :reqjson string value: A string to be used to search the assets. Optional.
+   :reqjson string address: An address to be used to search for. Optional.
    :reqjson int[optional] chain_id: Chain id of a supported EVM chain used to filter the result
    :reqjson list[string][optional] owner_addresses: A list of evm addresses. If provided, only nfts owned by these addresses will be returned.
    :reqjson string[optional] name: Optional nfts name to filter by.
    :reqjson string[optional] collection_name: Optional nfts collection_name to filter by.
    :reqjson string[optional] ignored_assets_handling: A flag to specify how to handle ignored assets. Possible values are `'none'`, `'exclude'` and `'show_only'`. You can write 'none' in order to not handle them in any special way (meaning to show them too). This is the default. You can write 'exclude' if you want to exclude them from the result. And you can write 'show_only' if you want to only see the ignored assets in the result.
+
+   .. note::
+      Either value or address need to be provided when calling this endpoint.
+
 
    **Example Response**:
 
@@ -3380,7 +3457,7 @@ Querying owned assets
    :resjson list result: A list of asset symbols owned by the user
    :statuscode 200: Assets successfully queried.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: No user is currently logged in.
+   :statuscode 401: No user is currently logged in.
    :statuscode 500: Internal rotki error
 
 Detecting owned tokens
@@ -3431,7 +3508,7 @@ Detecting owned tokens
   :resjson object result: a dictionary containing mappings of an account to owned tokens and last tokens update timestamp. Tokens and last_update_timestamp can be None (if no info about account's tokens yet).
   :statuscode 200: Tokens successfully detected.
   :statuscode 400: Provided JSON is in some way malformed
-  :statuscode 409: No user is currently logged in.
+  :statuscode 401: No user is currently logged in.
   :statuscode 500: Internal rotki error
 
 Get asset types
@@ -3747,7 +3824,8 @@ Performing an asset update
    :resjson object result: Either ``true`` if all went fine or a a list of conflicts, containing the identifier of the asset in question and the local and remote versions.
    :statuscode 200: Update was successfully applied (if any).
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: Conflicts were found during update. The conflicts should also be returned. No user is currently logged in.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Conflicts were found during update. The conflicts should also be returned.
    :statuscode 500: Internal rotki error
    :statuscode 502: Error while trying to reach the remote for asset updates.
 
@@ -3827,7 +3905,8 @@ Replacing an asset
 
    :statuscode 200: Asset successfully replaced.
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: Some conflict at replacing or user is not logged in.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some conflict at replacing.
    :statuscode 500: Internal rotki error
 
 Querying asset icons
@@ -3935,15 +4014,198 @@ Refreshing asset icons
    :statuscode 500: Internal rotki error
 
 
+Get asset location mappings for a location
+==========================================
+
+.. http:post:: /api/(version)/assets/locationmappings
+
+    Doing a POST on the asset location mappings endpoint will return all the paginated location assets mappings for the given filter.
+
+    **Example Request**
+
+    .. http:example:: curl wget httpie python-requests
+
+        POST /api/1/assets/locationmappings/ HTTP/1.1
+        Host: localhost:5042
+        Content-Type: application/json;charset=UTF-8
+
+        {
+          "offset": 20,
+          "limit": 2
+        }
+
+    :reqjson str location[optional]: If given, filter the returned mappings only for the location. Possible values can be any supported exchange, ``null`` to get the mappings that are common for all exchanges, or omitting it to get all the mappings.
+    :reqjson str location_symbol[optional]: Filter the exchange symbols using the provided string.
+    :reqjson int limit: This signifies the limit of records to return as per the `sql spec <https://www.sqlite.org/lang_select.html#limitoffset>`__.
+    :reqjson int offset: This signifies the offset from which to start the return of records per the `sql spec <https://www.sqlite.org/lang_select.html#limitoffset>`__.
+
+    **Example Response**
+
+    .. sourcecode:: http
+
+        HTTP/1.1 200 OK
+        Content-Type: application/json
+
+        {
+            "result": {
+              "entries": [
+                { "asset": "eip155:1/erc20:0x6810e776880C02933D47DB1b9fc05908e5386b96", "location_symbol": "GNO", "location": "binance"},
+                { "asset": "eip155:1/erc20:0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE", "location_symbol": "SHIB", "location": "kraken"}
+              ],
+              "entries_found": 1500,
+              "entries_total": 1500
+            },
+            "message": ""
+        }
+
+    :resjson object entries: An array of mapping objects. Each entry is composed of the asset identifier under the ``"asset"`` key, its ticker symbol used in the location under the ``"location_symbol"`` key, and its location under the ``"location"`` key.
+    :resjson int entries_found: The number of entries found for the current filter. Ignores pagination.
+    :resjson int entries_total: The number of total entries ignoring all filters.
+    :resjson str message: Error message if any errors occurred.
+    :statuscode 200: Mappings were returned successfully.
+    :statuscode 400: Provided JSON is in some way malformed.
+    :statuscode 500: Internal rotki error.
+
+
+Insert asset location mappings for a location
+=============================================
+
+.. http:put:: /api/(version)/assets/locationmappings
+
+    Doing a PUT on the asset location mappings endpoint with a list of entries, and each entry containing an asset's identifier, its location, and its location symbol will save these mappings in the DB.
+
+    **Example Request**
+
+    .. http:example:: curl wget httpie python-requests
+
+        PUT /api/1/assets/locationmappings HTTP/1.1
+        Host: localhost:5042
+        Content-Type: application/json;charset=UTF-8
+
+        {
+          "entries": [
+            { "asset": "eip155:1/erc20:0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984", "location_symbol": "UNI", "location": "kucoin"},
+            { "asset": "eip155:1/erc20:0xF57e7e7C23978C3cAEC3C3548E3D615c346e79fF", "location_symbol": "IMX", "location": "kraken"}
+          ]
+        }
+
+    :reqjson object entries: A list of mappings containing ``"asset"``, ``"location_symbol"``, and ``"location"`` to be saved in the database
+
+    **Example Response**
+
+    .. sourcecode:: http
+
+        HTTP/1.1 200 OK
+        Content-Type: application/json
+
+        {
+            "result": true,
+            "message": ""
+        }
+
+    :resjson bool result: A boolean which is true in the case the mappings were added successfully.
+    :resjson str message: Error message if any errors occurred.
+    :statuscode 200: Mappings were added successfully.
+    :statuscode 400: Provided JSON is in some way malformed.
+    :statuscode 409: Some of the provided mappings already exist in the database or assets have incorrect format.
+    :statuscode 500: Internal rotki error.
+
+
+Update asset location mappings for a location
+=============================================
+
+.. http:patch:: /api/(version)/assets/locationmappings
+
+    Doing a PATCH on the asset location mappings endpoint with a list of entries, and each entry containing an asset's identifier, its location, and its location symbol will updates these mappings in the DB.
+
+    **Example Request**
+
+    .. http:example:: curl wget httpie python-requests
+
+        PATCH /api/1/assets/locationmappings HTTP/1.1
+        Host: localhost:5042
+        Content-Type: application/json;charset=UTF-8
+
+        {
+          "location": "kucoin",
+          "entries": [
+            { "asset": "eip155:1/erc20:0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984", "location_symbol": "UNI", "location": "kraken"},
+            { "asset": "eip155:1/erc20:0xF57e7e7C23978C3cAEC3C3548E3D615c346e79fF", "location_symbol": "IMX", "location": "kucoin"}
+          ]
+        }
+
+    :reqjson object entries: A list of mappings containing ``"asset"``, ``"location_symbol"``, and ``"location"`` to be updated in the database.
+
+    **Example Response**
+
+    .. sourcecode:: http
+
+        HTTP/1.1 200 OK
+        Content-Type: application/json
+
+        {
+            "result": true,
+            "message": ""
+        }
+
+    :resjson bool result: A boolean which is true in case the mappings were updated successfully.
+    :resjson str message: Error message if any errors occurred.
+    :statuscode 200: Mappings were updated successfully.
+    :statuscode 400: Provided JSON is in some way malformed.
+    :statuscode 409: Some of the provided mappings don't exist in the database or assets have incorrect format.
+    :statuscode 500: Internal rotki error.
+
+
+Delete asset location mappings for a location
+=============================================
+
+.. http:delete:: /api/(version)/assets/locationmappings
+
+    Doing a DELETE on the asset location mappings endpoint with a list of entries, and each entry containing an asset's location, and its location symbol will delete these mappings from the DB.
+
+    **Example Request**
+
+    .. http:example:: curl wget httpie python-requests
+
+        DELETE /api/1/assets/locationmappings HTTP/1.1
+        Host: localhost:5042
+        Content-Type: application/json;charset=UTF-8
+
+        {
+          "entries": [
+            {"location_symbol": "UNI", "location": "kraken"},
+            {"location_symbol": "IMX", "location": "kucoin"}
+          ]
+        }
+
+    :reqjson object entries: A list of objects containing ``"location_symbol"`` and ``"location"`` whose mappings should be deleted from the database.
+
+    **Example Response**
+
+    .. sourcecode:: http
+
+        HTTP/1.1 200 OK
+        Content-Type: application/json
+
+        {
+            "result": true,
+            "message": ""
+        }
+
+    :resjson bool result: A boolean which is true in case the mappings were deleted successfully.
+    :resjson str message: Error message if any errors occurred.
+    :statuscode 200: Mappings were deleted successfully.
+    :statuscode 400: Provided JSON is in some way malformed.
+    :statuscode 409: Some of the provided asset identifiers don't exist in the database for the given location or their format is incorrect.
+    :statuscode 500: Internal rotki error.
+
+
 Statistics for netvalue over time
 ====================================
 
 .. http:get:: /api/(version)/statistics/netvalue/
 
-   .. note::
-      This endpoint is only available for premium users
-
-   Doing a GET on the statistics netvalue over time endpoint will return all the saved historical data points with user's history
+   Doing a GET on the statistics netvalue over time endpoint will return all the saved historical data points with user's history. For non-premium users this returns up to 2 weeks of data in the past.
 
 
    **Example Request**:
@@ -3972,7 +4234,7 @@ Statistics for netvalue over time
    :resjson list[string] data: A list of net usd value for the corresponding timestamps. They are matched by list index.
    :statuscode 200: Netvalue statistics successfully queried.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription.
+   :Statuscode 401: No user is currently logged in.
    :statuscode 500: Internal rotki error.
 
 Statistics for asset or collection balance over time
@@ -4029,7 +4291,8 @@ Statistics for asset or collection balance over time
 
    :statuscode 200: Single asset balance statistics successfully queried
    :statuscode 400: Provided JSON is in some way malformed or data is invalid.
-   :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription.
+   :statuscode 401: No user is currently logged in
+   :statuscode 403: Logged in user does not have premium.
    :statuscode 500: Internal rotki error
 
 Statistics for value distribution
@@ -4086,7 +4349,8 @@ Statistics for value distribution
 
    :statuscode 200: Value distribution successfully queried.
    :statuscode 400: Provided JSON is in some way malformed or data is invalid.
-   :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 403: Logged in user does not have premium.
    :statuscode 500: Internal rotki error.
 
 .. http:get:: /api/(version)/statistics/value_distribution/
@@ -4140,7 +4404,8 @@ Statistics for value distribution
 
    :statuscode 200: Value distribution successfully queried.
    :statuscode 400: Provided JSON is in some way malformed or data is invalid.
-   :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 403: Logged in user does not have premium.
    :statuscode 500: Internal rotki error.
 
 Statistics rendering code
@@ -4177,7 +4442,9 @@ Statistics rendering code
    :resjson string result: The source code of the renderer.
    :statuscode 200: Rendering code successfully returned.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription. There is a problem reaching the rotki server.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 403: Logged in user does not have premium.
+   :statuscode 409: There is a problem reaching the rotki server.
    :statuscode 500: Internal rotki error.
 
 Dealing with trades
@@ -4214,6 +4481,7 @@ Dealing with trades
    :reqjson string quote_asset: Optionally filter trades by quote_asset. A valid asset identifier has to be provided. If missing trades are not filtered by quote asset.
    :reqjson string trade_type: Optionally filter trades by type. A valid trade type (buy, sell) has to be provided. If missing trades are not filtered by type.
    :reqjson bool include_ignored_trades: Determines whether ignored trades should be included in the result returned. Defaults to ``"true"``.
+   :reqjson bool exclude_ignored_assets: Determines whether the trades with ignored assets should be included in the result returned. Defaults to ``"true"``.
    :reqjson bool only_cache: Optional.If this is true then the equivalent exchange/location is not queried, but only what is already in the DB is returned.
 
    .. _trades_schema_section:
@@ -4477,6 +4745,7 @@ Querying asset movements
    :reqjson string asset: Optionally filter asset movements by asset. A valid asset identifier has to be provided. If missing, movements are not filtered by asset.
    :reqjson string action: Optionally filter asset movements by action type. A valid action type (deposit, withdrawals) has to be provided. If missing movements are not filtered by type.
    :reqjson bool only_cache: Optional. If this is true then the equivalent exchange/location is not queried, but only what is already in the DB is returned.
+   :reqjson bool exclude_ignored_assets: Optional. If this is true then the asset movements of ignored assets are not returned, defaults to ``"true"``.
 
 
    **Example Response**:
@@ -4582,7 +4851,7 @@ Dealing with History Events
                       "notes": "Burned 0.00863351371344 ETH for gas",
                       "sequence_index": 0,
                       "timestamp": 1642802807,
-                      "missing_accounting_rule": true,
+                      "event_accounting_rule_status": "not processed",
 		      "tx_hash": "0x8d822b87407698dd869e830699782291155d0276c5a7e5179cb173608554e41f",
 		      "address": null,
 		      "product": null
@@ -4607,7 +4876,7 @@ Dealing with History Events
                       "notes": "Burned 0.00863351371344 ETH for gas",
                       "sequence_index": 0,
                       "timestamp": 1642802807,
-                      "missing_accounting_rule": true,
+                      "event_accounting_rule_status": "not processed",
 		      "tx_hash": "0x1c822b87407698dd869e830699782291155d0276c5a7e5179cb173608554e41f",
 		      "address": null,
 		      "product": null
@@ -4630,7 +4899,7 @@ Dealing with History Events
                       "notes": "Withdrew 0.00163351371344 ETH from validator 1454",
                       "sequence_index": 0,
                       "timestamp": 1652802807,
-                      "missing_accounting_rule": true,
+                      "event_accounting_rule_status": "not processed",
 		      "validator_index": 1454,
 		      "is_exit": false
                   },
@@ -4653,7 +4922,7 @@ Dealing with History Events
                       "notes": "Validator 1454 produced block 15534342 with 0.00163351371344 going to 0xce15887E2CEC81434C16D587709f64603b39b545 as the block reward",
                       "sequence_index": 0,
                       "timestamp": 1652802807,
-                      "missing_accounting_rule": true,
+                      "event_accounting_rule_status": "not processed",
 		      "validator_index": 1454,
 		      "block_number": 15534342
                   },
@@ -4676,7 +4945,7 @@ Dealing with History Events
                       "notes": "Deposit 32 ETH to validator 4242",
                       "sequence_index": 15,
                       "timestamp": 1642802807,
-                      "missing_accounting_rule": true,
+                      "event_accounting_rule_status": "not processed",
 		      "tx_hash": "0x2c822b87407698dd869e830699782291155d0276c5a7e5179cb173608554e41f",
 		      "address": "0x00000000219ab540356cBB839Cbe05303d7705Fa",
 		      "product": "staking",
@@ -4694,13 +4963,13 @@ Dealing with History Events
           "message": ""
       }
 
-   :resjson list decoded_events: A list of history events. Each event is an object comprised of the event entry and a boolean denoting if the event has been customized by the user or not. Each entry may also have a `has_details` flag if true. If `has_details` is true, then it is possible to call /history/events/details endpoint to retrieve some extra information about the event. Also each entry may have a `customized` flag set to true. If it does, it means the event has been customized/added by the user. Each entry may also have a `hidden` flag if set to true. If it does then that means it should be hidden in the UI due to consolidation of events. Finally if `group_by_event_ids` exist and is true, each entry contains `grouped_events_num` which is an integer with the amount of events under the common event identifier. The consumer has to query this endpoint again with `group_by_event_ids` set to false and with the `event_identifiers` filter set to the identifier of the events having more than 1 event. Finally `ignored_in_accounting` is set to `true` when the user has marked this event as ignored. Following are all possible entries depending on entry type.
+   :resjson list decoded_events: A list of history events. Each event is an object comprised of the event entry and a boolean denoting if the event has been customized by the user or not. Each entry may also have a `has_details` flag if true. If `has_details` is true, then it is possible to call /history/events/details endpoint to retrieve some extra information about the event. Also each entry may have a `customized` flag set to true. If it does, it means the event has been customized/added by the user. Each entry may also have a `hidden` flag if set to true. If it does then that means it should be hidden in the UI due to consolidation of events. Also if `group_by_event_ids` exist and is true, each entry contains `grouped_events_num` which is an integer with the amount of events under the common event identifier. The consumer has to query this endpoint again with `group_by_event_ids` set to false and with the `event_identifiers` filter set to the identifier of the events having more than 1 event. If the event has a ``"notes"`` field that is auto-generated by default and not edited then the key ``"default_notes"`` will exit and be true. Finally `ignored_in_accounting` is set to `true` when the user has marked this event as ignored. Following are all possible entries depending on entry type.
    :resjson string identifier: Common key. This is the identifier of a single event.
    :resjson string entry_type: Common key. This identifies the category of the event and determines the schema. Possible values are: ``"history event"``, ``"evm event"``, ``"eth withdrawal event"``, ``"eth block event"``, ``"eth deposit event"``.
    :resjson string event_identifier: Common key. An event identifier grouping multiple events under a common group. This is how we group transaction events under a transaction, staking related events under block production etc.
    :resjson int sequence_index: Common key. This is an index that tries to provide the order of history entries for a single event_identifier.
    :resjson int timestamp: Common key. The timestamp of the entry
-   :resjson bool missing_accounting_rule: Common key. Present and `True` if the event is not processed by any accounting rule.
+   :resjson string event_accounting_rule_status: Common key. It explains the status of accounting rules for the event. Possible values are: ``has rule``: Meaning the event has a rule. ``processed``: meaning the event will be processed because it is affected by another event. ``not processed`` meaning it doesn't have any rule and won't be processed by accounting.
    :resjson string location: Common key. The location of the entry. Such as "ethereum", "optimism", etc.
    :resjson string asset: Common key. The asset involved in the event.
    :resjson object balance: Common key. The balance of the asset involved in the event.
@@ -5002,6 +5271,9 @@ Exporting History Events
 
 .. http:post:: /api/(version)/history/events/export
 
+   .. note::
+      This endpoint can also be queried asynchronously by using ``"async_query": true``
+
    Doing a POST on this endpoint with the given filter parameters will export a csv with all history events matching the filter to a file in the provided directory. Only the 'directory_path' argument is required. If no filter is used all the events will be exported.
 
    **Example Request**:
@@ -5015,7 +5287,8 @@ Exporting History Events
       {
           "directory_path": "/home",
           "from_timestamp": 1500,
-          "to_timestamp": 999999
+          "to_timestamp": 999999,
+          "async_query": false
       }
 
    .. _history_export_schema_section:
@@ -5040,8 +5313,12 @@ Exporting History Events
    :statuscode 400: Provided JSON is in some way malformed
    :statuscode 409: No user is logged in or failure at event export.
    :statuscode 500: Internal rotki error
+   :statuscode 502: Couldn't fetch prices for all the events due to being rate limited.
 
 .. http:put:: /api/(version)/history/events/export
+
+   .. note::
+      This endpoint can also be queried asynchronously by using ``"async_query": true``
 
    Doing a PUT on this endpoint with the given filter parameters will download a csv with all history events matching the filter. All arguments are optional. If no filter is used all the events will be downloaded.
 
@@ -5057,7 +5334,8 @@ Exporting History Events
 
       {
           "from_timestamp": 1500,
-          "to_timestamp": 999999
+          "to_timestamp": 999999,
+          "async_query": false
       }
 
    :reqjson list[string] order_by_attributes: This is the list of attributes of the transaction by which to order the results.
@@ -5090,6 +5368,7 @@ Exporting History Events
    :statuscode 400: Provided JSON is in some way malformed
    :statuscode 409: No user is logged in or failure at event download.
    :statuscode 500: Internal rotki error
+   :statuscode 502: Couldn't fetch prices for all the events due to being rate limited.
 
 Querying online events
 ============================================
@@ -5219,7 +5498,8 @@ Querying complete action history
 
    :statuscode 200: History processed and returned successfully
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: Fatal accounting error while processing the report.
    :statuscode 500: Internal rotki error.
 
 
@@ -5420,6 +5700,97 @@ Import PnL report debug data
    :statuscode 500: Internal rotki error.
 
 
+Export Accounting rules
+============================
+
+.. http:post:: /api/(version)/accounting/rules/export
+
+   .. note::
+      This endpoint can also be queried asynchronously by using ``"async_query": true``
+
+   Doing a POST on the Export Accounting rules endpoint will trigger an export of all the accounting rules from the DB into a file on the given ``directory_path``.
+
+   **Example Request**:
+
+   .. http:example:: curl wget httpie python-requests
+
+      POST /api/1/accounting/rules/transfer HTTP/1.1
+      Host: localhost:5042
+      Content-Type: application/json;charset=UTF-8
+
+      {"directory_path": "/home/user/Documents"}
+
+   :reqjson string directory_path: The directory in which to write the exported JSON file
+
+   **Example Response**:
+
+   .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+          "result": true
+          "message": ""
+      }
+
+   :resjson bool result: Boolean denoting success or failure of the export. If ``directory_path`` is not present, it will return the JSON data directly.
+   :statuscode 200: File was exported successfully
+   :statuscode 400: Provided JSON is in some way malformed.
+   :statuscode 409: No user is currently logged in. No permissions to write in the given directory. Check error message.
+   :statuscode 500: Internal rotki error.
+
+
+Import Accounting rules
+============================
+
+.. http:put:: /api/(version)/accounting/rules/import
+.. http:patch:: /api/(version)/accounting/rules/import
+
+   .. note::
+      This endpoint can also be queried asynchronously by using ``"async_query": true``
+
+   Doing a PUT on the Import Accounting rules endpoint with a path to the exported accounting rules json file will import the accounting rules from it.
+   Doing a PATCH on the Import Accounting rules endpoint with the exported accounting rules json as multipart/form-data will import the accounting rules from it.
+
+
+   **Example Request**:
+
+   .. http:example:: curl wget httpie python-requests
+
+      PUT /api/1/accounting/rules/transfer HTTP/1.1
+      Host: localhost:5042
+      Content-Type: application/json;charset=UTF-8
+
+       {
+            "filepath": "/home/user/Documents/accounting_rules.json",
+            "async_query": false
+        }
+
+   :reqjson str file: The path to the exported accounting rules JSON file.
+   :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not
+
+
+   **Example Response**:
+
+   .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+          "result": true,
+          "message": ""
+      }
+
+   :resjson bool result: Boolean denoting success or failure of the import
+
+   :statuscode 200: Import of accounting rules successfully
+   :statuscode 400: Provided JSON is in some way malformed. Import JSON contains some invalid data types.
+   :statuscode 409: No user is currently logged in. JSON does not contain required keys. Error importing accounting rules. Check error message.
+   :statuscode 500: Internal rotki error.
+
+
 Export action history to CSV
 ================================
 
@@ -5559,7 +5930,7 @@ Get missing acquisitions and prices
    :resjsonarr str from_asset: The asset whose price is missing.
    :resjsonarr str to_asset: The asset in which we want the price of from_asset.
    :resjsonarr int time: The timestamp for which the price is missing.
-   :resjosnarr bool reate_limited: True if we couldn't get the price and any of the oracles got rate limited.
+   :resjosnarr bool rate_limited: True if we couldn't get the price and any of the oracles got rate limited.
    :resjson list missing_acquisitions: A list that contains entries of missing acquisitions found during PnL reporting.
    :resjsonarr str asset: The asset that is involved in the event.
    :resjsonarr int time: The timestamp this event took place in.
@@ -6337,7 +6708,9 @@ Getting ethereum MakerDAO DSR historical report
    :resjsonarr int tx_hash: The transaction hash of the DSR movement
 
    :statuscode 200: DSR history successfully queried.
-   :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription. Or makerdao module is not activated.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 403: Logged in user does not have premium.
+   :statuscode 409: Makerdao module is not activated.
    :statuscode 500: Internal rotki error
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
@@ -6544,7 +6917,9 @@ Getting MakerDAO vault details
    :resjsonarr string tx_hash: The transaction hash associated with the event.
 
    :statuscode 200: Vault details successfully queried
-   :statuscode 409: User is not logged in. Or makerdao module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 403: Logged in user does not have premium.
+   :statuscode 409: Makerdao module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
@@ -6704,7 +7079,8 @@ Getting Aave stats
 
    :statuscode 200: Aave history successfully queried.
    :statuscode 400: Requested module is not allowed to query statistics.
-   :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription. Or aave module is not activated.
+   :statuscode 401: No user is currently logged in or currently logged in user does not have a premium subscription.
+   :statuscode 409: Aave module is not activated.
    :statuscode 500: Internal rotki error
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
@@ -6819,111 +7195,9 @@ Getting Balancer balances
    :resjson object user_balance: The liquidity token amount of the user balance and its estimated USD value.
 
    :statuscode 200: Balancer balances successfully queried.
-   :statuscode 409: User is not logged in. Or Balancer module is not activated.
-   :statuscode 500: Internal rotki error.
-   :statuscode 502: An external service used in the query such as the graph node could not be reached or returned unexpected response.
-
-Getting Balancer events
-=========================
-
-.. http:get:: /api/(version)/blockchains/eth/modules/balancer/history/events
-
-   Doing a GET on the Balancer events history resource will return the history of all Balancer events (i.e. add and remove liquidity in the pools).
-
-   .. note::
-      This endpoint is only available for premium users
-
-   .. note::
-      This endpoint can also be queried asynchronously by using ``"async_query": true``
-
-   **Example Request**:
-
-   .. http:example:: curl wget httpie python-requests
-
-      GET /api/1/blockchains/eth/modules/balancer/history/events HTTP/1.1
-      Host: localhost:5042
-
-   :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not
-
-   **Example Response**:
-
-   .. sourcecode:: http
-
-      HTTP/1.1 200 OK
-      Content-Type: application/json
-
-      {
-          "message": "",
-          "result": {
-              "0x7716a99194d758c8537F056825b75Dd0C8FDD89f": [
-                  {
-                    "pool_address": "0x59A19D8c652FA0284f44113D0ff9aBa70bd46fB4",
-                    "pool_tokens": [
-                      { "token": "eip155:1/erc20:0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "weight": "20" },
-                      { "token": "eip155:1/erc20:0xba100000625a3754423978a60c9317c58a424e3D", "weight": "80" }
-                    ],
-                    "events": [
-                      {
-                        "tx_hash": "0xb9dff9df4e3838c75d354d62c4596d94e5eb8904e07cee07a3b7ffa611c05544",
-                        "log_index": 331,
-                        "timestamp": 1597144247,
-                        "event_type": "mint",
-                        "lp_balance": {
-                          "amount": "0.042569019597126949",
-                          "usd_value": "19.779488662371895"
-                        },
-                        "amounts": {
-                          "eip155:1/erc20:0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": "0.05",
-                          "eip155:1/erc20:0xba100000625a3754423978a60c9317c58a424e3D": "0"
-                        }
-                      },
-                      {
-                        "tx_hash": "0xfa1dfeb83480e51a15137a93cb0eba9ac92c1b6b0ee0bd8551a422c1ed83695b",
-                        "log_index": 92,
-                        "timestamp": 1597243001,
-                        "event_type": "burn",
-                        "lp_balance": {
-                          "amount": "0.042569019597126949",
-                          "usd_value": "19.01364749076136579119809947"
-                        },
-                        "amounts": {
-                          "eip155:1/erc20:0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": "0.010687148200906598",
-                          "eip155:1/erc20:0xba100000625a3754423978a60c9317c58a424e3D": "0.744372160905819159"
-                        }
-                      }
-                    ],
-                    "profit_loss_amounts": {
-                      "eip155:1/erc20:0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2": "-0.039312851799093402",
-                      "eip155:1/erc20:0xba100000625a3754423978a60c9317c58a424e3D": "0.744372160905819159"
-                    },
-                    "usd_profit_loss": "-0.76584117161052920880190053"
-                  }
-              ]
-          }
-      }
-
-   :resjson object result: A mapping between accounts and their Balancer events history (grouped per liquidity pool).
-   :resjson string address: The address of the user who interacted with the pool.
-   :resjson list[object] events: A list of all the events generated by the address interacting with the pool.
-
-       - tx_hash: The transaction hash of the event.
-       - log_index: The index of the event in the transaction.
-       - timestamp: The Unix timestamp in UTC when the event happened (in seconds).
-       - event_type: The type of interaction, i.e. "mint" (add liquidity) and "burn" (remove liquidity).
-       - amounts: A mapping between each pool token identifier and the amount added or removed on the event.
-       - lp_balance: The amount of liquidity token (i.e. BPT) involved in the event and its estimated USD amount. This amount is set to zero if the endpoint is not able to get the USD value of the event token at a particular timestamp.
-
-   :resjson string pool_address: The contract address of the pool.
-   :resjson list[object] profit_loss_amounts: A mapping between each pool token identifier and the profit/loss amount.
-   :resjson list[object] pool_tokens: A list with the LP underlying tokens data.
-
-       - token: the token identifier (as string). When its an object it means the token is unknown to rotki.
-       - weight: the weight (%) that represents the token in the LP.
-
-   :resjson string usd_profit_loss: The total profit/loss in USD.
-
-   :statuscode 200: Balancer events successfully queried.
-   :statuscode 409: User is not logged in. Or Balancer module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 403: Logged in user does not have premium.
+   :statuscode 409: Balancer module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as the graph node could not be reached or returned unexpected response.
 
@@ -7013,7 +7287,8 @@ Getting Compound balances
    :resjson object result: A mapping of all accounts that currently have compound balance to the balances and APY data for each account for lending and borrowing. Each key is an asset identifier and its values are the current balance and the APY in %
 
    :statuscode 200: Compound balances successfully queried.
-   :statuscode 409: User is not logged in. Or compound module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Compound module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as etherscan or the graph node could not be reached or returned unexpected response.
 
@@ -7107,7 +7382,9 @@ Getting compound statistics
 
    :statuscode 200: Compound statistics successfully queried.
    :statuscode 400: Requested module is not allowed to query statistics.
-   :statuscode 409: User is not logged in. Or compound module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 403: Logged in user does not have premium.
+   :statuscode 409: Compound module is not activated.
    :statuscode 500: Internal rotki error.
 
 
@@ -7116,7 +7393,7 @@ Getting Liquity balances
 
 .. http:get:: /api/(version)/blockchains/eth/modules/liquity/balances
 
-   Doing a GET on the liquity balances resource will return the balances that the user has in troves.
+   Doing a GET on the liquity balances resource will return the balances that the user has in troves and the Total Collateral Ratio.
 
    .. note::
       This endpoint can also be queried asynchronously by using ``"async_query": true``
@@ -7145,30 +7422,36 @@ Getting Liquity balances
 
       {
           "result": {
-            "0x063c26fF1592688B73d8e2A18BA4C23654e2792E": {
-                "collateral": {
-                    "asset": "ETH"
-                    "amount": "5.3100000000000005",
-                    "usd_value": "16161.675300000001521815"
-                },
-                "debt": {
-                    "asset": "eip155:1/erc20:0x5f98805A4E8be255a32880FDeC7F6728C6568bA0"
-                    "amount": "6029.001719188487",
-                    "usd_value": "6089.29173638037187"
-                },
-                "collateralization_ratio": "268.0655281381374051287323733",
-                "liquidation_price": "1261.435199626818912670885158",
-                "active": true,
-                "trove_id": 148
-            }
+            "balances": {
+               "0x063c26fF1592688B73d8e2A18BA4C23654e2792E": {
+                  "collateral": {
+                     "asset": "ETH"
+                     "amount": "5.3100000000000005",
+                     "usd_value": "16161.675300000001521815"
+                  },
+                  "debt": {
+                     "asset": "eip155:1/erc20:0x5f98805A4E8be255a32880FDeC7F6728C6568bA0"
+                     "amount": "6029.001719188487",
+                     "usd_value": "6089.29173638037187"
+                  },
+                  "collateralization_ratio": "268.0655281381374051287323733",
+                  "liquidation_price": "1261.435199626818912670885158",
+                  "active": true,
+                  "trove_id": 148
+               }
+	    },
+            "total_collateral_ratio": "279754357977226400"
           },
           "message": ""
       }
 
    :resjson object result: A mapping of all accounts that currently have Liquity positions to ``trove`` information.
+   :resjson object balances:  A mapping of all accounts that currently have Liquity positions to ``trove`` information.
+   :resjson integer total_collateral_ratio: Information about the Total Collateral Ratio in the protocol. Can be null in case of an error.
 
    :statuscode 200: Liquity balances successfully queried.
-   :statuscode 409: User is not logged in or Liquity module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Liquity module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
@@ -7252,7 +7535,8 @@ Getting Liquity staked amount
    :resjson object optional[proxies]: A mapping of proxy addresses to the amount and value of assets staked in the protocol.
 
    :statuscode 200: Liquity staking information successfully queried.
-   :statuscode 409: User is not logged in or Liquity module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Liquity module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
@@ -7336,7 +7620,8 @@ Getting Liquity stability pool information
    :resjson object rewards: Information about the amount and usd value of the LQTY rewards gained.
 
    :statuscode 200: Liquity information successfully queried.
-   :statuscode 409: User is not logged in or Liquity module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Liquity module is not activated.
    :statuscode 500: Internal rotki error.
 
 
@@ -7497,7 +7782,8 @@ Getting Liquity staking information
 
    :statuscode 200: Liquity staking stats successfully queried.
    :statuscode 400: Requested module is not allowed to query statistics.
-   :statuscode 409: User is not logged in or Liquity module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Liquity module is not activated.
    :statuscode 500: Internal rotki error.
 
 
@@ -7574,7 +7860,8 @@ Getting Uniswap balances
    :resjson object user_balance: The liquidity token user balance and its USD value.
 
    :statuscode 200: Uniswap balances successfully queried.
-   :statuscode 409: User is not logged in. Or Uniswap module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Uniswap module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as etherscan or the graph node could not be reached or returned unexpected response.
 
@@ -7655,7 +7942,8 @@ Getting Uniswap V3 balances
    :resjson object user_balance: The liquidity token user balance and its USD value.
 
    :statuscode 200: Uniswap balances successfully queried.
-   :statuscode 409: User is not logged in. Or Uniswap module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Uniswap module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
@@ -7719,7 +8007,9 @@ Getting Uniswap/Sushiswap events
 
    :statuscode 200: Uniswap events successfully queried.
    :statuscode 400: Requested module is not allowed to query statistics.
-   :statuscode 409: User is not logged in. Or Uniswap module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 403: Logged in user does not have premium.
+   :statuscode 409: Uniswap module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as etherscan or the graph node could not be reached or returned unexpected response.
 
@@ -7805,159 +8095,11 @@ Getting yearn finance vaults balances
 
 
    :statuscode 200: Yearn vault balances successfully queried.
-   :statuscode 409: User is not logged in. Or yearn module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Yearn module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
-
-Getting yearn finance vaults historical data
-=============================================
-
-.. http:get:: /api/(version)/blockchains/eth/modules/yearn/vaults/history
-
-   .. note::
-      This endpoint is only available for premium users
-
-   .. note::
-      This endpoint can also be queried asynchronously by using ``"async_query": true``
-
-   .. note::
-      This endpoint also accepts parameters as query arguments.
-
-   Doing a GET on the yearn finance vaults history resource will return all yearn vault related events for addresses that have utilized yearn finance vaults.
-
-
-   **Example Request**:
-
-   .. http:example:: curl wget httpie python-requests
-
-      GET /api/1/blockchains/eth/modules/yearn/vaults/history HTTP/1.1
-      Host: localhost:5042
-
-   :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not
-   :reqjson bool reset_db_data: Boolean denoting whether all yearn event data saved in the DB are going to be deleted and rewritten after this query. False by default.
-   :reqjson int from_timestamp: Timestamp from which to query yearn vaults historical data. If not given 0 is implied.
-   :reqjson int to_timestamp: Timestamp until which to query yearn vaults historical data. If not given current timestamp is implied.
-
-   **Example Response**:
-
-   .. sourcecode:: http
-
-      HTTP/1.1 200 OK
-      Content-Type: application/json
-
-      {
-          "result": {
-              "0x1D7D7Eb7035B42F39f200AA3af8a65BC3475A237": {
-                  "YCRV Vault": {
-                      "events": [{
-                          "event_type": "deposit",
-                          "block_number": 1,
-                          "timestamp": 1,
-                          "from_asset": "eip155:1/erc20:0xdF5e0e81Dff6FAF3A7e52BA697820c5e32D806A8",
-                          "from_value": {
-                              "amount": "115000", "usd_value": "119523.23"
-                          },
-                          "to_asset": "eip155:1/erc20:0xdF5e0e81Dff6FAF3A7e52BA697820c5e32D806A8",
-                          "to_value": {
-                              "amount": "108230.234", "usd_value": "119523.23"
-                          },
-                          "realized_pnl": null,
-                          "tx_hash": "0x188aea85b54c5b2834b144e9f7628b524bf9faf3b87821aa520b7bcfb57ab289",
-                          "log_index": 1
-                      }, {
-                          "event_type": "withdraw",
-                          "block_number": 1,
-                          "timestamp": 1,
-                          "from_asset": "eip155:1/erc20:0xdF5e0e81Dff6FAF3A7e52BA697820c5e32D806A8",
-                          "from_value": {
-                              "amount": "108230.234", "usd_value": "125321.24"
-                          },
-                          "to_asset": "eip155:1/erc20:0xdF5e0e81Dff6FAF3A7e52BA697820c5e32D806A8",
-                          "to_value": {
-                              "amount": "117500.23", "usd_value": "123500.32"
-                          },
-                          "realized_pnl": {
-                              "amount": "2500.23", "usd_value": "2750.452"
-                          },
-                          "tx_hash": "0x188aea85b54c5b2834b144e9f7628b524bf9faf3b87821aa520b7bcfb57ab289",
-                          "log_index": 1
-                      }],
-                      "profit_loss": {
-                              "amount": "2500.23", "usd_value": "2750.452"
-                      }
-                  },
-                  "YYFI Vault": {
-                      "events": [{
-                          "event_type": "deposit",
-                          "block_number": 1,
-                          "timestamp": 1,
-                          "from_asset": "eip155:1/erc20:0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e",
-                          "from_value": {
-                              "amount": "5", "usd_value": "155300.23"
-                          },
-                          "to_asset": "yYFI",
-                          "to_value": {
-                              "amount": "4.97423", "usd_value": "154300.44"
-                          },
-                          "realized_pnl": null,
-                          "tx_hash": "0x188aea85b54c5b2834b144e9f7628b524bf9faf3b87821aa520b7bcfb57ab289",
-                          "log_index": 1
-                      }],
-                      "profit_loss": {
-                              "amount": "0.05", "usd_value": "1500"
-                      }
-              }
-          },
-          "0xA0B6B7fEa3a3ce3b9e6512c0c5A157a385e81056": {
-              "YSRENCURVE Vault": {
-                      "events": [{
-                          "event_type": "deposit",
-                          "block_number": 1,
-                          "timestamp": 1,
-                          "from_asset": "eip155:1/erc20:0x075b1bb99792c9E1041bA13afEf80C91a1e70fB3",
-                          "from_value": {
-                              "amount": "20", "usd_value": "205213.12"
-                          },
-                          "to_asset": "eip155:1/erc20:0x7Ff566E1d69DEfF32a7b244aE7276b9f90e9D0f6",
-                          "to_value": {
-                              "amount": "19.8523", "usd_value": "2049874.23"
-                          },
-                          "realized_pnl": null,
-                          "tx_hash": "0x188aea85b54c5b2834b144e9f7628b524bf9faf3b87821aa520b7bcfb57ab289",
-                          "log_index": 1
-                      }],
-                      "profit_loss": {
-                              "amount": "0.1", "usd_value": "1984.23"
-                      }
-              }
-          }},
-          "message": ""
-      }
-
-   :resjson object result: A mapping of addresses to vault history results
-   :resjsonarr string event_type: The type of the yearn vault event.
-       - ``"deposit"``: when you deposit a token in the vault
-       - ``"withdraw"``: when you withdraw a token from the vault
-   :resjsonarr int timestamp: The unix timestamp at which the event occurred.
-   :resjsonarr int block_number: The block number at which the event occurred.
-   :resjsonarr string from_asset: The source asset involved in the event.
-       - For ``"deposit"`` events this is the asset being deposited in the vault
-       - For ``"withdraw"`` events this is the vault token that is being burned and converted to the original asset.
-   :resjsonarr object from_value: The value of the from asset for the event. The rate should be the asset/USD rate at the event's timestamp. But in reality due to current limitations of our implementation is the USD value at the current timestamp. We will address this soon.
-   :resjsonarr string to_asset: The target asset involved in the event.
-       - For ``"deposit"`` events this is the vault token that is minted to represent the equivalent of the deposited asset.
-       - For ``"withdraw"`` events this is the original token that the user withdrew from the vault
-   :resjsonarr object to_value: The value of the to asset for the event. The rate should be the asset/USD rate at the event's timestamp. But in reality due to current limitations of our implementation is the USD value at the current timestamp. We will address this soon.
-   :resjsonarr object realized_pnl: [Optional]. Realized profit/loss at this event if any. May happen for withdraw events. Same limitation as the usd value in from/to value applies.
-   :resjsonarr int tx_hash: The transaction hash of the event.
-   :resjsonarr int log_index: The log index of the event.
-   :resjson object profit_loss: The total profit/loss for the vault
-
-   :statuscode 200: Yearn vaults history successfully queried.
-   :statuscode 409: User is not logged in. Or yearn module is not activated.
-   :statuscode 500: Internal rotki error.
-   :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
 Getting yearn finance V2 vaults balances
 ==========================================
@@ -8032,150 +8174,8 @@ Getting yearn finance V2 vaults balances
 
 
    :statuscode 200: Yearn vault V2 balances successfully queried.
-   :statuscode 409: User is not logged in. Or yearn module is not activated.
-   :statuscode 500: Internal Rotki error.
-   :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
-
-
-Getting yearn finance V2 vaults historical data
-================================================
-
-.. http:get:: /api/(version)/blockchains/eth/modules/yearn/vaultsv2/history
-
-   .. note::
-      This endpoint is only available for premium users
-
-   .. note::
-      This endpoint can also be queried asynchronously by using ``"async_query": true``
-
-   .. note::
-      This endpoint also accepts parameters as query arguments.
-
-   Doing a GET on the yearn finance vaults V2 history resource will return all yearn vault related events for addresses that have utilized yearn finance vaults.
-
-
-   **Example Request**:
-
-   .. http:example:: curl wget httpie python-requests
-
-      GET /api/1/blockchains/eth/modules/yearn/vaultsv2/history HTTP/1.1
-      Host: localhost:5042
-
-   :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not
-   :reqjson bool reset_db_data: Boolean denoting whether all yearn event data saved in the DB are going to be deleted and rewritten after this query. False by default.
-   :reqjson int from_timestamp: Timestamp from which to query yearn vaults historical data. If not given 0 is implied.
-   :reqjson int to_timestamp: Timestamp until which to query yearn vaults historical data. If not given current timestamp is implied.
-
-   **Example Response**:
-
-   .. sourcecode:: http
-
-      HTTP/1.1 200 OK
-      Content-Type: application/json
-
-      {
-        "result":{
-            "0x915C4580dFFD112db25a6cf06c76cDd9009637b7":{
-              "eip155:1/erc20:0xF29AE508698bDeF169B89834F76704C3B205aedf":{
-                  "events":[
-                    {
-                        "event_type":"deposit",
-                        "block_number":12588754,
-                        "timestamp":1623087604,
-                        "from_asset":"eip155:1/erc20:0xC011a73ee8576Fb46F5E1c5751cA3B9Fe0af2a6F",
-                        "from_value":{
-                          "amount":"273.682277822922514201",
-                          "usd_value":"273.682277822922514201"
-                        },
-                        "to_asset":"eip155:1/erc20:0xF29AE508698bDeF169B89834F76704C3B205aedf",
-                        "to_value":{
-                          "amount":"269.581682615706959373",
-                          "usd_value":"269.581682615706959373"
-                        },
-                        "realized_pnl":null,
-                        "tx_hash":"0x01ed01b47b8c7bdab961dd017e8412d1e9d181163e72cbfbce931395004bda4b",
-                        "log_index":149
-                    }
-                  ],
-                  "profit_loss":{
-                    "amount":"-273.682277822922514201",
-                    "usd_value":"-273.682277822922514201"
-                  }
-              },
-              "eip155:1/erc20:0x1C6a9783F812b3Af3aBbf7de64c3cD7CC7D1af44":{
-                  "events":[
-                    {
-                        "event_type":"deposit",
-                        "block_number":12462638,
-                        "timestamp":1621397797,
-                        "from_asset":"eip155:1/erc20:0x94e131324b6054c0D789b190b2dAC504e4361b53",
-                        "from_value":{
-                          "amount":"32064.715735449204040742",
-                          "usd_value":"32064.715735449204040742"
-                        },
-                        "to_asset":"eip155:1/erc20:0x1C6a9783F812b3Af3aBbf7de64c3cD7CC7D1af44",
-                        "to_value":{
-                          "amount":"32064.715735449204040742",
-                          "usd_value":"32064.715735449204040742"
-                        },
-                        "realized_pnl":null,
-                        "tx_hash":"0x0a53f8817f44ac0f8b516b7fa7ecba2861c001f506dbc465fe289a7110fcc1ca",
-                        "log_index":16
-                    },
-                    {
-                        "event_type":"withdraw",
-                        "block_number":12494161,
-                        "timestamp":1621820621,
-                        "from_asset":"eip155:1/erc20:0x1C6a9783F812b3Af3aBbf7de64c3cD7CC7D1af44",
-                        "from_value":{
-                          "amount":"32064.715735449204040742",
-                          "usd_value":"32064.715735449204040742"
-                        },
-                        "to_asset":"eip155:1/erc20:0x94e131324b6054c0D789b190b2dAC504e4361b53",
-                        "to_value":{
-                          "amount":"32092.30659836985292638",
-                          "usd_value":"32092.30659836985292638"
-                        },
-                        "realized_pnl":{
-                          "amount":"27.590862920648885638",
-                          "usd_value":"27.590862920648885638"
-                        },
-                        "tx_hash":"0xda0694c6b3582fe03b2eb9edb0169d23c8413157e233d0c8f678a7cc9ab4f918",
-                        "log_index":134
-                    }
-                  ],
-                  "profit_loss":{
-                    "amount":"27.590862920648885638",
-                    "usd_value":"27.590862920648885638"
-                  }
-                }
-          }
-        },
-        "message":""
-      }
-
-
-   :resjson object result: A mapping of addresses to vault history results
-   :resjsonarr string event_type: The type of the yearn vault event.
-       - ``"deposit"``: when you deposit a token in the vault
-       - ``"withdraw"``: when you withdraw a token from the vault
-   :resjsonarr int timestamp: The unix timestamp at which the event occurred.
-   :resjsonarr int block_number: The block number at which the event occurred.
-   :resjsonarr string from_asset: The source asset involved in the event.
-       - For ``"deposit"`` events this is the asset being deposited in the vault
-       - For ``"withdraw"`` events this is the vault token that is being burned and converted to the original asset.
-   :resjsonarr object from_value: The value of the from asset for the event. The rate should be the asset/USD rate at the events's timestamp. But in reality due to current limitations of our implementation is the USD value at the current timestamp. We will address this soon.
-   :resjsonarr string to_asset: The target asset involved in the event.
-       - For ``"deposit"`` events this is the vault token that is minted to represent the equivalent of the deposited asset.
-       - For ``"withdraw"`` events this is the original token that the user withdrew from the vault
-   :resjsonarr object to_value: The value of the to asset for the event. The rate should be the asset/USD rate at the events's timestamp. But in reality due to current limitations of our implementation is the USD value at the current timestamp. We will address this soon.
-   :resjsonarr object realized_pnl: [Optional]. Realized profit/loss at this event if any. May happen for withdraw events. Same limitation as the usd value in from/to value applies.
-   :resjsonarr int tx_hash: The transaction hash of the event.
-   :resjsonarr int log_index: The log index of the event.
-   :resjson object profit_loss: The total profit/loss for the vault
-
-   :statuscode 200: Yearn vaults V2 history successfully queried.
-   :statuscode 409: User is not logged in. Or yearn module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Yearn module is not activated.
    :statuscode 500: Internal Rotki error.
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
@@ -8225,17 +8225,19 @@ Getting Loopring balances
    :resjson object result: A mapping between accounts and their balances
 
    :statuscode 200: Loopring balances successfully queried.
-   :statuscode 409: User is not logged in. Or loopring module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Loopring module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as loopring returned an unexpected result.
 
 
-Getting Eth2 Staking details
-==============================
+Getting eth2 staking performance
+=======================================
 
-.. http:PUT:: /api/(version)/blockchains/eth2/stake/details
 
-   Doing a PUT on the ETH2 stake details endpoint will return detailed information about your ETH2 staking activity and information about the earned ETH as part of withdrawals, mev rewards and new blocks.
+.. http:put:: /api/(version)/blockchains/eth2/stake/performance
+
+   Doing a PUT on the ETH2 stake performance endpoint will return the performance for all validators (or the filtered ones) in a paginated manner.
 
    .. note::
       This endpoint is only available for premium users
@@ -8243,21 +8245,25 @@ Getting Eth2 Staking details
    .. note::
       This endpoint can also be queried asynchronously by using ``"async_query": true``
 
-
    **Example Request**:
 
    .. http:example:: curl wget httpie python-requests
 
-      PUT /api/1/blockchains/eth2/stake/details HTTP/1.1
+      PUT /api/1/blockchains/eth2/stake/performance HTTP/1.1
       Host: localhost:5042
+      Content-Type: application/json;charset=UTF-8
 
-      {'validator_indices': [1111]}
+      {"from_timestamp": 1451606400, "to_timestamp": 1571663098, "validator_indices": [0, 15, 23542], "only_cache": false, "status": "all", "limit": 10, "offset": 10}
 
-      :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not.
-      :reqjson bool ignore_cache: If true then cached information from beaconchain is ignored and queried again.
-      :reqjson list[string] addresses: A list of location labels to optionally filter by. Is an EVM address and is used to filter the validator details.
-      :reqjson list[int] validator_indices: An optional list of validator indices to filter by.
-
+   :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not
+   :reqjson bool only_cache: If false then we skip any cached values
+   :reqjson int limit: Optional. This signifies the limit of records to return as per the `sql spec <https://www.sqlite.org/lang_select.html#limitoffset>`__.
+   :reqjson int offset: This signifies the offset from which to start the return of records per the `sql spec <https://www.sqlite.org/lang_select.html#limitoffset>`__.
+   :reqjson int[optional] from_timestamp: The timestamp from which to query. Can be missing in which case we query from 0.
+   :reqjson int[optional] to_timestamp: The timestamp until which to query. Can be missing in which case we query until now.
+   :reqjson list[optional] validator_indices: The indices of the validators to filter for
+   :reqjson list[optional] addresses: The associated addresses for which to filter the results. These will associate with a validator if the address is a depositor, a withdrawal address or a fee recipient.
+   :reqjson string[optional] status: The status by which to filter. By default and if missing it's ``"all"`` validators. Can also fiter by ``"active"`` or ``"exited"``.
 
    **Example Response**:
 
@@ -8267,107 +8273,52 @@ Getting Eth2 Staking details
       Content-Type: application/json
 
       {
-        "result": [{
-              "eth1_depositor": "0xfeF0E7635281eF8E3B705e9C5B86e1d3B0eAb397",
-              "index": 9,
-	      "has_exited": true,
-              "public_key": "0xb016e31f633a21fbe42a015152399361184f1e2c0803d89823c224994af74a561c4ad8cfc94b18781d589d03e952cd5b",
-              "balance": {"amount": "0", "usd_value": "0"},
-              "performance_1d": {"amount": "0.1", "usd_value": "100"},
-              "performance_1w": {"amount": "0.7", "usd_value": "700"},
-              "performance_1m": {"amount": "3", "usd_value": "3000"},
-              "performance_1y": {"amount": "36.5", "usd_value": "36500"},
-              "performance_total": {"amount": "42.5", "usd_value": "43500"}
-          }, {
-              "eth1_depositor": "0xfeF0E7635281eF8E3B705e9C5B86e1d3B0eAb397",
-              "index": 10,
-	      "has_exited": false,
-              "public_key": "0xa256e41f633a21fbe42a015152399361184f1e2c0803d89823c224994af74a561c4ad8cfc94b18781d589d03e952cf14",
-              "balance": {"amount": "32.101", "usd_value": "11399"},
-              "performance_1d": {"amount": "0.1", "usd_value": "100"},
-              "performance_1w": {"amount": "0.7", "usd_value": "700"},
-              "performance_1m": {"amount": "3", "usd_value": "3000"},
-              "performance_1y": {"amount": "36.5", "usd_value": "36500"},
-              "performance_total": {"amount": "42.5", "usd_value": "43500"}
-          }, {
-              "eth1_depositor": null,
-              "index": 155,
-	      "has_exited": false,
-              "public_key": "0xa8ff5fc88412d080a297683c25a791ef77eb52d75b265fabab1f2c2591bb927c35818ac6289bc6680ab252787d0ebab3",
-              "balance": {"amount": "32", "usd_value": "19000"},
-              "performance_1d": {"amount": "0", "usd_value": "0"},
-              "performance_1w": {"amount": "0", "usd_value": "0"},
-              "performance_1m": {"amount": "0", "usd_value": "0"},
-              "performance_1y": {"amount": "0", "usd_value": "0"},
-              "performance_total": {"amount": "42.5", "usd_value": "43500"}
-        }],
-        "message": "",
+          "result": {
+              "sums": {
+                  "apr": "0.0597652039949379861158979362586657031468575710584143257025001370766265371913491",
+                  "execution": "0.951964836013963505",
+                  "exits": "0.0014143880000005993",
+                  "outstanding_consensus_pnl": "0.000829238",
+                  "sum": "3.2351487110139639043",
+                  "withdrawals": "2.2809402489999998"
+              },
+              "validators": {
+                  "432840": {
+                      "apr": "0.0466762036714707128052091929912369373004480648295118244406922158753010413605874",
+                      "execution": "0.93361811418473",
+                      "exits": "0.0014143880000005993",
+                      "sum": "2.5266283731847305993",
+                      "withdrawals": "1.591595871"
+                  },
+                  "624729": {
+                      "apr": "0.0130890003234672733106887432674287658464095062289025012618079212013254958307617",
+                      "execution": "0.018346721829233505",
+                      "outstanding_consensus_pnl": "0.000829238",
+                      "sum": "0.708520337829233305",
+                      "withdrawals": "0.6893443779999998"
+                  }
+              },
+              "entries_found": 2,
+              "entries_total": 402
+          },
+          "message": ""
       }
 
-   :resjson details list: The result of the Eth2 staking details for all of the user's accounts. It's a list of details per validator. Important thing to note here is that if all performance entries are 0 then this means that the validator is not active yet and is still waiting in the deposit queue.
+   :resjson object sums: Sums of all the pages of the results
+   :resjson object validator: Mapping of validator index to performance for the current page
+   :resjson string apr: The APR of returns for the given timerange for the validator.
+   :resjson string execution: The sum of execution layer ETH PnL for the validator.
+   :resjson string withdrawals: The sum of consensus layer withdrawals ETH pnl for the validator
+   :resjson string exits: The sum of the exit ETH PnL for the validator
+   :resjson string outstanding_consensus_pnl: If a recent timerange is queried we also take into account not yet withdrawn ETH gathering in the consensus layer.
+   :resjson int entries_found: The validators found for the current filter
+   :resjson int entries_total: The total number of validators found
 
-   :resjson eth_depositor [optional]string: The eth1 address that made the deposit for the validator. Can be missing if we can't find it yet.
-   :resjson index int: The Eth2 validator index.
-   :resjson has_exited bool: A boolean indicating if the validator has exited.
-   :resjson public_key str: The Eth2 validator public key.
-   :resjson balance object: The balance in ETH of the validator and its usd value
-   :resjson performance_1d object: How much has the validator earned in ETH (and USD equivalent value) in the past day.
-   :resjson performance_1w object: How much has the validator earned in ETH (and USD equivalent value) in the past week.
-   :resjson performance_1m object: How much has the validator earned in ETH (and USD equivalent value) in the past month.
-   :resjson performance_1y object: How much has the validator earned in ETH (and USD equivalent value) in the past year.
-   :resjson performance_total object: How much has the validator earned in ETH (and USD equivalent value) since it was activated.
-
-   :statuscode 200: Eth2 staking details successfully queried
-   :statuscode 409: User is not logged in. Or eth2 module is not activated.
+   :statuscode 200: Eth2 validator performance successfully returned.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: eth2 module is not activated.
    :statuscode 500: Internal rotki error.
-   :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
-
-
-.. http:POST:: /api/(version)/blockchains/eth2/stake/details
-
-   Doing a POST on the ETH2 stake details endpoint will query the database for information about earned ETH as part of withdrawals, mev rewards and new blocks.
-
-   .. note::
-      This endpoint is only available for premium users
-
-
-   **Example Request**:
-
-   .. http:example:: curl wget httpie python-requests
-
-      POST /api/1/blockchains/eth2/stake/details HTTP/1.1
-      Host: localhost:5042
-
-      {'validator_indices': [1111]}
-
-      :reqjson int from_timestamp: The timestamp from which to start querying. Default is 0.
-      :reqjson int to_timestamp: The timestamp until which to query. Default is now.
-      :reqjson list[string] addresses: A list of location labels to optionally filter by. Is a list of EVM addresses and is used to filter the rewards.
-      :reqjson list[int] validator_indices: An optional list of validator indices to filter by.
-
-
-   **Example Response**:
-
-   .. sourcecode:: http
-
-      HTTP/1.1 200 OK
-      Content-Type: application/json
-
-      {
-        "result": {
-          "withdrawn_consensus_layer_rewards": "4.2",
-          "execution_layer_rewards": "3.7",
-        },
-        "message": "",
-      }
-
-   :resjson withdrawn_consensus_layer_rewards string: Amount of ETH collected as withdrawals from the beacon chain for the given filter.
-   :resjson execution_layer_rewards string: Amount of ETH earned as part of MEV rewards and new blocks created for the given filter.
-
-   :statuscode 200: Stats correctly queried.
-   :statuscode 409: User is not logged in. Or eth2 module is not activated.
-   :statuscode 500: Internal rotki error.
-
+   :statuscode 502: Error connecting to a remote to query data.
 
 Getting Eth2 Staking daily stats
 =====================================
@@ -8390,7 +8341,7 @@ Getting Eth2 Staking daily stats
       Host: localhost:5042
       Content-Type: application/json;charset=UTF-8
 
-      {"from_timestamp": 1451606400, "to_timestamp": 1571663098, "validators": [0, 15, 23542], "only_cache": false}
+      {"from_timestamp": 1451606400, "to_timestamp": 1571663098, "validator_indices": [0, 15, 23542], "addresses": ["0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12"],  "status": "all", "only_cache": false}
 
    :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not
    :reqjson bool only_cache: If true then only the daily stats in the DB are queried.
@@ -8400,7 +8351,9 @@ Getting Eth2 Staking daily stats
    :reqjson list[bool] ascending: Optional. False by default. Defines the order by which results are returned depending on the chosen order by attribute.
    :reqjson int from_timestamp: The timestamp from which to query. Can be missing in which case we query from 0.
    :reqjson int to_timestamp: The timestamp until which to query. Can be missing in which case we query until now.
-   :reqjson list(string) validators: Optionally filter entries validator indices. If missing data for all validators are returned.
+   :reqjson list(string)[optional] validator_indices: Optionally filter entries validator indices. If missing data for all validators are returned.
+   :reqjson list(string)[optional] addresses: The associated addresses for which to filter the results. These will associate with a validator if the address is a depositor, a withdrawal address or a fee recipient.
+   :reqjson string[optional] status: The status by which to filter. By default and if missing it's ``"all"`` validators. Can also fiter by ``"active"`` or ``"exited"``.
 
    **Example Response**:
 
@@ -8437,7 +8390,9 @@ Getting Eth2 Staking daily stats
    :resjson int entries_total: The number of total entries ignoring all filters.
 
    :statuscode 200: Eth2 staking details successfully queried
-   :statuscode 409: User is not logged in. Or eth2 module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 403: Logged in user does not have premium.
+   :statuscode 409: eth2 module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
@@ -8460,8 +8415,8 @@ Adding an Eth2 validator
       PUT /api/1/blockchains/eth2/validators HTTP/1.1
       Host: localhost:5042
 
-   :reqjson validator_index int: An optional integer representing the validator index of the validator to track. If this is not given then the pulic key of the validator has to be given!
-   :reqjson public_key str: An optional string representing the hexadecimal string of the public key of the validator to track. If this is not given the the validator index has to be given!
+   :reqjson validator_index int: An optional integer representing the validator index of the validator to track. If this is not given then the public key of the validator has to be given!
+   :reqjson public_key str: An optional string representing the hexadecimal string of the public key of the validator to track. If this is not given the validator index has to be given!
    :resjson ownership_percentage: An optional string representing the amount of the validator owned by the user in the range of 0 to 100. If not provided a default value of 100 is assigned.
    :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not
 
@@ -8479,7 +8434,8 @@ Adding an Eth2 validator
 
    :statuscode 200: Eth2 validator successfully added.
    :statuscode 401: Can't add the validator since user is not premium and would go over the limit.
-   :statuscode 409: User is not logged in. Or eth2 module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: eth2 module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as beaconcha.in could not be reached or returned unexpected response.
 
@@ -8519,7 +8475,8 @@ Deleting Eth2 validators
       }
 
    :statuscode 200: Eth2 validator/s successfully delete.
-   :statuscode 409: User is not logged in. Or eth2 module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: eth2 module is not activated.
    :statuscode 500: Internal rotki error.
 
 
@@ -8554,7 +8511,8 @@ Editing an Eth2 validator
       }
 
    :statuscode 200: Eth2 validator successfully edited.
-   :statuscode 409: User is not logged in, eth2 module is not activated or validator doesn't exist.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: eth2 module is not activated or validator doesn't exist.
    :statuscode 500: Internal rotki error.
 
 
@@ -8563,7 +8521,10 @@ Getting tracked Eth2 validators
 
 .. http:get:: /api/(version)/blockchains/eth2/validators
 
-   Doing a GET on the ETH2 validators endpoint will get information on the tracked ETH2 validators. If the user is not premium they will see up to a certain limit of validators.
+   Doing a GET on the ETH2 validators endpoint will get information on the tracked ETH2 validators. If the user is not premium they will see up to a certain limit of validators. If ignore cache is false, only DB data is return. If it's true then all validator data will be refreshed and new validators will be detected.
+
+   .. note::
+      This endpoint can also be queried asynchronously by using ``"async_query": true``
 
 
    **Example Request**:
@@ -8572,6 +8533,15 @@ Getting tracked Eth2 validators
 
       GET /api/1/blockchains/eth2/validators HTTP/1.1
       Host: localhost:5042
+      Content-Type: application/json;charset=UTF-8
+
+      {"ignore_cache": true, "async_query": true}
+
+   :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not
+   :reqjson bool ignore_cache: Boolean denoting whether to ignore the DB cache and refresh all validator data.
+   :reqjson list(string)[optional] validator_indices: Optionally filter entries validator indices. If missing data for all validators are returned.
+   :reqjson list(string)[optional] addresses: The associated addresses for which to filter the results. These will associate with a validator if the address is a depositor, a withdrawal address or a fee recipient.
+   :reqjson string[optional] status: The status by which to filter. By default and if missing it's ``"all"`` validators. Can also fiter by ``"active"`` or ``"exited"``.
 
 
    **Example Response**:
@@ -8587,17 +8557,23 @@ Getting tracked Eth2 validators
             {
               "index":1,
               "public_key":"0xa1d1ad0714035353258038e964ae9675dc0252ee22cea896825c01458e1807bfad2f9969338798548d9858a571f7425c",
-              "ownership_percentage": "100"
-            },
-            {
+	      "withdrawal_address": "0x23a3283f9f538a54d49139cd35c2fe0443cad3db",
+	      "status": "pending",
+            }, {
               "index":1532,
               "public_key":"0xa509dec619e5b3484bf4bc1c33baa4c2cdd5ac791876f4add6117f7eded966198ab77862ec2913bb226bdf855cc6d6ed",
-              "ownership_percentage": "50"
-            },
-            {
+              "ownership_percentage": "50",
+	      "activation_timestamp": 1701971000,
+	      "status": "active"
+            }, {
               "index":5421,
               "public_key":"0xa64722f93f37c7da8da67ee36fd2a763103897efc274e3accb4cd172382f7a170f064b81552ae77cdbe440208a1b897e",
-              "ownership_percentage": "25.75"
+              "ownership_percentage": "25.75",
+	      "withdrawal_address": "0xfa13283f9e538a84d49139cd35c2fe0443caa34f",
+	      "activation_timestamp": 1701972000,
+	      "withdrawable_timestamp": 1702572000,
+	      "exited_timestamp": 1702584000,
+	      "status": "exited"
             }
           ],
           "entries_found":3,
@@ -8609,11 +8585,18 @@ Getting tracked Eth2 validators
    :resjson object entries: The resulting entries list
    :resjson integer index: The index of the validator
    :resjson string public_key: The public key of the validator
-   :resjson string ownership_percentage: The ownership percentage of the validator
+   :resjson string status: The status of the validator. Can be one of ``"pending"``, ``"active"``, ``"exiting"`` and ``"exited"``.
+   :resjson string[optional] ownership_percentage: The ownership percentage of the validator. If missing assume 100%.
+   :resjson string[optional] withdrawal_address: The withdrawal address for the validator if set.
+   :resjson integer[optional] activation_timestamp: If existing this is the timestamp the validator will (or has been) activate/d. If not then this is a pending validator not yet fully deposited or not yet processed by the consensus layer.
+   :resjson integer[optional] withdrawable_timestamp: If existing this is the timestamp the validator will (or has been) able to be completely withdrawn. In other words from which point on a full exit will happen next time it's skimmed by withdrawals. If this key exists this mean we are dealing with a validator that is exiting or has exited.
+   :resjson integer[optional] exited_timestamp: If existing this is the timestamp the validator has exited the beaconchain.
 
    :statuscode 200: Eth2 validator defaults successfully returned.
-   :statuscode 409: User is not logged in. Or eth2 module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: eth2 module is not activated.
    :statuscode 500: Internal rotki error.
+   :statuscode 502: Error contacting to a remote to query data.
 
 
 Getting Pickle's DILL balances
@@ -8667,7 +8650,8 @@ Getting Pickle's DILL balances
    :resjson object result: A mapping of all accounts that currently have Pickle locked to keys ``locked_amount``,  ``pending_rewards`` and ``locked_until``
 
    :statuscode 200: Pickle balances successfully queried.
-   :statuscode 409: User is not logged in or Pickle module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Pickle module is not activated.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
@@ -8700,7 +8684,9 @@ Querying ethereum airdrops
                      "amount": "675.55",
                      "asset": "eip155:1/erc20:0x111111111117dC0aa78b770fA6A738034120C302",
                      "link": "https://app.uniswap.org/",
-                     "claimed": false
+                     "claimed": false,
+                     "cutoff_time": 1719697503,
+                     "has_decoder": true
                   }
             },
             "0x0B89f648eEcCc574a9B7449B5242103789CCD9D7": {
@@ -8708,13 +8694,16 @@ Querying ethereum airdrops
                      "amount": "1823.23",
                      "asset": "eip155:1/erc20:0x111111111117dC0aa78b770fA6A738034120C302",
                      "link": "https://1inch.exchange/",
-                     "claimed": false
+                     "claimed": false,
+                     "has_decoder": false
                   },
                   "uniswap": {
                      "amount": "400",
                      "asset": "eip155:1/erc20:0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
                      "link": "https://app.uniswap.org/",
-                     "claimed": true
+                     "claimed": true,
+                     "icon_url": "https://raw.githubusercontent.com/rotki/data/main/airdrops/icons/uniswap.svg",
+                     "has_decoder": true
                   }
             },
             "message": ""
@@ -8725,7 +8714,7 @@ Querying ethereum airdrops
    :reqjson object result: A mapping of addresses to protocols for which claimable airdrops exist
 
    :statuscode 200: Tags successfully queried.
-   :statuscode 409: User is not logged in.
+   :statuscode 401: User is not logged in.
    :statuscode 500: Internal rotki error
    :statuscode 502: Could not query an airdrop file
    :statuscode 507: Failed to store CSV files for airdrops.
@@ -8762,7 +8751,7 @@ Get addresses to query per protocol
 
    :resjson list result: A mapping of modules/protocols for which an entry exists to the list of addresses to query.
    :statuscode 200: The addresses have been queried successfully
-   :statuscode 409: No user is logged in.
+   :statuscode 401: No user is logged in.
    :statuscode 500: Internal rotki error
 
 
@@ -8805,7 +8794,8 @@ Add address to query per protocol
    :resjson list result: A mapping of modules/protocols for which an entry exists to the list of addresses to query.
    :statuscode 200: The address has been added successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is logged in. The address already exists in the addresses to query for that protocol.
+   :statuscode 401: No user is logged in.
+   :statuscode 409: The address already exists in the addresses to query for that protocol.
    :statuscode 500: Internal rotki error
 
 Remove an address to query per protocol
@@ -8847,7 +8837,8 @@ Remove an address to query per protocol
    :resjson list result: A mapping of modules/protocols for which an entry exists to the list of addresses to query.
    :statuscode 200: The address has been removed successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is logged in. The address is not in the addresses to query for that protocol.
+   :statuscode 401: No user is logged in.
+   :statuscode 409: The address is not in the addresses to query for that protocol.
    :statuscode 500: Internal rotki error
 
 
@@ -8870,11 +8861,17 @@ Adding EVM accounts to all EVM chains
 
       {
           "accounts": [{
-                  "address": "0x78b0AD50E768D2376C6BA7de33F426ecE4e03e0B",
+                  "address": "0x9008D19f58AAbD9eD0D60971565AA8510560ab41",
                   "label": "my new metamask",
                   "tags": ["public", "metamask"]
               }, {
-                  "address": "0x19b0AD50E768D2376C6BA7de32F426ecE4e03e0b"
+                  "address": "0x9531C059098e3d194fF87FebB587aB07B30B1306"
+              }, {
+                  "address": "0x106B62Fdd27B748CF2Da3BacAB91a2CaBaeE6dCa"
+              }, {
+                  "address": "0xc37b40ABdB939635068d3c5f13E7faF686F03B65"
+              }, {
+                  "address": "0x7277F7849966426d345D8F6B9AFD1d3d89183083"
               }]
       }
 
@@ -8889,20 +8886,49 @@ Adding EVM accounts to all EVM chains
 
       {
         "result": {
-            "eth": [
-                "0x78b0AD50E768D2376C6BA7de33F426ecE4e03e0B",
-                "0x19b0AD50E768D2376C6BA7de32F426ecE4e03e0b"
-            ],
-            "avax": ["0x78b0AD50E768D2376C6BA7de33F426ecE4e03e0B"],
-            "optimism": ["0x78b0AD50E768D2376C6BA7de33F426ecE4e03e0B"]
+            "added":{
+               "0x9531C059098e3d194fF87FebB587aB07B30B1306": ["all"],
+               "0x9008D19f58AAbD9eD0D60971565AA8510560ab41": ["eth"]
+            },
+            "failed":{
+               "0xc37b40ABdB939635068d3c5f13E7faF686F03B65": [
+                  "polygon_pos",
+                  "arbitrum_one",
+                  "base",
+                  "gnosis"
+               ]
+            },
+            "existed":{
+               "0x7277F7849966426d345D8F6B9AFD1d3d89183083": ["gnosis"]
+            },
+            "no_activity":{
+               "0x106B62Fdd27B748CF2Da3BacAB91a2CaBaeE6dCa": ["all"],
+               "0x7277F7849966426d345D8F6B9AFD1d3d89183083": [
+                  "eth",
+                  "optimism",
+                  "avax",
+                  "polygon_pos",
+                  "arbitrum_one",
+                  "base"
+               ]
+            },
+            "eth_contracts": ["0x9008D19f58AAbD9eD0D60971565AA8510560ab41"]
         },
         "message": ""
       }
 
-   :resjson list result: A mapping containing the evm chain keys and which addresses were added for each chain.
+   .. note::
+     When a result includes all the chains instead of listing them all we use the special symbol ``all``
+
+   :resjson object added: A mapping containing addresses and what chains they were added to.
+   :resjson object existed: A mapping containing addresses and in what chains they were already tracked before the api call so no action was taken on them.
+   :resjson object failed: A mapping containing which chains failed to get added for each address due to some error contacting remote APIs.
+   :resjson object no_activity: A mapping containing addresses and in which chains they had no activity so no action was taken for them.
+   :resjson list no_activity: A list of the addresses that were detected as ethereum contracts.
    :statuscode 200: Accounts successfully added
    :statuscode 400: Provided JSON or data is in some way malformed. The accounts to add contained invalid addresses or were an empty list.
-   :statuscode 409: User is not logged in. Provided tags do not exist. Check message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Provided tags do not exist. Check message for details.
    :statuscode 500: Internal rotki error
    :statuscode 502: Remote error occurred when attempted to connect to an Avalanche or Polkadot node and only if it's the first account added. Check message for details.
 
@@ -8938,7 +8964,8 @@ Adding EVM accounts to all EVM chains
    :resjson bool result: true in case of success, null otherwise.
    :statuscode 200: Accounts successfully added
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: User is not logged in. Node that was queried is not synchronized.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Node that was queried is not synchronized.
    :statuscode 500: Internal rotki error
    :statuscode 502: Remote error occurred.
 
@@ -9001,7 +9028,8 @@ Adding blockchain accounts
    :resjson list result: A list containing accounts' addresses that were added during a request.
    :statuscode 200: Accounts successfully added
    :statuscode 400: Provided JSON or data is in some way malformed. The accounts to add contained invalid addresses or were an empty list.
-   :statuscode 409: User is not logged in. Provided tags do not exist. Check message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Provided tags do not exist. Check message for details.
    :statuscode 500: Internal rotki error
    :statuscode 502: Remote error occurred when attempted to connect to an Avalanche or Polkadot node and only if it's the first account added. Check message for details.
 
@@ -9057,7 +9085,8 @@ Adding BTC/BCH xpubs
 
    :statuscode 200: Xpub successfully added
    :statuscode 400: Provided JSON or data is in some way malformed. The accounts to add contained invalid addresses or were an empty list.
-   :statuscode 409: User is not logged in. Some error occurred when re-querying the balances after addition. Provided tags do not exist. Check message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some error occurred when re-querying the balances after addition. Provided tags do not exist. Check message for details.
    :statuscode 500: Internal rotki error
    :statuscode 502: Error occurred with some external service query such as blockstream or haskoin. Check message for details.
 
@@ -9152,7 +9181,8 @@ Editing BTC/BCH xpubs
    :resjson object result: An object containing the ``"per_account"`` and ``"totals"`` keys as also defined `here <blockchain_balances_result_>`_.
    :statuscode 200: Xpub successfully edited
    :statuscode 400: Provided JSON or data is in some way malformed. The accounts to add contained invalid addresses or were an empty list.
-   :statuscode 409: User is not logged in. Some error occurred when re-querying the balances after addition. Provided tags do not exist. Check message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some error occurred when re-querying the balances after addition. Provided tags do not exist. Check message for details.
    :statuscode 500: Internal rotki error
 
 Deleting BTC/BCH xpubs
@@ -9239,7 +9269,8 @@ Deleting BTC/BCH xpubs
    :resjson object result: An object containing the ``"per_account"`` and ``"totals"`` keys as also defined `here <blockchain_balances_result_>`_.
    :statuscode 200: Xpub successfully removed
    :statuscode 400: Provided JSON or data is in some way malformed. The accounts to add contained invalid addresses or were an empty list.
-   :statuscode 409: User is not logged in. Some error occurred when re-querying the balances after addition. Check message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some error occurred when re-querying the balances after addition. Check message for details.
    :statuscode 500: Internal rotki error
    :statuscode 502: Error occurred with some external service query such as blockstream/haskoin. Check message for details.
 
@@ -9254,7 +9285,7 @@ Editing blockchain account data
 
       Supported blockchains with ENS domains: ``"BTC", "BCH", "ETH", "KSM", "DOT"``
 
-   Doing a PATCH on the the blockchains endpoint with a specific blockchain URL and a list of accounts to edit will edit the label and tags for those accounts.
+   Doing a PATCH on the blockchains endpoint with a specific blockchain URL and a list of accounts to edit will edit the label and tags for those accounts.
 
 
    **Example Request**:
@@ -9312,7 +9343,126 @@ Editing blockchain account data
 
    :statuscode 200: Accounts successfully edited
    :statuscode 400: Provided JSON or data is in some way malformed. Given list to edit is empty.
-   :statuscode 409: User is not logged in. An account given to edit does not exist or a given tag does not exist.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: An account given to edit does not exist or a given tag does not exist.
+   :statuscode 500: Internal rotki error
+
+
+Account operations by chain type
+==================================
+
+.. http:patch:: /api/(version)/blockchains/type/(chain_type)/accounts
+
+   .. note::
+      Supported blockchains types: ``EVM, BITCOIN, SUBSTRATE``
+
+   .. note::
+      This endpoint doesn't support ENS resolution
+
+      This endpoint can also be queried asynchronously by using ``"async_query": true``
+
+   Doing a PATCH on this endpoint with a list of accounts to edit will edit the label and tags for those accounts in all the chains of the same type where they are tracked.
+ 
+   **Example Request**:
+
+   .. http:example:: curl wget httpie python-requests
+
+      PATCH /api/1/blockchains/type/evm/accounts HTTP/1.1
+      Host: localhost:5042
+      Content-Type: application/json;charset=UTF-8
+
+      {
+          "accounts": [
+              {
+                  "address": "0x78b0AD50E768D2376C6BA7de33F426ecE4e03e0B",
+                  "label": "my new metamask",
+                  "tags": [
+                      "public",
+                      "metamask"
+                  ]
+              },
+              {
+                  "address": "0xc37b40ABdB939635068d3c5f13E7faF686F03B65",
+                  "label": "my hardware wallet"
+              }
+          ]
+      }
+
+
+   :reqjson string chain_type: The type of blockchain where the address was added. ``EVM``, ``BITCOIN`` or ``SUBSTRATE``
+   :reqjson list[object] accounts: A list of account data to edit.
+   :reqjsonarr string address: The address of the account to edit. It doesn't allow ENS names.
+   :reqjsonarr string[optional] label: An optional label to edit for the account. Cannot be empty string.
+   :reqjsonarr list[optional] tags: An optional list of tags to attach to the account. Can be null. Should never be an empty list.
+
+   **Example Response**:
+
+   .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+          "result" : True,
+          "message": "",
+      }
+
+   :resjson list result: Okay result if all the accounts were edited correctly.
+
+   :statuscode 200: Accounts successfully edited
+   :statuscode 400: Provided JSON or data is in some way malformed. Given list to edit is empty.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: An account given to edit does not exist or a given tag does not exist.
+   :statuscode 500: Internal rotki error
+
+
+.. http:delete:: /api/(version)/blockchains/type/(chain_type)/accounts
+
+   .. note::
+      Supported blockchains types: ``EVM, BITCOIN, SUBSTRATE``
+
+   .. note::
+      This endpoint doesn't support ENS resolution
+
+      This endpoint can also be queried asynchronously by using ``"async_query": true``
+
+
+   Doing a DELETE on this endpoint with a list of accounts in the json data will remove these accounts from the tracked accounts for the all the chains of the ``chain_type`` provided.
+   If one of the given accounts to add is invalid the entire request will fail.
+
+
+   **Example Request**:
+
+   .. http:example:: curl wget httpie python-requests
+
+      DELETE /api/1/blockchains/type/evm/accounts HTTP/1.1
+      Host: localhost:5042
+      Content-Type: application/json;charset=UTF-8
+
+      {"accounts": ["0x78b0AD50E768D2376C6BA7de33F426ecE4e03e0B"]}
+
+   :reqjson string chain_type: The type of blockchain where the address was added. ``EVM``, ``BITCOIN`` or ``SUBSTRATE``
+   :reqjson list[string] accounts: A list of accounts to delete for the given blockchain. Each account Can only an address. ENS is not supported.
+   :reqjson bool async_query: Boolean denoting whether this is an asynchronous query or not
+
+   **Example Response**:
+
+   .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+          "result" : True,
+          "message": "",
+      }
+
+   :resjson list result: Okey result if all the accounts were deleted correctly.
+
+   :statuscode 200: Accounts successfully deleted
+   :statuscode 400: Provided JSON or data is in some way malformed. Given list to delete is empty.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: An account given to be deleted does not exist.
    :statuscode 500: Internal rotki error
 
 Removing blockchain accounts
@@ -9327,7 +9477,7 @@ Removing blockchain accounts
 
       This endpoint can also be queried asynchronously by using ``"async_query": true``
 
-   Doing a DELETE on the the blockchains endpoint with a specific blockchain URL and a list of accounts in the json data will remove these accounts from the tracked accounts for the given blockchain and the current user. The updated balances after the account deletions are returned.
+   Doing a DELETE on the blockchains endpoint with a specific blockchain URL and a list of accounts in the json data will remove these accounts from the tracked accounts for the given blockchain and the current user. The updated balances after the account deletions are returned.
     If one of the given accounts to add is invalid the entire request will fail.
 
 
@@ -9394,7 +9544,8 @@ Removing blockchain accounts
    :resjson object result: An object containing the ``"per_account"`` and ``"totals"`` keys as also defined `here <blockchain_balances_result_>`_.
    :statuscode 200: Accounts successfully deleted
    :statuscode 400: Provided JSON or data is in some way malformed. The accounts to remove contained invalid addresses or were an empty list.
-   :statuscode 409: User is not logged in. Some error occurred when re-querying the balances after addition. Check message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Some error occurred when re-querying the balances after addition. Check message for details.
    :statuscode 500: Internal rotki error
    :statuscode 502: Error occurred with some external service query such as Etherscan. Check message for details.
 
@@ -9425,7 +9576,7 @@ Getting manually tracked balances
       {
           "result": {
           "balances": [{
-                  "id": 1,
+                  "identifier": 1,
                   "asset": "XMR",
                   "label": "My monero wallet",
                   "amount": "50.315",
@@ -9433,14 +9584,14 @@ Getting manually tracked balances
                   "tags": ["public"],
                   "location": "blockchain"
               }, {
-                  "id": 2,
+                  "identifier": 2,
                   "asset": "BTC",
                   "label": "My XPUB BTC wallet",
                   "amount": "1.425",
                   "usd_value": "9087.22",
                   "location": "blockchain"
               }, {
-                  "id": 3,
+                  "identifier": 3,
                   "asset": "ZEC",
                   "label" "My favorite wallet",
                   "amount": "76.2"
@@ -9453,7 +9604,7 @@ Getting manually tracked balances
 
    :resjson object result: An object containing all the manually tracked balances as defined `here <manually_tracked_balances_section_>`__ with additionally a current usd equivalent value per account.
    :statuscode 200: Balances successfully queried
-   :statuscode 409: User is not logged in.
+   :statuscode 401: User is not logged in.
    :statuscode 500: Internal rotki error
 
 Adding manually tracked balances
@@ -9464,7 +9615,7 @@ Adding manually tracked balances
    .. note::
       This endpoint can also be queried asynchronously by using ``"async_query": true``
 
-   Doing a PUT on the the manually tracked balances endpoint you can add a balance for an asset that rotki can't automatically detect, along with a label identifying it for you and any number of tags.
+   Doing a PUT on the manually tracked balances endpoint you can add a balance for an asset that rotki can't automatically detect, along with a label identifying it for you and any number of tags.
 
    .. _manually_tracked_balances_section:
 
@@ -9483,12 +9634,14 @@ Adding manually tracked balances
                   "label": "My monero wallet",
                   "amount": "50.315",
                   "tags": ["public"],
-                  "location": "blockchain"
+                  "location": "blockchain",
+                  "balance_type": "asset"
               }, {
                   "asset": "BTC",
                   "label": "My XPUB BTC wallet",
                   "amount": "1.425",
-                  "location": "blockchain"
+                  "location": "blockchain",
+                  "balance_type": "liability"
               }]
       }
 
@@ -9498,6 +9651,7 @@ Adding manually tracked balances
    :reqjsonarr string amount: The amount of asset that is stored.
    :reqjsonarr list[optional] tags: An optional list of tags to attach to the this manually tracked balance. Can be null. Should never be an empty list.
    :reqjsonarr string location: The location where the balance is saved. Can be one of: ["external", "kraken", "poloniex", "bittrex", "binance", "bitmex", "coinbase", "banks", "blockchain", "coinbasepro", "gemini", "ftx", "ftxus", "independentreserve"]
+   :reqjsonarr string[optional] balance_type: The type of the balance. Either "asset" or "liability". By default it's an asset.
 
    **Example Response**:
 
@@ -9509,28 +9663,31 @@ Adding manually tracked balances
       {
           "result": {
           "balances": [{
-                  "id": 1,
+                  "identifier": 1,
                   "asset": "XMR",
                   "label": "My monero wallet",
                   "amount": "50.315",
                   "usd_value": "2370.13839",
                   "tags": ["public"],
-                  "location": "blockchain"
+                  "location": "blockchain",
+                   "balance_type": "asset"
               }, {
-                  "id" :2,
+                  "identifier" :2,
                   "asset": "BTC",
                   "label": "My XPUB BTC wallet",
                   "amount": "1.425",
                   "usd_value": "9087.22",
-                  "location": "blockchain"
+                  "location": "blockchain",
+                  "balance_type": "asset"
               }, {
-                  "id": 3
+                  "identifier": 3
                   "asset": "ZEC",
                   "label" "My favorite wallet",
                   "amount": "76.2"
                   "usd_value": "6067.77",
                   "tags": ["private", "inheritance"]
-                  "location": "blockchain"
+                  "location": "blockchain",
+                  "balance_type": "asset"
               }]
           "message": ""
       }
@@ -9538,7 +9695,8 @@ Adding manually tracked balances
    :resjson object result: An object containing all the manually tracked balances as defined `here <manually_tracked_balances_section_>`__ with additionally a current usd equivalent value per account.
    :statuscode 200: Balances successfully added
    :statuscode 400: Provided JSON or data is in some way malformed. The balances to add contained invalid assets or were an empty list. One of the balance labels already exist.
-   :statuscode 409: User is not logged in. Provided tags do not exist. Check message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Provided tags do not exist. Check message for details.
    :statuscode 500: Internal rotki error
    :statuscode 502: Error occurred with some external service query such as Cryptocompare. Check message for details.
 
@@ -9550,7 +9708,7 @@ Editing manually tracked balances
    .. note::
       This endpoint can also be queried asynchronously by using ``"async_query": true``
 
-   Doing a PATCH on the the manual balances endpoint allows you to edit a number of manually tracked balances by id.
+   Doing a PATCH on the manual balances endpoint allows you to edit a number of manually tracked balances by identifier.
 
    **Example Request**:
 
@@ -9562,18 +9720,20 @@ Editing manually tracked balances
 
       {
           "balances": [{
-                  "id": 1,
+                  "identifier": 1,
                   "asset": "XMR",
                   "label": "My monero wallet",
                   "amount": "4.5",
-                  "location": "blockchain"
+                  "location": "blockchain",
+                  "balance_type": "asset"
                   },{
-                  "id": 3,
+                  "identifier": 3,
                   "asset": "ETH"    ,
                   "label": "My favorite wallet",
                   "amount": "10",
                   "tags": [],
-                  "location": "kraken"
+                  "location": "kraken",
+                  "balance_type": "liability"
               }]
       }
 
@@ -9589,27 +9749,30 @@ Editing manually tracked balances
       {
           "result": {
           "balances": [{
-                  "id" 1,
+                  "identifier" 1,
                   "asset": "XMR",
                   "label": "My monero wallet",
                   "amount": "4.5",
                   "usd_value": "210.548",
                   "tags": ["public"],
-                  "location": "blockchain"
+                  "location": "blockchain",
+                  "balance_type": "asset"
               }, {
-                  "id": 2,
+                  "identifier": 2,
                   "asset": "BTC",
                   "label": "My XPUB BTC wallet",
                   "amount": "1.425",
                   "usd_value": "9087.22",
-                  "location": "blockchain"
+                  "location": "blockchain",
+                  "balance_type": "asset"
               }, {
-                  "id": 3,
+                  "identifier": 3,
                   "asset": "ZEC",
                   "label" "My favorite wallet",
                   "amount": "10"
                   "usd_value": "1330.85"
-                  "location": "kraken"
+                  "location": "kraken",
+                  "balance_type": "asset"
               }]
           "message": ""
       }
@@ -9617,7 +9780,8 @@ Editing manually tracked balances
    :resjson object result: An object containing all the manually tracked balances as defined `here <manually_tracked_balances_section_>`__ with additionally a current usd equivalent value per account.
    :statuscode 200: Balances successfully edited
    :statuscode 400: Provided JSON or data is in some way malformed. The balances to add contained invalid assets or were an empty list.
-   :statuscode 409: User is not logged in. Provided tags do not exist. Check message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Provided tags do not exist. Check message for details.
    :statuscode 500: Internal rotki error
    :statuscode 502: Error occurred with some external service query such as Cryptocompare. Check message for details.
 
@@ -9629,7 +9793,7 @@ Deleting manually tracked balances
    .. note::
       This endpoint can also be queried asynchronously by using ``"async_query": true``
 
-   Doing a DELETE on the the manual balances endpoint with a list of ids of manually tracked balances will remove these balances from the database for the current user.
+   Doing a DELETE on the manual balances endpoint with a list of identifiers of manually tracked balances will remove these balances from the database for the current user.
     If one of the given ids to remove is invalid the entire request will fail.
 
 
@@ -9655,12 +9819,13 @@ Deleting manually tracked balances
       {
           "result": {
           "balances": [{
-                  "id": 2,
+                  "identifier": 2,
                   "asset": "BTC",
                   "label": "My XPUB BTC wallet",
                   "amount": "1.425",
                   "usd_value": "9087.22",
-                  "location": "blockchain"
+                  "location": "blockchain",
+                  "balance_type": "asset"
               }]
           "message": ""
       }
@@ -9668,7 +9833,8 @@ Deleting manually tracked balances
    :resjson object result: An object containing all the manually tracked balances as defined `here <manually_tracked_balances_section_>`__ with additionally a current usd equivalent value per account.
    :statuscode 200: Balances successfully delete
    :statuscode 400: Provided JSON or data is in some way malformed. One of the labels to remove did not exist.
-   :statuscode 409: User is not logged in. Check message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Check message for details.
    :statuscode 500: Internal rotki error
    :statuscode 502: Error occurred with some external service query such as Cryptocompare. Check message for details.
 
@@ -9715,7 +9881,8 @@ Getting watchers
    :reqjson string type: The type of the watcher. Valid types are: "makervault_collateralization_ratio".
    :reqjson object args: An object containing the args for the vault. Depending on the vault type different args are possible. Check `here <watcher_types_section_>`__ to see the different options.
    :statuscode 200: Watchers successfully queried
-   :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 403: Logged in user does not have premium.
    :statuscode 500: Internal rotki error
    :statuscode 502: Could not connect to or got unexpected response format from rotki server
 
@@ -9728,7 +9895,7 @@ Getting watchers
     - op: The comparison operator:
         * lt: less than the given ratio
         * le: less than or equal to the given ratio
-        * gt: greater than the the given ratio
+        * gt: greater than the given ratio
         * ge: greater than or equal to the given ratio
 
 Adding new watcher
@@ -9739,7 +9906,7 @@ Adding new watcher
    .. note::
       This endpoint is only available for premium users
 
-   Doing a PUT on the the watchers endpoint you can install new watchers for watching to the server.
+   Doing a PUT on the watchers endpoint you can install new watchers for watching to the server.
 
 
    **Example Request**:
@@ -9786,7 +9953,8 @@ Adding new watcher
    :resjson object result: An object containing all the watchers, including the ones that were added. The watchers follow the schema defined `above <watchers_schema_section_>`__.
    :statuscode 200: Watchers successfully added
    :statuscode 400: Provided JSON or data is in some way malformed. Or the same watcher already exists for this user in the DB.
-   :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 403: Logged in user does not have premium.
    :statuscode 500: Internal rotki error
    :statuscode 502: Could not connect to or got unexpected response format from rotki server
 
@@ -9798,7 +9966,7 @@ Editing watchers
    .. note::
       This endpoint is only available for premium users
 
-   Doing a PATCH on the the watchers endpoint allows you to edit a number of watchers by identifier. If one of the identifier is not found, the whole method fails.
+   Doing a PATCH on the watchers endpoint allows you to edit a number of watchers by identifier. If one of the identifier is not found, the whole method fails.
 
    **Example Request**:
 
@@ -9845,7 +10013,8 @@ Editing watchers
    :resjson object result: An object containing all the watchers as defined `here <watchers_schema_section_>`__
    :statuscode 200: Watchers successfully edited
    :statuscode 400: Provided JSON or data is in some way malformed. Or a given identifier does not exist in the DB.
-   :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 403: Logged in user does not have premium.
    :statuscode 500: Internal rotki error
    :statuscode 502: Could not connect to or got unexpected response format from rotki server
 
@@ -9857,7 +10026,7 @@ Deleting watchers
    .. note::
       This endpoint is only available for premium users
 
-   Doing a DELETE on the the watchers endpoint with a list of identifiers will delete either all or none of them.
+   Doing a DELETE on the watchers endpoint with a list of identifiers will delete either all or none of them.
 
 
    **Example Request**:
@@ -9892,7 +10061,8 @@ Deleting watchers
    :resjson object result: An object containing all the watchers after deletion. The watchers follow the schema defined `above <watchers_schema_section_>`__.
    :statuscode 200: Watchers successfully delete
    :statuscode 400: Provided JSON or data is in some way malformed. One of the identifiers  to remove did not exist.
-   :statuscode 409: No user is currently logged in or currently logged in user does not have a premium subscription.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 403: Logged in user does not have premium.
    :statuscode 500: Internal rotki error
    :statuscode 502: Could not connect to or got unexpected response format from rotki server
 
@@ -9926,7 +10096,7 @@ Dealing with ignored assets
    :resjson list result: A list of asset names that are currently ignored.
    :statuscode 200: Assets successfully queried
    :statuscode 400: Provided JSON or data is in some way malformed.
-   :statuscode 409: User is not logged in.
+   :statuscode 401: User is not logged in.
    :statuscode 500: Internal rotki error
 
 .. http:put:: /api/(version)/assets/ignored/
@@ -9954,14 +10124,15 @@ Dealing with ignored assets
       Content-Type: application/json
 
       {
-          "result": ["eip155:1/erc20:0xAf30D2a7E90d7DC361c8C4585e9BB7D2F6f15bc7", "eip155:1/erc20:0xBB9bc244D798123fDe783fCc1C72d3Bb8C189413", "eip155:1/erc20:0x6810e776880C02933D47DB1b9fc05908e5386b96"]
+          "result": {"successful":[],"no_action":["eip155:1/erc20:0x255Aa6DF07540Cb5d3d297f0D0D4D84cb52bc8e6"]},
           "message": ""
       }
 
-   :resjson list result: A list of asset names that are currently ignored.
+   :resjson list successful: A list of asset identifiers that were added to the list of ignored assets.
+   :resjson list no_action: A list of assets that were already ignored and no action was taken on them.
    :statuscode 200: Assets successfully added
    :statuscode 400: Provided JSON or data is in some way malformed.
-   :statuscode 409: User is not logged in. One of the assets provided is already on the list.
+   :statuscode 401: User is not logged in.
    :statuscode 500: Internal rotki error
 
 .. http:delete:: /api/(version)/assets/ignored/
@@ -9989,15 +10160,186 @@ Dealing with ignored assets
       Content-Type: application/json
 
       {
-          "result": ["eip155:1/erc20:0xAf30D2a7E90d7DC361c8C4585e9BB7D2F6f15bc7"]
+          "result": {"successful":[],"no_action":["ETH"]},
           "message": ""
       }
 
-   :resjson list result: A list of asset names that are currently ignored.
+   :resjson list successful: A list of asset identifiers that were removed from the list of ignored assets.
+   :resjson list no_action: A list of assets that weren't ignored and no action was taken on them.
    :statuscode 200: Assets successfully removed
    :statuscode 400: Provided JSON or data is in some way malformed.
-   :statuscode 409: User is not logged in. One of the assets provided is not on the list.
+   :statuscode 401: User is not logged in.
    :statuscode 500: Internal rotki error
+
+
+False positive in spam assets
+==============================
+
+.. http:post:: /api/(version)/assets/ignored/whitelist
+
+   Doing a POST on this endpoint will mark the provided token as a false positive spam asset. This will remove it from the list of ignored assets, remove the spam value from the protocol field and add it to the list of false positives.
+
+  **Example Request**
+
+  .. http:example:: curl wget httpie python-requests
+
+      PATH /api/1/assets/ignored/whitelist HTTP/1.1
+      Host: localhost:5042
+
+      {"token": "eip155:1/erc20:0x6B3595068778DD592e39A122f4f5a5cF09C90fE2"}
+
+
+  :reqjsonarr string token: The identifier of the evm token that will be marked as false positive
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+        "result": true,
+        "message": ""
+      }
+
+  :resjson bool result: Boolean denoting success or failure.
+  :statuscode 200: Asset added to spam whitelist successfully.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 500: Internal rotki error.
+
+.. http:get:: /api/(version)/assets/ignored/whitelist
+
+   Doing a GET on this endpoint will return a list of the assets that are whitelisted.
+
+  **Example Request**
+
+  .. http:example:: curl wget httpie python-requests
+
+      GET /api/1/assets/ignored/whitelist HTTP/1.1
+      Host: localhost:5042
+
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+          "result": ["eip155:1/erc20:0x6B175474E89094C44Da98b954EedeAC495271d0F"],
+          "message": ""
+      }
+
+  :resjson bool result: list of the assets whitelisted.
+  :statuscode 200: Assets listed succesfully.
+  :statuscode 409: No user is currently logged in.
+  :statuscode 500: Internal rotki error.
+
+.. http:delete:: /api/(version)/assets/ignored/whitelist
+
+   Doing a DELETE on this endpoint will remove the provided token from the list of false positives.
+
+  **Example Request**
+
+  .. http:example:: curl wget httpie python-requests
+
+      DELETE /api/1/assets/ignored/whitelist HTTP/1.1
+      Host: localhost:5042
+
+      {"token": "eip155:1/erc20:0x6B3595068778DD592e39A122f4f5a5cF09C90fE2"}
+
+
+  :reqjsonarr string token: The identifier of the evm token that will be removed from the false positive whitelist
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+        "result": true,
+        "message": ""
+      }
+
+  :resjson bool result: Boolean denoting success or failure.
+  :statuscode 200: Asset removed from spam whitelist successfully.
+  :statuscode 409: No user is currently logged in.
+  :statuscode 500: Internal rotki error.
+
+
+Toggle spam status in evm tokens
+==================================
+
+.. http:post:: /api/(version)/assets/evm/spam/
+
+   Doing a POST on this endpoint will mark the provided token as a spam token. It will move the token to the list of ignored assets and remove it from the list of whitelisted tokens. Any protocol value that the token might have will be overwritten.
+
+  **Example Request**
+
+  .. http:example:: curl wget httpie python-requests
+
+      PATH /api/1/assets/evm/spam HTTP/1.1
+      Host: localhost:5042
+
+      {"tokens": "eip155:1/erc20:0x6B3595068778DD592e39A122f4f5a5cF09C90fE2"}
+
+
+  :reqjsonarr list[string] token: The identifiers of the EVM tokens that will be marked as spam
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+        "result": true,
+        "message": ""
+      }
+
+  :resjson bool result: Boolean denoting success or failure.
+  :statuscode 200: Asset marked as spam successfully.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 500: Internal rotki error.
+
+.. http:delete:: /api/(version)/assets/evm/spam/
+
+   Doing a DELETE on this endpoint will remove the spam protocol from the token setting it to null. It will also remove the token from the list of ignored assets.
+
+  **Example Request**
+
+  .. http:example:: curl wget httpie python-requests
+
+      DELETE /api/1/assets/evm/spam HTTP/1.1
+      Host: localhost:5042
+
+      {"token": "eip155:1/erc20:0x6B3595068778DD592e39A122f4f5a5cF09C90fE2"}
+
+
+  :reqjsonarr string token: The identifier of the evm token that will be updated removing the protocol value of spam.
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+        "result": true,
+        "message": ""
+      }
+
+  :resjson bool result: Boolean denoting success or failure.
+  :statuscode 200: Asset updated correctly.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 500: Internal rotki error.
+
 
 Dealing with ignored actions
 ==============================
@@ -10035,7 +10377,8 @@ Dealing with ignored actions
    :resjson bool result: The result field in this response is a simple boolean value indicating success or failure.
    :statuscode 200: Action ids successfully added
    :statuscode 400: Provided JSON or data is in some way malformed.
-   :statuscode 409: User is not logged in. One of the action ids provided is already on the list.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: One of the action ids provided is already on the list.
    :statuscode 500: Internal rotki error
 
 .. http:delete:: /api/(version)/actions/ignored/
@@ -10080,7 +10423,8 @@ Dealing with ignored actions
    :resjson bool result: The result field in this response is a simple boolean value indicating success or failure.
    :statuscode 200: Action ids successfully removed
    :statuscode 400: Provided JSON or data is in some way malformed.
-   :statuscode 409: User is not logged in. One of the action ids provided is not on the list.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: One of the action ids provided is not on the list.
    :statuscode 500: Internal rotki error
 
 
@@ -10200,7 +10544,7 @@ Data imports
 
       {"source": "cointracking", "filepath": "/path/to/data/file", "timestamp_format": "%d/%m/%Y %H:%M:%S"}
 
-   :reqjson str source: The source of the data to import. Valid values are ``"cointracking"``, ``"cryptocom"``, ``"blockfi_transactions"``, ``"blockfi_trades"``, ``"nexo"``,  ``"shapeshift_trades"``, ``"uphold_transactions"``, ``"bitmex_wallet_history"``, ``"bisq_trades"``, ``"binance"``, ``"rotki_events"``, ``"rotki_trades"``, ``"bitcoin_tax"``, ``"bitstamp"``.
+   :reqjson str source: The source of the data to import. Valid values are ``"cointracking"``, ``"cryptocom"``, ``"blockfi_transactions"``, ``"blockfi_trades"``, ``"nexo"``,  ``"shapeshift_trades"``, ``"uphold_transactions"``, ``"bitmex_wallet_history"``, ``"bisq_trades"``, ``"binance"``, ``"rotki_events"``, ``"rotki_trades"``, ``"bitcoin_tax"``, ``"bitstamp"``, ``"bittrex"``, ``"kucoin"``, ``"blockpit"``.
    :reqjson str filepath: The filepath to the data for importing
    :reqjson str timestamp_format: Optional. Custom format to use for dates in the CSV file. Should follow rules at `Datetime docs <https://docs.python.org/3/library/datetime.html#strftime-and-strptime-format-codes>`__.
 
@@ -10219,7 +10563,7 @@ Data imports
    :resjson bool result: The result field in this response is a simple boolean value indicating success or failure.
    :statuscode 200: Data imported. Check user messages for warnings.
    :statuscode 400: Provided JSON or data is in some way malformed.
-   :statuscode 409: User is not logged in. Or premium was needed for the import and not found.
+   :statuscode 409: User is not logged in.
    :statuscode 500: Internal rotki error
 
 ERC20 token info
@@ -10379,7 +10723,8 @@ Querying  NFTs
                 "background_color": null,
                 "image_url": "https://lh3.googleusercontent.com/kwF-39qZlluEalQnNv-yMxbntzNdc3g00pK2xALkpoir9ooWttVUO2hVFWOgPtOkJOHufYRajfn-nNFdjruRQ4YaMgOYHEB8E4CdjBk",
                 "external_link": "https://www.bastardganpunks.club/v2/8636",
-                "price_eth": "0.025",
+                "price_in_asset": "0.025",
+                "price_asset": "ETH",
                 "price_usd": "250",
                 "collection": {
                   "name": "BASTARD GAN PUNKS V2",
@@ -10406,11 +10751,13 @@ Querying  NFTs
    :resjson string name: [ Optional] The name of the NFT. Can be Null.
    :resjson string external_link: [Optional]. A link to the page of the creator of the NFT. Can be Null.
    :resjson string permalink: [Optional]. A link to the NFT in opensea.
-   :resjson string price_eth: The last known price of the NFT in ETH. Can be zero.
+   :resjson string price_in_asset: The last known price of the NFT in `price_asset`. Can be zero.
+   :resjson string price_asset: The identifier of the asset used for `price_in_asset`.
    :resjson string price_usd: The last known price of the NFT in USD. Can be zero.
    :statuscode 200: NFTs successfully queried
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in or nft module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: nft module is not activated.
    :statuscode 500: Internal rotki error
    :statuscode 502: An external service used in the query such as opensea could not be reached or returned unexpected response.
 
@@ -10497,7 +10844,8 @@ Show NFT Balances
    :resjson int total_usd_value: Total usd value of the nfts in the filter.
    :statuscode 200: NFT balances successfully queried
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: User is not logged in or nft module is not activated.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: nft module is not activated.
    :statuscode 500: Internal rotki error
    :statuscode 502: An external service used in the query such as opensea could not be reached or returned unexpected response.
 
@@ -10549,7 +10897,7 @@ Querying database information
    :resjson object info: Under the userdb this contains the info of the currently logged in user. It has the path to the DB file, the size in bytes and the DB version.
    :resjson list backups: Under the userdb this contains the list of detected backups (if any) for the user db. Each list entry is an object with the size in bytes of the backup, the unix timestamp in which it was taken and the user DB version.
    :statuscode 200: Data were queried successfully.
-   :statuscode 409: No user is currently logged in.
+   :statuscode 401: No user is currently logged in.
    :statuscode 500: Internal rotki error.
 
 Creating a database backup
@@ -10582,7 +10930,8 @@ Creating a database backup
    :resjson string result: The full path of the newly created database backup
 
    :statuscode 200: Backup was created successfully.
-   :statuscode 409: No user is currently logged in or failure to create the DB backup.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: Failure to create the DB backup.
    :statuscode 500: Internal rotki error.
 
 Deleting a database backup
@@ -10618,7 +10967,8 @@ Deleting a database backup
 
    :statuscode 200: Backup was deleted successfully.
    :statuscode 400: The given filepath does not exist
-   :statuscode 409: No user is currently logged in or failure to delete the backup or the requested file to delete is not in the user's data directory.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: Failure to delete the backup or the requested file to delete is not in the user's data directory.
    :statuscode 500: Internal rotki error.
 
 Downloading a database backup
@@ -10648,7 +10998,8 @@ Downloading a database backup
 
    :statuscode 200: Backup was downloaded successfully.
    :statuscode 400: The given filepath does not exist
-   :statuscode 409: No user is currently logged in or failure to download the backup or the requested file to download is not in the user's data directory.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: Failure to download the backup or the requested file to download is not in the user's data directory.
    :statuscode 500: Internal rotki error.
 
 Get associated locations
@@ -10678,7 +11029,8 @@ Get associated locations
       }
 
    :statuscode 200: Locations successfully queried.
-   :statuscode 409: User is not logged in. Check error message for details.
+   :statuscode 401: User is not logged in.
+   :statuscode 409: Other error. Check error message for details.
    :statuscode 500: Internal Rotki error
 
 Staking events
@@ -10780,7 +11132,8 @@ Staking events
 
    :statuscode 200: Events are successfully returned
    :statuscode 400: Provided JSON is in some way malformed
-   :statuscode 409: No user is logged in, kraken is not active or some parameter for filters is not valid.
+   :statuscode 401: No user is logged in.
+   :statuscode 409: Kraken is not active or some parameter for filters is not valid.
    :statuscode 500: Internal rotki error
 
 
@@ -10820,7 +11173,7 @@ Export assets added by the user
    :resjsonarr string destination: Folder where the generated files will be saved
 
    :statuscode 200: Response file is correctly generated
-   :statuscode 409: No user is logged in.
+   :statuscode 401: No user is logged in.
    :statuscode 507: Failed to create the file.
 
 
@@ -10865,7 +11218,8 @@ Import assets added by the user
       }
 
    :statuscode 200: Assets correctly imported
-   :statuscode 409: No user is logged in, imported file is for an older version of the schema or file can't be loaded or format is not valid.
+   :statuscode 401: No user is logged in.
+   :statuscode 409: Imported file is for an older version of the schema or file can't be loaded or format is not valid.
    :statuscode 500: Internal rotki error
    :statuscode 507: Filesystem error, probably related to size.
 
@@ -10921,7 +11275,7 @@ Handling snapshot manipulation
 
    :resjson object result: A dictionary representing the snapshot at the specified timestamp.
    :statuscode 200: Snapshot was retrieved successfully.
-   :statuscode 409: No user is currently logged in.
+   :statuscode 401: No user is currently logged in.
    :statuscode 404: No snapshot data found for the given timestamp.
    :statuscode 500: Internal rotki error.
 
@@ -10956,7 +11310,8 @@ Handling snapshot manipulation
    :resjson bool result: Boolean denoting success or failure of the query.
    :statuscode 200: Files were exported successfully.
    :statuscode 400: Provided query parameter(s) is in some way malformed or given path is not a directory.
-   :statuscode 409: No user is currently logged in. No snapshot data found for the given timestamp. No permissions to write in the given directory. Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: No snapshot data found for the given timestamp. No permissions to write in the given directory. Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -10984,7 +11339,8 @@ Handling snapshot manipulation
 
    :statuscode 200: Snapshot was downloaded successfully.
    :statuscode 400: Provided query parameter(s) is in some way malformed.
-   :statuscode 409: No user is currently logged in. No snapshot data found for the given timestamp. No permissions to write in the given directory. Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: No snapshot data found for the given timestamp. No permissions to write in the given directory. Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -11014,7 +11370,8 @@ Handling snapshot manipulation
 
    :statuscode 200: Snapshot was deleted successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in. No snapshot found for the specified timestamp.Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: No snapshot found for the specified timestamp.Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -11067,7 +11424,8 @@ Handling snapshot manipulation
 
    :statuscode 200: Snapshot was updated successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in. JSON has different timestamps. Snapshot contains an unknown asset. JSON has invalid headers. Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: JSON has different timestamps. Snapshot contains an unknown asset. JSON has invalid headers. Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -11103,7 +11461,8 @@ Handling snapshot manipulation
 
    :statuscode 200: Snapshot was imported successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in. Csv file has different timestamps. Snapshot contains an unknown asset. Csv file has invalid headers. Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: CSV file has different timestamps. Snapshot contains an unknown asset. Csv file has invalid headers. Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -11164,7 +11523,8 @@ Get ENS names
    :resjson str message: Error message if any errors occurred.
    :statuscode 200: Names were returned successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: Failed to query names or no user is currently logged in or addresses have incorrect format.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: Failed to query names or addresses have incorrect format.
    :statuscode 500: Internal rotki error.
 
 
@@ -11190,14 +11550,17 @@ Get mappings from addressbook
           "name_substring": "neighbour",
           "addresses": [
             {"address": "0x9531c059098e3d194ff87febb587ab07b30b1306", "blockchain": "eth"},
+            {"address": "bc1qamhqfr5z2ypehv0sqq784hzgd6ws2rjf6v46w8", "blockchain": "btc"},
             {"address": "0x8A4973ABBCEd48596D6D79ac6B53Ceda65e342CD"}
            ]
         }
 
     :reqjson int[optional] limit: This signifies the limit of records to return as per the `sql spec <https://www.sqlite.org/lang_select.html#limitoffset>`__.
     :reqjson int[optional] offset: This signifies the offset from which to start the return of records per the `sql spec <https://www.sqlite.org/lang_select.html#limitoffset>`__.
+    :reqjson list[string] order_by_attributes: This is the list of attributes of the addressbook entries by which to order the results.
+    :reqjson list[bool] ascending: Should the order be ascending? This is the default. If set to false, it will be on descending order.
     :reqjson str[optional] name_substring: The substring to use as filter for the name to be found in the addressbook.
-    :reqjson str[optional] blockchain: The chain in which to use the provided name.
+    :reqjson str[optional] blockchain: The blockchain in which to use the provided name.
     :reqjson object[optional] addresses: List of addresses that the backend should find names for.
 
     **Example Response**
@@ -11210,6 +11573,7 @@ Get mappings from addressbook
         {
             "result": {
               "entries": [
+                { "address": "bc1qamhqfr5z2ypehv0sqq784hzgd6ws2rjf6v46w8", "name": "mtgox", "blockchain": "btc" },
                 { "address": "0x9531c059098e3d194ff87febb587ab07b30b1306", "name": "My dear friend Tom", "blockchain": "eth" },
                 { "address": "0x8A4973ABBCEd48596D6D79ac6B53Ceda65e342CD", "name": "Neighbour Frank", "blockchain": "eth" }
                ],
@@ -11225,7 +11589,8 @@ Get mappings from addressbook
     :resjson str message: Error message if any errors occurred.
     :statuscode 200: Mappings were returned successfully.
     :statuscode 400: Provided JSON is in some way malformed.
-    :statuscode 409: No user is currently logged in or addresses have incorrect format.
+    :statuscode 401: No user is currently logged in.
+    :statuscode 409: Addresses have incorrect format.
     :statuscode 500: Internal rotki error.
 
 
@@ -11269,7 +11634,8 @@ Insert mappings into addressbook
     :resjson str message: Error message if any errors occurred.
     :statuscode 200: Entries were added successfully.
     :statuscode 400: Provided JSON is in some way malformed.
-    :statuscode 409: Some of the provided entries already exist in the addressbook or no user is currently logged in or addresses have incorrect format.
+    :statuscode 401: No user is currently logged in.
+    :statuscode 409: Some of the provided entries already exist in the addressbook or addresses have incorrect format.
     :statuscode 500: Internal rotki error.
 
 
@@ -11278,7 +11644,7 @@ Update mappings in the addressbook
 
 .. http:patch:: /api/(version)/names/addressbook
 
-    Doing a PATCH on the addressbook endpoint with either /global or /private postfix with a list of entries, each entry containing address and a name will updates these entries' names in the addressbook
+    Doing a PATCH on the addressbook endpoint with either /global or /private postfix with a list of entries, each entry containing address and a name will update these entries' names in the addressbook, or add them if they do not already exist. Setting a blank name will delete the entry.
 
     **Example Request**
 
@@ -11291,13 +11657,14 @@ Update mappings in the addressbook
         {
           "entries": [
             {"address": "0x9531c059098e3d194ff87febb587ab07b30b1306", "name": "Dude ABC"},
+            {"address": "13EcxFSXEFmJfxGXSQYLfgEXXGZBSF1P753MyHauw5NV4tAV", "name": "Polkacomma"},
             {"address": "0x8A4973ABBCEd48596D6D79ac6B53Ceda65e342CD", "name": "Dude XYZ"}
           ]
         }
 
     :reqjson object entries: A list of entries to be updated in the addressbook.
     :reqjson str address: The address that will be tracked in the addressbook.
-    :reqjson str[optional] blockchain: The chain in which to use the provided name.
+    :reqjson str[optional] blockchain: The blockchain in which to use the provided name.
     :reqjson str name: Name to be used.
 
     **Example Response**
@@ -11316,7 +11683,8 @@ Update mappings in the addressbook
     :resjson str message: Error message if any errors occurred.
     :statuscode 200: Entries were updated successfully.
     :statuscode 400: Provided JSON is in some way malformed.
-    :statuscode 409: Some of the provided entries don't exist in the addressbook or no user is currently logged in or addresses have incorrect format.
+    :statuscode 401: No user is currently logged in.
+    :statuscode 409: Some of the provided entries don't exist in the addressbook or addresses have incorrect format.
     :statuscode 500: Internal rotki error.
 
 
@@ -11344,7 +11712,7 @@ Delete mappings in the addressbook
 
     :reqjson object entries: A list of addresses to be deleted from the addressbook
     :reqjson str address: The address that will be deleted in the addressbook.
-    :reqjson str[optional] blockchain: The chain for which to delete the name mapping. If is not provided the names for all the chains will be deleted.
+    :reqjson str[optional] blockchain: The blockchain for which to delete the name mapping. If is not provided the names for all the chains will be deleted.
 
     **Example Response**
 
@@ -11362,7 +11730,8 @@ Delete mappings in the addressbook
     :resjson str message: Error message if any errors occurred.
     :statuscode 200: Entries were deleted successfully.
     :statuscode 400: Provided JSON is in some way malformed.
-    :statuscode 409: Some of the provided entries don't exist in the addressbook or no user is currently logged in or addresses have incorrect format.
+    :statuscode 409: No user is currently logged in.
+    :statuscode 409: Some of the provided entries don't exist in the addressbook or addresses have incorrect format.
     :statuscode 500: Internal rotki error.
 
 
@@ -11411,7 +11780,8 @@ Search for all known names of an address
     :resjson str message: Error message if any errors occurred.
     :statuscode 200: Mappings were returned successfully.
     :statuscode 400: Provided JSON is in some way malformed.
-    :statuscode 409: No user is currently logged in or addresses have incorrect format.
+    :statuscode 401: No user is currently logged in.
+    :statuscode 409: Addresses have incorrect format.
     :statuscode 500: Internal rotki error.
 
 
@@ -11484,7 +11854,7 @@ Handling user notes
    :resjson int entries_total: The number of total entries ignoring all filters.
 
    :statuscode 200: User notes were retrieved successfully.
-   :statuscode 409: No user is currently logged in.
+   :statuscode 401: No user is currently logged in.
    :statuscode 500: Internal rotki error.
 
 .. http:delete:: /api/(version)/notes
@@ -11514,7 +11884,8 @@ Handling user notes
 
    :statuscode 200: User note was deleted successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in. No user note found. Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: No user note found. Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -11557,7 +11928,8 @@ Handling user notes
 
    :statuscode 200: User note was updated successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in. User note does not exist.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: User note does not exist.
    :statuscode 500: Internal rotki error.
 
 
@@ -11596,7 +11968,8 @@ Handling user notes
 
    :statuscode 200: User note was added successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in. User note with the given title already exists. User has reached the limit of available notes. Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: User note with the given title already exists. User has reached the limit of available notes. Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -11662,7 +12035,7 @@ Custom Assets
 
    :statuscode 200: Custom assets were retrieved successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in.
+   :statuscode 401: No user is currently logged in.
    :statuscode 500: Internal rotki error.
 
 .. http:delete:: /api/(version)/assets/custom
@@ -11692,7 +12065,8 @@ Custom Assets
 
    :statuscode 200: Custom asset was deleted successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in. No custom asset found. Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: No custom asset found. Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -11731,7 +12105,8 @@ Custom Assets
 
    :statuscode 200: Custom asset was updated successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in. Custom asset name and type is already being used. Custom asset does not exist.  Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: Custom asset name and type is already being used. Custom asset does not exist.  Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -11769,7 +12144,8 @@ Custom Assets
 
    :statuscode 200: Custom asset was created successfully.
    :statuscode 400: Provided JSON is in some way malformed.
-   :statuscode 409: No user is currently logged in. Custom asset with the given name and type already exists. Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: Custom asset with the given name and type already exists. Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -11797,7 +12173,8 @@ Custom Assets
    :resjson list[str] result: The list of custom asset types in the DB.
 
    :statuscode 200: Custom asset types retrieved successfully.
-   :statuscode 409: No user is currently logged in. Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: Other error. Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -11844,7 +12221,7 @@ Events Details
    :statuscode 200: The details were returned successfully.
    :statuscode 400: Provided JSON is in some way malformed.
    :statuscode 404: There is no event with the provided identifier or the event has no details to be returned.
-   :statuscode 409: No user is currently logged in.
+   :statuscode 401: No user is currently logged in.
    :statuscode 500: Internal rotki error.
 
 Add EVM Transaction By Hash
@@ -11893,7 +12270,7 @@ Add EVM Transaction By Hash
    :statuscode 200: The transaction was saved successfully.
    :statuscode 400: Provided JSON is in some way malformed. Transaction is already present in DB. Address provided is not tracked by rotki.
    :statuscode 404: Transaction hash not found for the specified chain.
-   :statuscode 409: No user is currently logged in.
+   :statuscode 401: No user is currently logged in.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as etherscan could not be reached or returned unexpected response.
 
@@ -11991,7 +12368,7 @@ Get Binance Savings Interests History
 
    :statuscode 200: The balances were returned successfully.
    :statuscode 400: Invalid location provided.
-   :statuscode 409: No user is currently logged in.
+   :statuscode 401: No user is currently logged in.
    :statuscode 500: Internal rotki error.
    :statuscode 502: An external service used in the query such as binance could not be reached or returned unexpected response.
 
@@ -12120,7 +12497,7 @@ Event Mappings
 
 .. http:get:: /api/(version)/history/events/type_mappings
 
-  Doing a GET on this endpoint will return a mapping of history events types and subtypes to a ``EventCategory`` representation. We also return properties such ``icon``, ``label`` and ``color`` for event types.
+  Doing a GET on this endpoint will return a mapping of history events types and subtypes to a mapping of ``EventCategory`` representations. We also return properties such ``icon``, ``label`` and ``color`` for event types.
 
   **Example Request**
 
@@ -12141,10 +12518,27 @@ Event Mappings
         "result":{
           "global_mappings":{
             "spend":{
-              "fee":"gas",
-              "return wrapped":"send",
-              "donate":"donate",
-              "none":"send"
+              "fee": {"default": "gas"},
+              "return wrapped": {"default": "send"},
+              "donate": {"default": "donate"},
+              "none":"{"default": send"},
+            },
+	    "deposit":{
+	      "deposit asset": {
+	          "default": "deposit",
+		  "exchange": "exchange deposit"
+	      },
+	      "bridge": {"default": "bridge deposit"}
+	    }
+          },
+          "entry_type_mappings":{
+            "eth withdrawal event":{
+              "staking":{
+                "remove asset":{
+                    "is_exit":"stake exit",
+                    "not_exit":"withdraw"
+                }
+              }
             }
           },
           "per_protocol_mappings":{
@@ -12212,7 +12606,8 @@ Event Mappings
         }
       }
 
-  :resjson object global_mappings: keys of this object are the history event types names and values are mappings of subtypes' names to the ``EventCategory`` name. Contains mappings that should be applied if there is no a specific protocol rule.
+  :resjson object global_mappings: keys of this object are the history event types names and values are mappings of subtypes' names to the ``EventCategory`` mapping. Each mapping is either a simple {"default": "send"}, or a different one depending on specific string values. Such as "exchange". At the moment the only such possible values are "default" and "exchange".
+  :resjson object type_mappings: the keys of this mapping are entry types and it contains the combinations of event type and subtype that would overwritte the information in ``global_mappings`` only for that entry type.
   :resjson object per_protocol_mappings: same as global_mappings but contains specific mappings per chain and protocol.
   :resjson object event_category_details: This is a mapping of ``EventCategory`` to its direction and mapping of counterparty to details. For all the ``EventCategoryDetails`` mapping there is a ``"default"`` key mapping to the default details. For some exceptions there is also other keys which are counterparties. Such as for spend/fee and counterparty gas.
   :resjon object accounting_events_icons: Mapping of accounting event type to its corresponding icon name.
@@ -12342,12 +12737,32 @@ Get all valid locations
           "locations": {
             "ethereum": {"image": "ethereum.svg"},
             "optimism": {"image": "optimism.svg"},
-            "kraken": {"image": "kraken.svg"},
+            "ftx": {"image": "ftx.svg", "is_exchange": true},
+            "kraken": {
+              "image": "kraken.svg",
+              "exchange_detail": {
+                "is_exchange_with_key": true
+              }
+            },
+            "kucoin": {
+              "image": "kucoin.svg",
+              "exchange_detail": {
+                "is_exchange_with_key": true,
+                "is_exchange_with_passphrase": true
+              }
+            },
+            "bitpanda": {
+              "image": "bitpanda.svg",
+              "exchange_detail": {
+                "is_exchange_with_key": true,
+                "is_exchange_without_api_secret": true
+              }
+            },
             "external": {"icon": "mdi-book"}
         }
       }
 
-  :resjson list[string] locations: A mapping of locations to their details. Can contain `image` or `icon` depending on whether a known image should be used or an icon from the icon set. Can also contain `display_name` if a special name has to be used.
+  :resjson list[string] locations: A mapping of locations to their details. Can contain `image` or `icon` depending on whether a known image should be used or an icon from the icon set. Additionally, it can contain a `display_name` if a special name needs to be used. If the location is an exchange, it may also include an `is_exchange` key, or an `exchange_details` object if the location has more details for the exchange data. The `exchange_details` object can contain `is_exchange_with_key` for exchanges requiring an API key, `is_exchange_with_passphrase` for exchanges needing an API key and passphrase, and `is_exchange_without_api_secret` for exchanges that do not require an API secret key, all within the exchange_detail object.
 
   :statuscode 200: Information was correctly returned
   :statuscode 500: Internal rotki error
@@ -12414,7 +12829,8 @@ Getting Metadata For Airdrops
             {
                "identifier": "uniswap",
                "name": "Uniswap",
-               "icon": "uniswap.svg"
+               "icon": "uniswap.svg",
+               "icon_url": "https://raw.githubusercontent.com/rotki/data/main/airdrops/icons/uniswap.svg"
             },
             {
                "identifier": "1inch",
@@ -12431,6 +12847,7 @@ Getting Metadata For Airdrops
 
    :statuscode 200: Information was correctly returned
    :statuscode 500: Internal rotki error
+   :statuscode 502: Failed to fetch airdrop metadata from rotki's data repository.
 
 Getting Metadata For Defi Protocols
 ==========================================
@@ -12549,7 +12966,8 @@ Dealing with skipped external events
    :statuscode 200: File were exported successfully
    :statuscode 400: Provided JSON is in some way malformed or given string is not a directory.
    :statuscode 404: No file was found when trying to export the events in CSV.
-   :statuscode 409: No user is currently logged in. No permissions to write in the given directory. Check error message.
+   :statuscode 401: No user is currently logged in.
+   :statuscode 409: No permissions to write in the given directory. Check error message.
    :statuscode 500: Internal rotki error.
 
 
@@ -12608,7 +13026,7 @@ Managing custom accounting rules
 
   :reqjsonarr optional[array[string]] event_types: List of possible event types to use while filtering.
   :reqjsonarr optional[array[string]] event_subtypes: List of possible event subtypes to use while filtering.
-  :reqjsonarr optional[array[string]] counterparties: List of possible counterparties to use while filtering.
+  :reqjsonarr optional[array[string]] counterparties: List of possible counterparties to use while filtering. Instead of a string a null value can also be given to mean counterparty being None.
 
 
   **Example Response**
@@ -12694,7 +13112,8 @@ Managing custom accounting rules
 
   :resjson bool result: Boolean denoting success or failure.
   :statuscode 200: Entry correctly stored.
-  :statuscode 409: No user is currently logged in. Failed to validate the data. Combination of type, subtype and counterparty already exists.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 409: Failed to validate the data. Combination of type, subtype and counterparty already exists.
   :statuscode 500: Internal rotki error.
 
 
@@ -12739,7 +13158,8 @@ Managing custom accounting rules
 
   :resjson bool result: Boolean denoting success or failure.
   :statuscode 200: Entry correctly updated.
-  :statuscode 409: No user is currently logged in. Failed to validate the data. Entry doesn't exist. Combination of type, subtype and counterparty already exists.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 409: Failed to validate the data. Entry doesn't exist. Combination of type, subtype and counterparty already exists.
   :statuscode 500: Internal rotki error.
 
 .. http:delete:: /api/(version)/accounting/rules
@@ -12774,7 +13194,8 @@ Managing custom accounting rules
 
   :resjson bool result: Boolean denoting success or failure.
   :statuscode 200: Entry correctly deleted.
-  :statuscode 409: No user is currently logged in. Failed to validate the data. Or entry doesn't exist.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 409: Failed to validate the data. Or entry doesn't exist.
   :statuscode 500: Internal rotki error.
 
 
@@ -12883,7 +13304,7 @@ Solving conflicts in accounting rules
   :resjson object result: An object, mapping identifiers to the local and remote version of the conflict.
 
   :statuscode 200: All okay
-  :statuscode 409: No user is currently logged in
+  :statuscode 401: No user is currently logged in
   :statuscode 500: Internal rotki error
 
 
@@ -12922,5 +13343,379 @@ Solving conflicts in accounting rules
 
   :resjson bool result: Boolean denoting success or failure.
   :statuscode 200: Conflicts resolved succesfully.
-  :statuscode 409: No user is currently logged in. Couldn't find the rule locally.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 409: Couldn't find the rule locally.
+  :statuscode 500: Internal rotki error.
+
+
+Managing calendar entries
+==========================
+
+.. http:post:: /api/(version)/calendar
+
+   Doing a POST on this endpoint will allow querying the calendar entries by some of their attributes.
+
+
+  **Example Request**
+
+  .. http:example:: curl wget httpie python-requests
+
+      POST /api/(version)/calendar HTTP/1.1
+      Host: localhost:5042
+
+      {
+         "from_timestamp": 1977652400,
+         "to_timestamp": 1977652511,
+         "accounts": [{"address": "0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12"}, {"address": "0xc37b40ABdB939635068d3c5f13E7faF686F03B65", "blockchain": "gnosis"}]
+         "counterparty": 'ens'
+      }
+
+  :reqjsonarr optional[list[object]] accounts: List of addresses + their chain linked to the calendar events. The blockchain part can be omitted and it will return information for the address in all the chains.
+  :reqjsonarr optional[integer] identifiers: List of identifiers linked to the calendar events.
+  :reqjsonarr string counterparty: Counterparty used to filter the events.
+  :reqjsonarr string name: Substring used to filter for in the ``name`` attribute when querying calendar events.
+  :reqjsonarr string description: Substring used to filter for in the ``description`` attribute when querying calendar events.
+  :resjson int from_timestamp: The earliest timestamp of the events queried.
+  :resjson int to_timestamp: The latest timestamp of the events queried.
+
+  **Example Response**
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+        "result":{
+          "entries":[
+            {
+              "identifier":1,
+              "name":"ENS renewal",
+              "description":"Renew yabir.eth extended",
+              "counterparty":"ENS",
+              "timestamp":1977652411,
+              "address":"0xc37b40ABdB939635068d3c5f13E7faF686F03B65"
+            },
+            {
+              "identifier":2,
+              "name":"CRV unlock",
+              "description":"Unlock date for CRV",
+              "counterparty":"CURVE",
+              "timestamp":1851422011,
+              "address":"0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12"
+            }
+          ],
+          "entries_found":2,
+          "entries_total":2,
+          "entries_limit":-1
+        }
+      }
+
+  :resjson array entries: List of all the calendar events with their identifier.
+  :resjson int entries_found: The number of entries found for the current filter. Ignores pagination.
+  :resjson int entries_limit: The limit of entries if free version. Always -1 for this endpoint.
+  :resjson int entries_total: The number of total entries ignoring all filters.
+
+  :statuscode 200: All okay
+  :statuscode 401: No user is currently logged in.
+  :statuscode 500: Internal rotki error
+
+
+.. http:put:: /api/(version)/calendar
+
+  Doing a PUT request on this endpoint will allow to create a new calendar entry.
+
+  **Example Request**
+
+  .. http:example:: curl wget httpie python-requests
+
+      PUT /api/(version)/calendar HTTP/1.1
+      Host: localhost:5042
+      Content-Type: application/json;charset=UTF-8
+
+      {
+        "timestamp":1869737344,
+        "name":"ENS renewal",
+        "description":"Renew yabir.eth",
+        "counterparty":"ENS",
+        "address":"0xc37b40ABdB939635068d3c5f13E7faF686F03B65",
+        "color": "ffffff"
+      }
+
+  .. _calendar_fields:
+
+  :resjson integer timestamp: Timestamp of the event in the calendar.
+  :resjson string name: Name of the event.
+  :resjson optional[string] description: Longer description given to the event.
+  :resjson string counterparty: A protocol counterparty given to the calendar event. Missing if it doesn't have a value.
+  :resjson string address: Address linked to the calendar event. Missing if it doesn't have a value.
+  :resjson string color: The color to render the event in the frontend with. Missing if it doesn't have a value.
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+         "result": {"entry_id": 1},
+         "message": ""
+      }
+
+  :resjson object result: object with the identifier of the calendar entry created.
+  :statuscode 200: Entry correctly stored.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 409: Failed to validate the data.
+  :statuscode 500: Internal rotki error.
+
+
+.. http:patch:: /api/(version)/calendar
+
+  Doing a PATCH on this endpoint allows to edit a calendar entry. Takes the same parameters as the PUT verb plus the identifier of the entry being updated.
+
+  **Example Request**:
+
+  .. http:example:: curl wget httpie python-requests
+
+    PATCH /api/(version)/calendar HTTP/1.1
+    Host: localhost:5042
+    Content-Type: application/json;charset=UTF-8
+
+      {
+        "identifier": 1,
+        "timestamp":1869737344,
+        "name":"ENS renewal",
+        "description":"Renew yabir.eth",
+        "counterparty":"ENS",
+        "address":"0xc37b40ABdB939635068d3c5f13E7faF686F03B65"
+      }
+
+  :ref:`calendar_fields`
+
+  :reqjsonarr integer identifier: The id of the event being updated.
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+         "result": {"entry_id": 1},
+         "message": ""
+      }
+
+  :resjson object result: object with the identifier of the calendar entry updated.
+  :statuscode 200: Entry correctly updated.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 409: Failed to validate the data. Event not found.
+  :statuscode 500: Internal rotki error.
+
+
+.. http:delete:: /api/(version)/calendar
+
+  Doing a DELETE on this endpoint allows deleting a calendar event by their identifier.
+
+  **Example Request**:
+
+  .. http:example:: curl wget httpie python-requests
+
+    PATCH /api/(version)/calendar HTTP/1.1
+    Host: localhost:5042
+    Content-Type: application/json;charset=UTF-8
+
+    {
+      "identifier": 2
+    }
+
+  :reqjsonarr integer identifier: The identifier of the event that will be deleted
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+        "result": true,
+        "message": ""
+      }
+
+  :resjson bool result: Boolean denoting success or failure.
+  :statuscode 200: Entry correctly deleted.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 409: Failed to validate the data. Entry doesn't exist.
+  :statuscode 500: Internal rotki error.
+
+
+Managing calendar reminders
+============================
+
+.. http:post:: /api/(version)/calendar/reminders
+
+   Doing a POST on this endpoint will allow querying the calendar reminders using the identifier of the associated calendar entry.
+
+
+  **Example Request**
+
+  .. http:example:: curl wget httpie python-requests
+
+      POST /api/(version)/calendar/reminders HTTP/1.1
+      Host: localhost:5042
+
+      {"identifier": 1}
+
+  :resjson int identifier: Identifier of the calendar entry linked to the reminder.
+
+  **Example Response**
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+        "result":{
+          "entries":[
+            {
+              "identifier":1,
+              "event_id": 1,
+              "secs_before": 213234124
+            }, {
+              "identifier":2,
+              "event_id": 1,
+              "secs_before": 2132341253
+            },
+          ]
+        }
+      }
+
+  :resjson array entries: List of all the calendar reminders linked to the provided calendar event.
+
+  :statuscode 200: All okay
+  :statuscode 401: No user is currently logged in.
+  :statuscode 500: Internal rotki error
+
+
+.. http:put:: /api/(version)/calendar/reminders
+
+  Doing a PUT request on this endpoint will allow to create new calendar reminder entries. If any of the entries fails to get added the key ``failed`` will be populated in the response.
+
+  **Example Request**
+
+  .. http:example:: curl wget httpie python-requests
+
+      PUT /api/(version)/calendar/reminders HTTP/1.1
+      Host: localhost:5042
+      Content-Type: application/json;charset=UTF-8
+
+      {
+        "reminders": [
+         {"secs_before": 1869737344, "event_id": 1},
+         {"secs_before": 1869737344, "event_id": 100}
+        ]
+      }
+
+  .. _calendar_reminder_fields:
+
+  :resjson integer secs_before: Seconds before the event timestamp to trigger a notification.
+  :resjson integer event_id: Identifier of a valid calendar entry.
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+         "result": {"success": [1], "failed": [100]},
+         "message": ""
+      }
+
+  :resjson object result: object with the ids of the events for which the reminders were created succesfully and for which it failed. If none failed the failed key is not returned.
+  :statuscode 200: Entry correctly stored.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 409: Failed to validate the data.
+  :statuscode 500: Internal rotki error.
+
+
+.. http:patch:: /api/(version)/calendar/reminders
+
+  Doing a PATCH on this endpoint allows to edit a calendar reminder. Takes the same parameters as the PUT verb plus the identifier of the entry being updated.
+
+  **Example Request**:
+
+  .. http:example:: curl wget httpie python-requests
+
+    PATCH /api/(version)/calendar HTTP/1.1
+    Host: localhost:5042
+    Content-Type: application/json;charset=UTF-8
+
+      {
+        "identifier": 1,
+        "secs_before": 1869737344,
+        "event_id": 1
+      }
+
+  :ref:`calendar_reminder_fields`
+
+  :reqjsonarr integer identifier: The id of the event being updated.
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+         "result": {"entry_id": 1},
+         "message": ""
+      }
+
+  :resjson object result: object with the identifier of the calendar reminder updated.
+  :statuscode 200: Entry correctly updated.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 409: Failed to validate the data. Event not found.
+  :statuscode 500: Internal rotki error.
+
+
+.. http:delete:: /api/(version)/calendar/reminders
+
+  Doing a DELETE on this endpoint allows deleting a calendar reminder by their identifier.
+
+  **Example Request**:
+
+  .. http:example:: curl wget httpie python-requests
+
+    PATCH /api/(version)/calendar/reminders HTTP/1.1
+    Host: localhost:5042
+    Content-Type: application/json;charset=UTF-8
+
+    {
+      "identifier": 2
+    }
+
+  :reqjsonarr integer identifier: The identifier of the reminder that will be deleted
+
+  **Example Response**:
+
+  .. sourcecode:: http
+
+      HTTP/1.1 200 OK
+      Content-Type: application/json
+
+      {
+        "result": true,
+        "message": ""
+      }
+
+  :resjson bool result: Boolean denoting success or failure.
+  :statuscode 200: Entry correctly deleted.
+  :statuscode 401: No user is currently logged in.
+  :statuscode 409: Failed to validate the data. Entry doesn't exist.
   :statuscode 500: Internal rotki error.

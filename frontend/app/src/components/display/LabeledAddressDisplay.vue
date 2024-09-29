@@ -1,137 +1,158 @@
 <script setup lang="ts">
-import { type GeneralAccount } from '@rotki/common/lib/account';
+import type {
+  BlockchainAccount,
+  BlockchainAccountBalance,
+} from '@/types/blockchain/accounts';
 
 const props = defineProps<{
-  account: GeneralAccount;
+  account: BlockchainAccount | BlockchainAccountBalance;
 }>();
 
 const { account } = toRefs(props);
-const { scrambleData, shouldShowAmount, scrambleHex, scrambleIdentifier } =
-  useScramble();
+const { scrambleData, shouldShowAmount, scrambleAddress, scrambleIdentifier } = useScramble();
 const { addressNameSelector, ensNameSelector } = useAddressesNamesStore();
-const css = useCssModule();
+const { t } = useI18n();
 
-const aliasName: ComputedRef<string> = computed(() => {
-  if (get(scrambleData)) {
-    return '';
-  }
+const accountAddress = computed<string>(() => getAccountAddress(get(account)));
 
-  const { address, chain } = get(account);
-  const name = get(addressNameSelector(address, chain));
+const derivationPath = computed<string | undefined>(() => {
+  const accountInfo = get(account);
+  if ('xpub' in accountInfo.data)
+    return accountInfo.data.derivationPath;
 
-  if (!name) {
-    return get(label);
-  }
-
-  return name;
+  return undefined;
 });
 
-const ensName: ComputedRef<string | null> = computed(() => {
-  if (get(scrambleData)) {
-    return null;
-  }
-
-  const { address } = get(account);
-  return get(ensNameSelector(address));
-});
-
-const { xs, name } = useDisplay();
-
-const address = computed<string>(() => {
-  const address = get(account).address;
-  return scrambleHex(address);
-});
-
-const truncationLength = computed<number>(() => {
-  let truncationPoint = truncationPoints[get(name)];
-  truncationPoint = truncationPoint ?? 4;
-
-  return Math.max(4, truncationPoint);
-});
-
-const truncatedAddress: ComputedRef<string> = computed(() =>
-  truncateAddress(get(address), get(truncationLength))
-);
-
-const truncated = computed<boolean>(() => {
-  const truncated = get(truncatedAddress);
-  if (truncated.length >= get(address).length) {
-    return false;
-  }
-  return truncated.includes('...');
+const isXpub = computed<boolean>(() => {
+  const accountInfo = get(account);
+  return 'xpub' in accountInfo.data;
 });
 
 const label = computed<string>(() => {
-  const label = get(account).label;
+  const label = getAccountLabel(get(account));
 
-  if (consistOfNumbers(label)) {
+  if (consistOfNumbers(label))
     return scrambleIdentifier(label);
-  }
 
   return label;
 });
 
-const truncatedAliasName: ComputedRef<string> = computed(() => {
-  const name = get(aliasName);
-  if (!name) {
+const aliasName = computed<string>(() => {
+  if (get(scrambleData))
     return '';
-  }
 
-  const length = get(truncationLength) * 2;
+  const accountData = get(account);
+  const chain = getChain(accountData);
+  const name = get(addressNameSelector(get(accountAddress), chain));
 
-  if (length > 0 && name.length > length) {
-    return `${name.slice(0, Math.max(0, length))}...`;
-  }
+  if (!name)
+    return get(label);
 
   return name;
+});
+
+const ensName = computed<string | null>(() => {
+  if (get(scrambleData))
+    return null;
+
+  return get(ensNameSelector(get(accountAddress)));
+});
+
+const address = computed<string>(() => scrambleAddress(get(accountAddress)));
+
+const displayedLabel = ref<HTMLDivElement>();
+const { width: displayedLabelWidth } = useElementSize(displayedLabel);
+
+const labelDisplayed = computed(() => {
+  const alias = get(aliasName);
+  if (alias)
+    return alias;
+  return get(address);
+});
+
+const CH = 7.21;
+const truncatedLabelDisplayed = computed(() => {
+  const label = get(labelDisplayed);
+  const characterLength = label.length;
+  const displayedWidth = get(displayedLabelWidth);
+  const charDisplayLimit = Math.floor(displayedWidth / CH);
+
+  if (charDisplayLimit >= characterLength)
+    return label;
+
+  const knownPrefix = findAddressKnownPrefix(label);
+
+  const charactersWithinSpace = Math.floor((charDisplayLimit - knownPrefix.length - 3) / 2);
+  return truncateAddress(label, charactersWithinSpace);
 });
 </script>
 
 <template>
   <RuiChip
     variant="outlined"
-    :class="css['labeled-address-display']"
+    :class="$style['labeled-address-display']"
     size="sm"
     color="primary"
   >
     <RuiTooltip
       :popper="{ placement: 'top' }"
-      open-delay="400"
-      :disabled="!truncated && !aliasName"
-      class="truncate mr-auto"
+      :open-delay="400"
+      class="flex-1"
     >
       <template #activator>
-        <span
+        <div
           data-cy="labeled-address-display"
-          :class="[
-            css['labeled-address-display__address'],
-            { 'labeled-address-display__address--mobile': xs }
-          ]"
+          :class="[$style['labeled-address-display__address']]"
         >
-          <EnsAvatar :address="address" avatar />
-          <span v-if="aliasName" class="text-truncate">
-            {{ truncatedAliasName }}
-          </span>
-          <span v-else :class="{ blur: !shouldShowAmount }">
-            {{ truncatedAddress }}
-          </span>
-        </span>
+          <EnsAvatar
+            :address="address"
+            avatar
+          />
+
+          <div
+            v-if="isXpub"
+            class="font-medium"
+          >
+            {{ t('common.xpub') }}
+          </div>
+
+          <div
+            ref="displayedLabel"
+            class="flex-1 font-mono overflow-hidden text-xs"
+            :class="{ blur: !shouldShowAmount }"
+          >
+            {{ truncatedLabelDisplayed }}
+          </div>
+        </div>
       </template>
-      <div>
-        <div v-if="aliasName">{{ aliasName }}</div>
-        <div v-if="ensName && aliasName !== ensName">({{ ensName }})</div>
-        <div>{{ address }}</div>
+      <div class="[&_*]:font-mono">
+        <div v-if="aliasName && aliasName !== address">
+          {{ aliasName }}
+        </div>
+        <div v-if="ensName && aliasName !== ensName">
+          ({{ ensName }})
+        </div>
+        <div>
+          {{ address }}
+        </div>
+        <div v-if="derivationPath">
+          {{ derivationPath }}
+        </div>
       </div>
     </RuiTooltip>
-    <RuiDivider vertical :class="css['labeled-address-display__divider']" />
-    <div :class="css['labeled-address-display__actions']">
+    <RuiDivider
+      vertical
+      :class="$style['labeled-address-display__divider']"
+    />
+    <div :class="$style['labeled-address-display__actions']">
       <HashLink
         class="h-full"
-        :text="account.address"
+        :text="accountAddress"
         buttons
+        :copy-only="isXpub"
         size="14"
         :show-icon="false"
-        :chain="account.chain"
+        :chain="getChain(account)"
       />
     </div>
   </RuiChip>
@@ -139,18 +160,15 @@ const truncatedAliasName: ComputedRef<string> = computed(() => {
 
 <style module lang="scss">
 .labeled-address-display {
-  background-color: var(--v-rotki-light-grey-base) !important;
+  @apply w-full hover:cursor-default max-w-[32rem] min-w-[15rem];
+  @apply bg-rui-grey-100 #{!important};
 
   > span {
     @apply w-full flex items-center px-0;
   }
 
   &__address {
-    &--mobile {
-      @apply max-w-[9.375rem];
-    }
-
-    @apply flex items-center gap-2 text-rui-text-secondary;
+    @apply flex items-center gap-2 text-rui-text-secondary w-full;
   }
 
   &__divider {
@@ -160,7 +178,11 @@ const truncatedAliasName: ComputedRef<string> = computed(() => {
   &__actions {
     @apply flex items-center h-[1.75rem];
   }
+}
 
-  @apply w-full hover:cursor-default;
+:global(.dark) {
+  .labeled-address-display {
+    @apply bg-rui-grey-900 #{!important};
+  }
 }
 </style>

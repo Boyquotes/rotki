@@ -1,346 +1,342 @@
-import csv
+import json
 import logging
 from collections import defaultdict
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from http import HTTPStatus
 from json.decoder import JSONDecodeError
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Final, NamedTuple, cast
 
+import polars as pl
 import requests
+from requests import Response
 
-from rotkehlchen.assets.asset import Asset
+from rotkehlchen.assets.asset import Asset, CryptoAsset
+from rotkehlchen.assets.types import AssetType
+from rotkehlchen.assets.utils import get_or_create_evm_token
 from rotkehlchen.chain.ethereum.utils import token_normalized_value_decimals
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants import ZERO
-from rotkehlchen.constants.assets import (
-    A_1INCH,
-    A_COMBO,
-    A_CORN,
-    A_CRV,
-    A_CVX,
-    A_DIVA,
-    A_ENS,
-    A_FOX,
-    A_GNOSIS_VCOW,
-    A_GRAIN,
-    A_LDO,
-    A_PSP,
-    A_SDL,
-    A_TORN,
-    A_UNI,
-    A_VCOW,
-)
+from rotkehlchen.constants.misc import AIRDROPSDIR_NAME, AIRDROPSPOAPDIR_NAME, APPDIR_NAME
 from rotkehlchen.db.dbhandler import DBHandler
 from rotkehlchen.db.settings import CachedSettings
-from rotkehlchen.errors.misc import RemoteError, UnableToDecryptRemoteData
+from rotkehlchen.errors.asset import UnknownAsset
+from rotkehlchen.errors.misc import RemoteError
+from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.fval import FVal
+from rotkehlchen.globaldb.cache import (
+    globaldb_get_unique_cache_value,
+    globaldb_set_unique_cache_value,
+)
+from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
-from rotkehlchen.types import ChecksumEvmAddress, FValWithTolerance
+from rotkehlchen.serialization.deserialize import deserialize_int
+from rotkehlchen.types import CacheType, ChainID, ChecksumEvmAddress, FValWithTolerance, Timestamp
+from rotkehlchen.utils.misc import is_production
 from rotkehlchen.utils.serialization import jsonloads_dict, rlk_jsondumps
 
 logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
-SMALLEST_AIRDROP_SIZE = 20900
+AIRDROPS_REPO_BASE: Final = f'https://raw.githubusercontent.com/rotki/data/{"main" if is_production() else "develop"}'  # noqa: E501
+AIRDROPS_INDEX: Final = f'{AIRDROPS_REPO_BASE}/airdrops/index_v3.json'
+ETAG_CACHE_KEY: Final = 'ETag'
+JSON_PATH_SEPARATOR_API_AIRDROPS: Final = '/'
+AIRDROP_IDENTIFIER_KEY: Final = 'airdrop_identifier'
 
 
-class Airdrop(NamedTuple):
+@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False, kw_only=True)  # noqa: E501
+class Airdrop:
     """Airdrop class for representing airdrop data.
 
     This contains the definition of the Airdrop class, which is used to represent
     individual airdrops along with their associated data, such as URL, token address,
-    website URL, name, and icon filename.
+    website URL, name, cutoff_time and icon filename.
     """
-    csv_url: str
-    asset: Asset
+    asset: CryptoAsset
     url: str
     name: str
     icon: str
+    icon_url: str | None = None
+    cutoff_time: Timestamp | None = None
+    has_decoder: bool = True
 
 
-AIRDROPS: dict[str, Airdrop] = {
-    'uniswap': Airdrop(
-        # is checksummed
-        csv_url='https://gist.githubusercontent.com/LefterisJP/d883cb7187a7c4fcf98c7a62f45568e7/raw/3718c95d572a29b9c3906d7c64726d3bd7524bfd/uniswap.csv',
-        asset=A_UNI,
-        url='https://app.uniswap.org/',
-        name='Uniswap',
-        icon='uniswap.svg',
-    ),
-    '1inch': Airdrop(
-        # is checksummed
-        csv_url='https://gist.githubusercontent.com/LefterisJP/8f41d1511bf354d7e56810188116a410/raw/87d967e86e1435aa3a9ddb97ce20531e4e52dbad/1inch.csv',
-        asset=A_1INCH,
-        url='https://1inch.exchange/',
-        name='1inch',
-        icon='1inch.svg',
-    ),
-    'tornado': Airdrop(
-        # is checksummed
-        csv_url='https://raw.githubusercontent.com/rotki/data/main/airdrops/tornado.csv',
-        asset=A_TORN,
-        url='https://tornado.cash/',
-        name='Tornado Cash',
-        icon='tornado.svg',
-    ),
-    'cornichon': Airdrop(
-        # is checksummed
-        csv_url='https://gist.githubusercontent.com/LefterisJP/5199d8bc6caa3253c343cd5084489088/raw/7e9ca4c4772fc50780bfe9997e1c43525e1b7445/cornichon_airdrop.csv',
-        asset=A_CORN,
-        url='https://cornichon.ape.tax/',
-        name='Cornichon',
-        icon='cornichon.svg',
-    ),
-    'grain': Airdrop(
-        # is checksummed
-        csv_url='https://gist.githubusercontent.com/LefterisJP/08d7a5b28876741b300c944650c89280/raw/987ab4a92d5363fdbe262f639565732bd1fd3921/grain_iou.csv',
-        asset=A_GRAIN,
-        url='https://claim.harvest.finance/',
-        name='Grain',
-        icon='grain.png',
-    ),
-    'furucombo': Airdrop(
-        # is checksummed
-        csv_url='https://gist.githubusercontent.com/LefterisJP/69612e155e8063fd6b3422d4efbf22a3/raw/b9023960ab1c478ee2620c456e208e5124115c19/furucombo_airdrop.csv',
-        asset=A_COMBO,
-        url='https://furucombo.app/',
-        name='Furucombo',
-        icon='furucombo.svg',
-    ),
-    'lido': Airdrop(
-        # is checksummed
-        csv_url='https://gist.githubusercontent.com/LefterisJP/57a8d65280a482fed6f3e2cc00c0e540/raw/e6ebac56c438cc8a882585c5f5bfba64eb57c424/lido_airdrop.csv',
-        asset=A_LDO,
-        url='https://lido.fi/',
-        name='Lido',
-        icon='lido.svg',
-    ),
-    'curve': Airdrop(
-        # is checksummed
-        csv_url='https://gist.githubusercontent.com/LefterisJP/9a37e5342ddb6219a805a82bcd3d63fe/raw/71e89f0e95ea8ef5503fb1ac569447fea63f1ede/curve_airdrop.csv',
-        asset=A_CRV,
-        url='https://www.curve.fi/',
-        name='Curve Finance',
-        icon='curve.png',
-    ),
-    'convex': Airdrop(
-        csv_url='https://gist.githubusercontent.com/LefterisJP/fd0ebccbc645f7de2b142907bd207363/raw/0613689dd5212b81788ed1a108c751b29b2ce93a/convex_airdrop.csv',
-        asset=A_CVX,
-        url='https://www.convexfinance.com/',
-        name='Convex',
-        icon='convex.jpeg',
-    ),
-    'shapeshift': Airdrop(
-        csv_url='https://raw.githubusercontent.com/rotki/data/main/airdrops/shapeshift.csv',
-        asset=A_FOX,
-        url='https://shapeshift.com/shapeshift-decentralize-airdrop',
-        name='ShapeShift',
-        icon='shapeshift.svg',
-    ),
-    'ens': Airdrop(
-        csv_url='https://raw.githubusercontent.com/rotki/data/main/airdrops/ens.csv',
-        asset=A_ENS,
-        url='https://claim.ens.domains/',
-        name='ENS',
-        icon='ens.svg',
-    ),
-    'psp': Airdrop(
-        csv_url='https://raw.githubusercontent.com/rotki/data/main/airdrops/psp.csv',
-        asset=A_PSP,
-        url='https://paraswap.io/',
-        name='ParaSwap',
-        icon='paraswap.svg',
-    ),
-    'sdl': Airdrop(
-        csv_url='https://raw.githubusercontent.com/rotki/data/main/airdrops/saddle_finance.csv',
-        asset=A_SDL,
-        url='https://saddle.exchange/#/',
-        name='SaddleFinance',
-        icon='saddle-finance.svg',
-    ),
-    'cow_mainnet': Airdrop(
-        csv_url='https://raw.githubusercontent.com/rotki/data/main/airdrops/cow_mainnet.csv',
-        asset=A_VCOW,
-        url='https://cowswap.exchange/#/claim',
-        name='COW (ethereum)',
-        icon='cow.svg',
-    ),
-    'cow_gnosis': Airdrop(
-        csv_url='https://raw.githubusercontent.com/rotki/data/main/airdrops/cow_gnosis.csv',
-        asset=A_GNOSIS_VCOW,
-        url='https://cowswap.exchange/#/claim',
-        name='COW (gnosis chain)',
-        icon='cow.svg',
-    ),
-    'diva': Airdrop(
-        csv_url='https://raw.githubusercontent.com/rotki/data/develop/airdrops/diva.csv',
-        asset=A_DIVA,
-        url='https://claim.diva.community/',
-        name='DIVA',
-        icon='diva.svg',
-    ),
-}
-
-POAP_AIRDROPS = {
-    'aave_v2_pioneers': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/569992ba1536474f97f7c74104e66354/raw/a8c5bfb91c8328f8a9d2b6f853a0a55328458ed7/poap_aave_v2_pioneers.json',
-        'https://poap.delivery/aave-v2-pioneers',
-        'AAVE V2 Pioneers',
-    ),
-    'beacon_chain_first_1024': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/73469098efe0b12965e5752899be00fe/raw/2ee02c22b68b90333359e2f1d24ff5d460dba092/poap_beacon_chain_first_1024.json',
-        'https://poap.delivery/beacon-chain-first-1024',
-        'Beacon Chain First 1024 Depositors and Proposers',
-    ),
-    'beacon_chain_first_32769': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/6302f4e6da6c1488427fbb8b6207222e/raw/1e2e6ebc8c29ba75c2189a5780c132da4ed8530c/poap_beacon_chain_first_32769.json',
-        'https://poap.delivery/beacon-chain-first-32769',
-        'Beacon Chain First 32,769 Block Validators',
-    ),
-    'coingecko_yield_farming': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/58d23332afc6e9fe701ecc80fcc864f6/raw/25ee4153498e9a4c709542d6f541cc9ab76997d8/poap_coingecko_yield_farming.json',
-        'https://poap.delivery/coin-gecko',
-        'Coin Gecko Yield Farming',
-    ),
-    'eth2_genesis': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/7ce2c343de427c9fe6f54dc9bd6d1a0c/raw/e55baebe6657c11c73b6b808cb269fab31c02da8/poap_eth2_genesis.json',
-        'https://poap.delivery/eth2-genesis/',
-        'Beacon Chain Genesis Depositor',
-    ),
-    'half_rekt': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/429e9c9b3948499cfe793cea75a3b0d6/raw/a0a09372d5bf01285490108661a7c223c1a7de8d/poap_half_rekt.json',
-        'https://poap.delivery/half-rekt',
-        'Half Rekt',
-    ),
-    'keep_stakers': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/b794526fb996cb85dfb825ee5f814e4f/raw/69ed0700a9f7432d783148c89872b86f1d0ee3dd/poap_keep_stakers.json',
-        'https://poap.delivery/keep-stakers',
-        'KEEP Network Mainnet Stakers',
-    ),
-    'lumberjackers': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/802359b6825472ee0081580dbe1a1c82/raw/a456fcd1eb1ddedac1cf4b6dd4bbb2d57371f028/poap_lumberjackers.json',
-        'https://poap.delivery/lumberjackers',
-        'False Start Lumberjackers',
-    ),
-    'medalla': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/1a293bf46b388f709df84ff98c5c5cc6/raw/196ccb50451d908d71cca4bc43731d6547b2276b/poap_medalla.json',
-        'https://poap.delivery/medalla',
-        'Medalla Validator',
-    ),
-    'muir_glacier': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/d135745cf9f4f3143555e0f6a8f0d804/raw/d34c93087100168cac0dfd0ab46254b4a82ff0b8/poap_muir_glacier.json',
-        'https://poap.delivery/muir-glacier',
-        'Muir Glacier',
-    ),
-    'proof_of_gucci': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/43b2c4bb73923d7bb3eaf3b329f7f7a1/raw/e5adb753a3a86f0a50bf93137e2c4adc61548293/poap_proof_of_gucci.json',
-        'https://poap.delivery/proof-of-gucci',
-        'YFI - Proof of Gucci',
-    ),
-    'proof_of_gucci_design_competition': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/40c6b2a94d4b8d7f442522b099e5e258/raw/a0851ce92ca2f668e17a97c9df982bc3e12f9bb3/poap_proof_of_gucci_design_competition.json',
-        'https://poap.delivery/proof-of-gucci-design',
-        'YFI - Proof of Gucci Design Competition',
-    ),
-    'resuscitators': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/0ac0216f82f16453b74a40529384a152/raw/f003083090efd834bcee1d0d1fe4e218380aa0cf/poap_resucitators.json',
-        'https://poap.delivery/medalla-resuscitator',
-        'Medalla Resuscitators',
-    ),
-    'yam': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/d676e1f3db8df96928c2501c6be434ac/raw/fa0a603117f6e3e807a49491924aaaa2bc89179a/poap_yam.json',
-        'https://poap.delivery/yam',
-        'Yam Heroes',
-    ),
-    'ycover': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/727c05f3a9cab79059258528595c102e/raw/59ff367bd532f632ce94e69900709155a55de82a/poap_ycover.json',
-        'https://poap.delivery/ycover',
-        'A New Face For yCover',
-    ),
-    'yfi_og': (
-        # is checksummed
-        'https://gist.githubusercontent.com/LefterisJP/58862ec2b398c770d60c24e50e18e50c/raw/3292995f530baedcdacde02526c6b2bd1de0e110/poap_yfi_og.json',
-        'https://poap.delivery/yfi-og',
-        'I Played 4 YFI',
-    ),
-}
+@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False, kw_only=True)  # noqa: E501
+class AirdropFileMetadata(Airdrop):
+    """Airdrops that provide files and we can use to query claimable amounts"""
+    file_path: str
+    file_hash: str
 
 
-def get_airdrop_data(name: str, data_dir: Path) -> Iterator[list[str]]:
-    airdrops_dir = data_dir / 'airdrops'
-    airdrops_dir.mkdir(parents=True, exist_ok=True)
-    filename = airdrops_dir / f'{name}.csv'
-    if not filename.is_file():
-        # if not cached, get it from the gist
+@dataclass(init=True, repr=True, eq=True, order=False, unsafe_hash=False, frozen=False, kw_only=True)  # noqa: E501
+class AirdropAPIData(Airdrop):
+    """Airdrops that use a remote url to determine the amount claimable.
+    Used when CSVs aren't available
+    """
+    api_url: str
+    amount_path: str  # json keys separated by `/` that point to the amount that needs to be extracted  # noqa: E501
+
+
+class AirdropClaimEventQueryParams(NamedTuple):
+    """Params used in the SQL query to detect as claimed an airdrop"""
+    protocol: str
+    event_type: HistoryEventType
+    event_subtype: HistoryEventSubType
+    location_label: ChecksumEvmAddress
+    asset: CryptoAsset
+    tolerance: FValWithTolerance
+
+
+def _enrich_user_airdrop_data(
+        user_data: dict[str, Any],
+        protocol_name: str,
+        airdrop_data: Airdrop,
+) -> None:
+    """Modify user_data to add information about icons"""
+    if airdrop_data.icon_url is not None:
+        user_data[protocol_name]['icon_url'] = airdrop_data.icon_url
+
+
+def _parse_airdrops(database: 'DBHandler', airdrops_data: dict[str, Any]) -> dict[str, Airdrop]:
+    """Parses the airdrops' data from airdrops metadata index. Also, creates the new token if
+    it's not present in the DB.
+
+    May raise - RemoteError if the metadata is invalid.
+    """
+    airdrops: dict[str, Airdrop] = {}
+    for protocol_name, airdrop_data in airdrops_data.items():
         try:
-            response = requests.get(url=AIRDROPS[name][0], timeout=(30, 100))  # a large read timeout is necessary because the queried data is quite large  # noqa: E501
+            if (new_asset_data := airdrop_data.get('new_asset_data')) is not None:
+                try:
+                    if (chain_id_raw := new_asset_data.get('chain_id')) is not None:
+                        chain_id = ChainID.deserialize(chain_id_raw)
+                    new_asset_type = AssetType.deserialize(new_asset_data['asset_type'])
+                except DeserializationError as e:
+                    log.error(f'Airdrops Index contains an invalid ChainID or AssetType of a token for {protocol_name}. {e!s}')  # noqa: E501
+                    continue
+
+                if new_asset_type == AssetType.EVM_TOKEN:
+                    crypto_asset: CryptoAsset = get_or_create_evm_token(
+                        userdb=database,
+                        evm_address=new_asset_data['address'],
+                        chain_id=chain_id,
+                        decimals=new_asset_data['decimals'],
+                        name=new_asset_data['name'],
+                        symbol=new_asset_data['symbol'],
+                        coingecko=new_asset_data.get('coingecko'),
+                        cryptocompare=new_asset_data.get('cryptocompare'),
+                    )
+                elif (asset := Asset(airdrop_data['asset_identifier'])).exists() is True:
+                    crypto_asset = asset.resolve_to_crypto_asset()  # use the local values of user, if it pre-existed  # noqa: E501
+                else:
+                    crypto_asset = CryptoAsset.initialize(
+                        identifier=airdrop_data['asset_identifier'],
+                        asset_type=new_asset_type,
+                        name=new_asset_data['name'],
+                        symbol=new_asset_data['symbol'],
+                        coingecko=new_asset_data.get('coingecko'),
+                        cryptocompare=new_asset_data.get('cryptocompare'),
+                    )
+                    GlobalDBHandler.add_asset(crypto_asset)
+            else:
+                try:
+                    crypto_asset = Asset(airdrop_data['asset_identifier']).resolve_to_crypto_asset()  # noqa: E501
+                except UnknownAsset as e:
+                    log.error(f"Airdrops Index did not provide any data for {airdrop_data['asset_identifier']}. {e!s}")  # noqa: E501
+                    continue
+
+            # combining the base data repo url for main/develop with the path to the icon in that repo  # noqa: E501
+            icon_url = f"{AIRDROPS_REPO_BASE}/{airdrop_data['icon_path']}" if 'icon_path' in airdrop_data else None  # noqa: E501
+            if 'file_path' in airdrop_data:
+                new_airdrop: Airdrop = AirdropFileMetadata(
+                    asset=crypto_asset,
+                    # combining the base data repo url for main/develop with the path to the file in that repo  # noqa: E501
+                    file_path=f"{AIRDROPS_REPO_BASE}/{airdrop_data['file_path']}",
+                    file_hash=airdrop_data['file_hash'],
+                    url=airdrop_data['url'],
+                    name=airdrop_data['name'],
+                    icon=airdrop_data['icon'],
+                    icon_url=icon_url,
+                    cutoff_time=airdrop_data.get('cutoff_time'),
+                    has_decoder=airdrop_data.get('has_decoder', True),
+                )
+            elif 'api_url' in airdrop_data:
+                new_airdrop = AirdropAPIData(
+                    asset=crypto_asset,
+                    api_url=airdrop_data['api_url'],
+                    amount_path=airdrop_data['amount_path'],
+                    url=airdrop_data['url'],
+                    name=airdrop_data['name'],
+                    icon=airdrop_data['icon'],
+                    icon_url=icon_url,
+                    cutoff_time=airdrop_data.get('cutoff_time'),
+                    has_decoder=airdrop_data.get('has_decoder', True),
+                )
+            else:
+                log.error(f'Invalid airdrop format found {airdrop_data}. Skipping')
+                continue
+
+            airdrops[protocol_name] = new_airdrop
+        except KeyError as e:
+            log.error(f'Airdrops Index does not contain a valid key for {protocol_name}. {e!s}')
+    return airdrops
+
+
+def fetch_airdrops_metadata(database: 'DBHandler') -> tuple[dict[str, Airdrop], dict[str, list[str]]]:  # noqa: E501
+    """Fetches airdrop metadata from the rotki/data repository. If it's not cached, parses them,
+    and returns them in two parts: a dict of Airdrop instances and a dict of POAP airdrops data.
+
+    May raise - RemoteError if the request fails or metadata is invalid.
+    """
+    airdrops_data = None
+    with GlobalDBHandler().conn.read_ctx() as cursor:
+        headers = {}
+        if (cached_etag := globaldb_get_unique_cache_value(
+            cursor=cursor,
+            key_parts=(CacheType.AIRDROPS_HASH, ETAG_CACHE_KEY),
+        )) is not None:
+            headers['If-None-Match'] = cached_etag.encode('utf-8')
+
+        try:
+            remote_metadata_res = requests.get(
+                url=AIRDROPS_INDEX,
+                timeout=CachedSettings().get_timeout_tuple(),
+                headers=headers,
+            )
         except requests.exceptions.RequestException as e:
-            raise RemoteError(f'Airdrops Gist request failed due to {e!s}') from e
-        try:
-            content = response.text
-            if (
-                not csv.Sniffer().has_header(content) or
-                len(response.content) < SMALLEST_AIRDROP_SIZE
-            ):
-                raise csv.Error
-            with open(filename, 'w', encoding='utf8') as f:
-                f.write(content)
-        except csv.Error as e:
-            log.debug(f'airdrop file {filename} contains invalid data {content}')
-            raise UnableToDecryptRemoteData(
-                f'File {filename} contains invalid data. Check logs.',
-            ) from e
-    # Verify the CSV file
-    with open(filename, encoding='utf8') as csvfile:
-        iterator = csv.reader(csvfile)
-        next(iterator)  # skip header
-        yield from iterator
+            raise RemoteError(f'Airdrops Index request failed due to {e!s}') from e
+
+        if remote_metadata_res.status_code == HTTPStatus.NOT_MODIFIED:  # index is not modified, use cached index  # noqa: E501
+            airdrops_metadata_cache = globaldb_get_unique_cache_value(
+                cursor=cursor,
+                key_parts=(CacheType.AIRDROPS_METADATA,),
+            )
+            if airdrops_metadata_cache is not None:
+                airdrops_data = jsonloads_dict(airdrops_metadata_cache)  # get cached response
+
+    if airdrops_data is None:  # index has been modified, save new index
+        with GlobalDBHandler().conn.write_ctx() as write_cursor:
+            globaldb_set_unique_cache_value(
+                write_cursor=write_cursor,
+                key_parts=(CacheType.AIRDROPS_HASH, ETAG_CACHE_KEY),
+                value=remote_metadata_res.headers[ETAG_CACHE_KEY],
+            )
+            globaldb_set_unique_cache_value(
+                write_cursor=write_cursor,
+                key_parts=(CacheType.AIRDROPS_METADATA,),
+                value=remote_metadata_res.text,
+            )
+            try:
+                airdrops_data = remote_metadata_res.json()
+            except JSONDecodeError as e:
+                raise RemoteError(f'Airdrops Index is not valid JSON {e!s}') from e
+
+    return (
+        _parse_airdrops(database=database, airdrops_data=airdrops_data['airdrops']),
+        airdrops_data['poap_airdrops'],
+    )
 
 
-def get_poap_airdrop_data(name: str, data_dir: Path) -> dict[str, Any]:
-    airdrops_dir = data_dir / 'airdrops_poap'
-    airdrops_dir.mkdir(parents=True, exist_ok=True)
-    filename = airdrops_dir / f'{name}.json'
+def _maybe_get_updated_file(
+        data_dir: Path,
+        name: str,
+        file_hash: str,
+        remote_url: str,
+        process_response: Callable[[Response, Path], None],
+) -> Path:
+    """Downloads the file if cached hash is different and returns its path."""
+    data_dir.mkdir(parents=True, exist_ok=True)
+    filename = data_dir / f'{name}'
+
+    with GlobalDBHandler().conn.read_ctx() as cursor:
+        if (existing_airdrop_hash := globaldb_get_unique_cache_value(
+            cursor=cursor,
+            key_parts=(CacheType.AIRDROPS_HASH, name),
+        )) != file_hash:
+            log.info(
+                f'Found a new {name} airdrop file hash: {file_hash}. '
+                f'Removing the old file with hash: {existing_airdrop_hash}, '
+                'and downloading new one.',
+            )
+            filename.unlink(missing_ok=True)
+
     if not filename.is_file():
-        # if not cached, get it from the gist
+        # if not cached, get it from the remote data repo
         try:
-            request = requests.get(url=POAP_AIRDROPS[name][0], timeout=CachedSettings().get_timeout_tuple())  # noqa: E501
+            response = requests.get(url=remote_url, timeout=(30, 100))  # a large read timeout is necessary because the queried data is quite large  # noqa: E501
         except requests.exceptions.RequestException as e:
-            raise RemoteError(f'POAP airdrops Gist request failed due to {e!s}') from e
+            raise RemoteError(f'Airdrops file request failed due to {e!s}') from e
+        process_response(response, filename)
 
+        with GlobalDBHandler().conn.write_ctx() as write_cursor:
+            globaldb_set_unique_cache_value(
+                write_cursor=write_cursor,
+                key_parts=(CacheType.AIRDROPS_HASH, name),
+                value=file_hash,
+            )
+
+    return filename
+
+
+def get_airdrop_data(airdrop_data: AirdropFileMetadata, name: str, data_dir: Path) -> pl.LazyFrame:
+    """Returns the airdrop's file after downloading it locally for the first time.
+    If a new file is found in the index, it will be downloaded again to update the local copy
+    and return new data."""
+    airdrops_dir = data_dir / APPDIR_NAME / AIRDROPSDIR_NAME
+
+    def _process_parquet(response: Response, filename: Path) -> None:
+        filename.write_bytes(response.content)
         try:
-            json_data = jsonloads_dict(request.content.decode('utf-8'))
+            pl.scan_parquet(filename).select(pl.selectors.by_index(0, 1)).first().collect()
+        except pl.exceptions.PolarsError as e:
+            filename.unlink()
+            log.error(f'Deleted invalid parquet file {filename} due to {e}')
+            raise RemoteError(f'Invalid parquet file for {name}. Removing it.') from e
+
+    filename = _maybe_get_updated_file(
+        data_dir=airdrops_dir,
+        file_hash=airdrop_data.file_hash,
+        name=f'{name}.parquet',
+        remote_url=airdrop_data.file_path,
+        process_response=_process_parquet,
+    )
+
+    return pl.scan_parquet(filename)
+
+
+def get_poap_airdrop_data(airdrop_data: list[str], name: str, data_dir: Path) -> dict[str, Any]:
+    """Returns a dictionary of POAP airdrop data after downloading it locally for the first time.
+    If a new JSON is found in the index, it will be downloaded again to update the local JSON file
+    and return its data."""
+    airdrops_dir = data_dir / APPDIR_NAME / AIRDROPSPOAPDIR_NAME
+
+    def _process_json(response: Response, filename: Path) -> None:
+        try:
+            json_data = jsonloads_dict(response.content.decode('utf-8'))
         except JSONDecodeError as e:
-            raise RemoteError(f'POAP airdrops Gist contains an invalid JSON {e!s}') from e
+            log.error(f"POAP airdrop {name}'s JSON is invalid {e!s}")
+            json_data = {}
 
-        with open(filename, 'w', encoding='utf8') as outfile:
-            outfile.write(rlk_jsondumps(json_data))
+        filename.write_text(rlk_jsondumps(json_data), encoding='utf8')
 
-    with open(filename, encoding='utf8') as infile:
-        data_dict = jsonloads_dict(infile.read())
-    return data_dict
+    filename = _maybe_get_updated_file(
+        data_dir=airdrops_dir,
+        file_hash=airdrop_data[3],
+        name=f'{name}.json',
+        remote_url=f'{AIRDROPS_REPO_BASE}/{airdrop_data[0]}',
+        process_response=_process_json,
+    )
+
+    return jsonloads_dict(Path(filename).read_text(encoding='utf8'))
 
 
 def calculate_claimed_airdrops(
-        airdrop_data: list[tuple[ChecksumEvmAddress, Asset, FValWithTolerance]],
+        airdrop_data: Sequence[AirdropClaimEventQueryParams],
         database: DBHandler,
-) -> list[tuple[ChecksumEvmAddress, Asset, FVal]]:
+) -> Sequence[tuple[ChecksumEvmAddress, str]]:
     """Calculates which of the given airdrops have been claimed.
     It does so by checking if there is a claim history event in the database
     that matches the airdrop data (address, asset and amount). It returns a list
@@ -348,31 +344,237 @@ def calculate_claimed_airdrops(
     if len(airdrop_data) == 0:
         return []
 
-    query_parts = []
-    bindings = [HistoryEventType.RECEIVE.serialize(), HistoryEventSubType.AIRDROP.serialize()]
-    for airdrop_info in airdrop_data:
-        amount_with_tolerance = airdrop_info[2]
-        amount = amount_with_tolerance.value
-        half_range = amount_with_tolerance.tolerance / 2
-        query_parts.append('events.location_label=? AND events.asset=? AND CAST(events.amount AS REAL) BETWEEN ? AND ?')  # noqa: E501
-        bindings.extend([airdrop_info[0], airdrop_info[1].serialize(), str(amount - half_range), str(amount + half_range)])  # noqa: E501
-
-    query_part = ' OR '.join(query_parts)
+    claimed_events = []
     with database.conn.read_ctx() as cursor:
-        claim_events = cursor.execute(
-            'SELECT events.location_label, events.asset, events.amount '
-            'FROM history_events AS events '
-            'WHERE events.type=? AND events.subtype=? '
-            f'AND {query_part}',
-            tuple(bindings),
-        ).fetchall()
+        for airdrop_info in airdrop_data:
+            amount = airdrop_info.tolerance.value
+            half_range = airdrop_info.tolerance.tolerance / 2
 
-    return [(event[0], event[1], event[2]) for event in claim_events]
+            for address, db_extra_data, in cursor.execute(
+                'SELECT events.location_label,evm_events.extra_data FROM history_events '
+                'AS events LEFT JOIN evm_events_info AS evm_events ON '
+                'events.identifier=evm_events.identifier WHERE(events.type=? AND events.subtype=? '
+                'AND events.location_label=? AND events.asset=? AND CAST(events.amount AS REAL) '
+                'BETWEEN ? AND ?);',
+                (
+                    airdrop_info.event_type.serialize(),
+                    airdrop_info.event_subtype.serialize(),
+                    airdrop_info.location_label,
+                    airdrop_info.asset.serialize(),
+                    str(amount - half_range),
+                    str(amount + half_range),
+                ),
+            ):
+                if db_extra_data is None:
+                    log.warning(
+                        f'Found no extra_data for an airdrop claim event of {airdrop_info.asset!s}'
+                        f' for address {address!s} in the DB. Skipping airdrop claim check.',
+                    )
+                    continue
+
+                try:
+                    extra_data = json.loads(db_extra_data)
+                except json.JSONDecodeError as e:
+                    log.error(
+                        f'Failed to read extra_data when reading EvmEvent entry '
+                        f'{db_extra_data} from the DB due to {e!s}. Skipping airdrop claim check.',
+                    )
+
+                if AIRDROP_IDENTIFIER_KEY not in extra_data:
+                    log.warning(
+                        f'"{AIRDROP_IDENTIFIER_KEY}" not found in the extra_data for an airdrop '
+                        f'claim event of {airdrop_info.asset!s} for address {address!s} in the DB.'
+                        'Skipping airdrop claim check.',
+                    )
+                    continue
+
+                if airdrop_info.protocol == extra_data[AIRDROP_IDENTIFIER_KEY]:
+                    claimed_events.append((address, airdrop_info.protocol))
+
+    return claimed_events
+
+
+def process_airdrop_with_api_data(
+        addresses: Sequence[ChecksumEvmAddress],
+        airdrop_data: AirdropAPIData,
+        protocol_name: str,
+        tolerance_for_amount_check: FVal,
+) -> tuple[list[AirdropClaimEventQueryParams], dict[ChecksumEvmAddress, dict]]:
+    """Query the airdrops that have information available only by consuming APIs
+    with the user addresses.
+
+    It returns a list of `AirdropClaimEventQueryParams` used to filter the history
+    events with the expected amount received and the combination of types and a mapping
+    with information about the asset for the airdrop, the amount, deadlines and other
+    relevant details.
+    """
+    timeout_tuple = CachedSettings().get_timeout_tuple()
+    found_data: dict[ChecksumEvmAddress, dict] = defaultdict(lambda: defaultdict(dict))
+    temp_airdrop_tuples = []
+    for address in addresses:
+        try:
+            response = requests.get(
+                url=airdrop_data.api_url.format(address=address),
+                timeout=timeout_tuple,
+                headers={  # headers added by yabir. Without them eigen flags as bot the requests
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:127.0) Gecko/20100101 Firefox/127.0',  # noqa: E501
+                    'Accept-Encoding': 'gzip, deflate, br, zstd',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',  # noqa: E501
+                },
+            )
+            data: dict[str, Any] = response.json()
+        except requests.exceptions.RequestException as e:
+            log.error(
+                f'Failed to query {protocol_name} airdrop API for address {address} due to {e}. '
+                f'{response.text=}',
+            )
+            continue
+
+        if response.status_code >= 400:
+            log.error(
+                f'Error response from {protocol_name} API for {address}: {data}. '
+                'Skipping airdrop',
+            )
+            continue
+
+        try:
+            token_num = data
+            for key in airdrop_data.amount_path.split(JSON_PATH_SEPARATOR_API_AIRDROPS):
+                token_num = token_num[key]
+        except KeyError as e:
+            log.error(
+                f'Could not find {airdrop_data.amount_path} in {data} for {protocol_name}. '
+                f'Missing key {e}. Skipping',
+            )
+            continue
+
+        try:
+            amount = deserialize_int(cast(int, token_num))
+        except DeserializationError as e:
+            log.error(f'Failed to read amount from {protocol_name} API: {e}. Skipping')
+            continue
+
+        if amount == 0:
+            continue
+
+        found_data[address][protocol_name] = {
+            'amount': str(amount),
+            'asset': airdrop_data.asset,
+            'link': airdrop_data.url,
+            'claimed': False,
+            'has_decoder': airdrop_data.has_decoder,
+        }
+        if airdrop_data.cutoff_time is not None:
+            found_data[address][protocol_name]['cutoff_time'] = airdrop_data.cutoff_time
+
+        _enrich_user_airdrop_data(
+            user_data=found_data[address],
+            protocol_name=protocol_name,
+            airdrop_data=airdrop_data,
+        )
+
+        temp_airdrop_tuples.append(
+            AirdropClaimEventQueryParams(
+                protocol=protocol_name,
+                event_type=HistoryEventType.RECEIVE,
+                event_subtype=HistoryEventSubType.AIRDROP,
+                location_label=address,
+                asset=airdrop_data.asset,
+                tolerance=FValWithTolerance(
+                    value=FVal(amount),
+                    tolerance=tolerance_for_amount_check,
+                ),
+            ),
+        )
+
+    return temp_airdrop_tuples, found_data
+
+
+def _process_airdrop_file(
+        addresses: Sequence[ChecksumEvmAddress],
+        data_dir: Path,
+        airdrop_data: AirdropFileMetadata,
+        protocol_name: str,
+        tolerance_for_amount_check: FVal,
+) -> tuple[list[AirdropClaimEventQueryParams], dict[ChecksumEvmAddress, dict]]:
+    """Process airdrop file to find the addresses that have a claimable amount.
+
+    It returns a list of `AirdropClaimEventQueryParams` used to filter the history
+    events with the expected amount received and the combination of types and a mapping
+    with information about the asset for the airdrop, the amount, deadlines and other
+    relevant details.
+    """
+
+    # In the shutter airdrop the claim of the vested SHU is decoded as informational/none
+    if protocol_name == 'shutter':
+        claim_event_type = HistoryEventType.INFORMATIONAL
+        claim_event_subtype = HistoryEventSubType.NONE
+    else:
+        claim_event_type = HistoryEventType.RECEIVE
+        claim_event_subtype = HistoryEventSubType.AIRDROP
+
+    # temporarily store this protocol's data here
+    temp_found_data: dict[ChecksumEvmAddress, dict] = defaultdict(lambda: defaultdict(dict))
+    temp_airdrop_tuples = []
+    airdrop_lazy_dataframe = get_airdrop_data(airdrop_data, protocol_name, data_dir)
+
+    for (address, amount_raw) in (
+        airdrop_lazy_dataframe.filter(
+            pl.selectors.by_index(0).is_in(addresses),
+        ).select(
+            pl.selectors.by_index(0, 1),  # select only first two columns (addr, amount)
+        ).collect().rows()
+    ):
+        if protocol_name in {
+            'cornichon',
+            'tornado',
+            'grain',
+            'lido',
+            'sdl',
+            'cow_mainnet',
+            'cow_gnosis',
+        }:
+            amount = token_normalized_value_decimals(int(amount_raw), 18)
+        else:
+            amount = amount_raw
+
+        if address in addresses:
+            addr = string_to_evm_address(address)
+            temp_found_data[addr][protocol_name] = {
+                'amount': str(amount),
+                'asset': airdrop_data.asset,
+                'link': airdrop_data.url,
+                'claimed': False,
+                'has_decoder': airdrop_data.has_decoder,
+            }
+            if airdrop_data.cutoff_time is not None:
+                temp_found_data[addr][protocol_name]['cutoff_time'] = airdrop_data.cutoff_time
+
+            _enrich_user_airdrop_data(
+                user_data=temp_found_data[addr],
+                protocol_name=protocol_name,
+                airdrop_data=airdrop_data,
+            )
+            temp_airdrop_tuples.append(
+                AirdropClaimEventQueryParams(
+                    protocol=protocol_name,
+                    event_type=claim_event_type,
+                    event_subtype=claim_event_subtype,
+                    location_label=addr,
+                    asset=airdrop_data.asset,
+                    tolerance=FValWithTolerance(
+                        value=FVal(amount),
+                        tolerance=tolerance_for_amount_check,
+                    ),
+                ),
+            )
+    return temp_airdrop_tuples, temp_found_data
 
 
 def check_airdrops(
         addresses: Sequence[ChecksumEvmAddress],
         database: DBHandler,
+        data_dir: Path,
         tolerance_for_amount_check: FVal = ZERO,
 ) -> dict[ChecksumEvmAddress, dict]:
     """Checks airdrop data for the given list of ethereum addresses
@@ -381,54 +583,39 @@ def check_airdrops(
         - RemoteError if the remote request fails
     """
     found_data: dict[ChecksumEvmAddress, dict] = defaultdict(lambda: defaultdict(dict))
-    data_dir = database.user_data_dir.parent
     airdrop_tuples = []
-    for protocol_name, airdrop_data in AIRDROPS.items():
-        for row in get_airdrop_data(protocol_name, data_dir):
-            if len(row) < 2:
-                raise UnableToDecryptRemoteData(
-                    f'Airdrop CSV for {protocol_name} contains an invalid row: {row}',
-                )
-            addr, amount, *_ = row
-            # not doing to_checksum_address() here since the file addresses are checksummed
-            # and doing to_checksum_address() so many times hits performance
-            if protocol_name in {
-                'cornichon',
-                'tornado',
-                'grain',
-                'lido',
-                'sdl',
-                'cow_mainnet',
-                'cow_gnosis',
-            }:
-                amount = token_normalized_value_decimals(int(amount), 18)  # type: ignore
-            if addr in addresses:
-                asset = airdrop_data[1]
-                found_data[addr][protocol_name] = {  # type: ignore
-                    'amount': str(amount),
-                    'asset': asset,
-                    'link': airdrop_data[2],
-                    'claimed': False,
-                }
-                airdrop_tuples.append((
-                    string_to_evm_address(addr),
-                    asset,
-                    FValWithTolerance(
-                        value=FVal(amount),
-                        tolerance=tolerance_for_amount_check,
-                    ),
-                ))
+    airdrops, poap_airdrops = fetch_airdrops_metadata(database=database)
 
-    asset_to_protocol = {item[1]: protocol for protocol, item in AIRDROPS.items()}
+    for protocol_name, airdrop_data in airdrops.items():
+        if isinstance(airdrop_data, AirdropFileMetadata):
+            temp_airdrop_tuples, temp_found_data = _process_airdrop_file(
+                addresses=addresses,
+                data_dir=data_dir,
+                airdrop_data=airdrop_data,
+                protocol_name=protocol_name,
+                tolerance_for_amount_check=tolerance_for_amount_check,
+            )
+        else:  # airdrop with api metadata AirdropAPIData
+            temp_airdrop_tuples, temp_found_data = process_airdrop_with_api_data(
+                addresses=addresses,
+                airdrop_data=airdrop_data,  # type: ignore
+                protocol_name=protocol_name,
+                tolerance_for_amount_check=tolerance_for_amount_check,
+            )
+
+        airdrop_tuples.extend(temp_airdrop_tuples)
+        for temp_addr, data in temp_found_data.items():
+            found_data[temp_addr].update(data)
+
     claim_events_tuple = calculate_claimed_airdrops(
         airdrop_data=airdrop_tuples,
         database=database,
     )
     for event_tuple in claim_events_tuple:
-        found_data[event_tuple[0]][asset_to_protocol[event_tuple[1]]]['claimed'] = True
+        found_data[event_tuple[0]][event_tuple[1]]['claimed'] = True
 
-    for protocol_name, poap_airdrop_data in POAP_AIRDROPS.items():
-        data_dict = get_poap_airdrop_data(protocol_name, data_dir)
+    for protocol_name, poap_airdrop_data in poap_airdrops.items():
+        data_dict = get_poap_airdrop_data(poap_airdrop_data, protocol_name, data_dir)
         for addr, assets in data_dict.items():
             # not doing to_checksum_address() here since the file addresses are checksummed
             # and doing to_checksum_address() so many times hits performance

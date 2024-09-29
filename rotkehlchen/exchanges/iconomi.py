@@ -11,7 +11,7 @@ from urllib.parse import urlencode
 import requests
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.assets.converters import UNSUPPORTED_ICONOMI_ASSETS, asset_from_iconomi
+from rotkehlchen.assets.converters import asset_from_iconomi
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import A_AUST
 from rotkehlchen.errors.asset import UnknownAsset, UnsupportedAsset
@@ -26,6 +26,7 @@ from rotkehlchen.exchanges.data_structures import (
     TradeType,
 )
 from rotkehlchen.exchanges.exchange import ExchangeInterface, ExchangeQueryBalances
+from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.serialization.deserialize import (
@@ -103,9 +104,9 @@ class Iconomi(ExchangeInterface):
             api_key=api_key,
             secret=secret,
             database=database,
+            msg_aggregator=msg_aggregator,
         )
         self.uri = 'https://api.iconomi.com'
-        self.msg_aggregator = msg_aggregator
         self.aust = A_AUST.resolve_to_asset_with_oracles()
 
     def _generate_signature(self, request_type: str, request_path: str, timestamp: str) -> str:
@@ -184,10 +185,8 @@ class Iconomi(ExchangeInterface):
                 raise RemoteError(json_ret['message'])
 
             raise RemoteError(
-                'ICONOMI api request for {} failed with HTTP status code {}'.format(
-                    response.url,
-                    response.status_code,
-                ),
+                f'ICONOMI api request for {response.url} '
+                f'failed with HTTP status code {response.status_code}',
             )
 
         return json_ret
@@ -250,11 +249,16 @@ class Iconomi(ExchangeInterface):
                     amount=amount,
                     usd_value=usd_value,
                 )
-            except (UnknownAsset, UnsupportedAsset) as e:
-                asset_tag = 'unknown' if isinstance(e, UnknownAsset) else 'unsupported'
+            except UnsupportedAsset:
                 self.msg_aggregator.add_warning(
-                    f'Found {asset_tag} ICONOMI asset {ticker}. '
+                    f'Found unsupported ICONOMI asset {ticker}. '
                     f' Ignoring its balance query.',
+                )
+                continue
+            except UnknownAsset as e:
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='balance query',
                 )
                 continue
 
@@ -266,7 +270,7 @@ class Iconomi(ExchangeInterface):
                 # value in Anchor UST (AUST). That's why we report the user balance for this
                 # strategy as usd_value / AUST price.
                 try:
-                    aust_usd_price = Inquirer().find_usd_price(asset=A_AUST)
+                    aust_usd_price = Inquirer.find_usd_price(asset=A_AUST)
                 except RemoteError as e:
                     self.msg_aggregator.add_error(
                         f'Error processing ICONOMI balance entry due to inability to '
@@ -336,9 +340,10 @@ class Iconomi(ExchangeInterface):
                 try:
                     trades.append(trade_from_iconomi(tx))
                 except UnknownAsset as e:
-                    self.msg_aggregator.add_warning(
-                        f'Ignoring an iconomi transaction because of unsupported '
-                        f'asset {e!s}')
+                    self.send_unknown_asset_message(
+                        asset_identifier=e.identifier,
+                        details='transaction',
+                    )
                 except (DeserializationError, KeyError) as e:
                     msg = str(e)
                     if isinstance(e, KeyError):
@@ -365,7 +370,7 @@ class Iconomi(ExchangeInterface):
         for asset_info in resp:
             if not asset_info['supported']:
                 continue
-            if asset_info['ticker'] in UNSUPPORTED_ICONOMI_ASSETS:
+            if GlobalDBHandler.is_asset_symbol_unsupported(Location.ICONOMI, asset_info['ticker']):
                 continue
             tickers.append(asset_info['ticker'])
 

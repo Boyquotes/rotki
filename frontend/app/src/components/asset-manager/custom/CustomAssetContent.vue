@@ -1,90 +1,59 @@
 <script setup lang="ts">
-import { type Nullable } from '@/types';
-import { type Collection } from '@/types/collection';
-import {
-  type Filters,
-  type Matcher
-} from '@/composables/filters/custom-assets';
-import {
-  type CustomAsset,
-  type CustomAssetRequestPayload
-} from '@/types/asset';
+import type { Nullable } from '@rotki/common';
+import type { Collection } from '@/types/collection';
+import type { Filters, Matcher } from '@/composables/filters/custom-assets';
+import type { CustomAsset, CustomAssetRequestPayload } from '@/types/asset';
 
 const props = withDefaults(
   defineProps<{
     identifier?: string | null;
     mainPage?: boolean;
   }>(),
-  { identifier: null, mainPage: false }
+  { identifier: null, mainPage: false },
 );
+
+const { t } = useI18n();
 
 const { identifier, mainPage } = toRefs(props);
 
 const types = ref<string[]>([]);
 
-const dialogTitle = computed<string>(() =>
-  get(editableItem)
-    ? t('asset_management.edit_title')
-    : t('asset_management.add_title')
-);
-
 const router = useRouter();
 const route = useRoute();
-const { t } = useI18n();
-const { deleteCustomAsset, queryAllCustomAssets, getCustomAssetTypes } =
-  useAssetManagementApi();
+
+const { deleteCustomAsset, queryAllCustomAssets, getCustomAssetTypes } = useAssetManagementApi();
 const { setMessage } = useMessageStore();
 
 const { show } = useConfirmStore();
 
 const { setOpenDialog, setPostSubmitFunc } = useCustomAssetForm();
 
-const add = () => {
-  set(editableItem, null);
-  setOpenDialog(true);
-};
-
-const edit = (editAsset: CustomAsset) => {
-  set(editableItem, editAsset);
-  setOpenDialog(true);
-};
-
-const deleteAsset = async (assetId: string) => {
+async function deleteAsset(assetId: string) {
   try {
     const success = await deleteCustomAsset(assetId);
-    if (success) {
+    if (success)
       await refresh();
-    }
-  } catch (e: any) {
+  }
+  catch (error: any) {
     setMessage({
       description: t('asset_management.delete_error', {
         address: assetId,
-        message: e.message
-      })
+        message: error.message,
+      }),
     });
   }
-};
-
-const editAsset = (assetId: Nullable<string>) => {
-  if (assetId) {
-    const asset = get(state).data.find(({ identifier: id }) => id === assetId);
-    if (asset) {
-      edit(asset);
-    }
-  }
-};
+}
 
 const {
   state,
   filters,
   expanded,
   matchers,
-  options,
   fetchData,
-  setFilter,
-  setOptions,
   isLoading: loading,
-  editableItem
+  editableItem,
+  pagination,
+  sort,
 } = usePaginationFilters<
   CustomAsset,
   CustomAssetRequestPayload,
@@ -94,32 +63,54 @@ const {
   Matcher
 >(null, mainPage, () => useCustomAssetFilter(types), queryAllCustomAssets, {
   defaultSortBy: {
-    key: 'name',
-    ascending: [false]
-  }
+    key: ['name'],
+    ascending: [false],
+  },
 });
 
-const refreshTypes = async () => {
-  set(types, await getCustomAssetTypes());
-};
+const dialogTitle = computed<string>(() =>
+  get(editableItem) ? t('asset_management.edit_title') : t('asset_management.add_title'),
+);
 
-const refresh = async () => {
+function add() {
+  set(editableItem, null);
+  setOpenDialog(true);
+}
+
+function edit(editAsset: CustomAsset) {
+  set(editableItem, editAsset);
+  setOpenDialog(true);
+}
+
+function editAsset(assetId: Nullable<string>) {
+  if (assetId) {
+    const asset = get(state).data.find(({ identifier: id }) => id === assetId);
+    if (asset)
+      edit(asset);
+  }
+}
+
+async function refreshTypes() {
+  set(types, await getCustomAssetTypes());
+}
+
+async function refresh() {
   await Promise.all([fetchData(), refreshTypes()]);
-};
+}
 
 setPostSubmitFunc(refresh);
 
-const showDeleteConfirmation = (item: CustomAsset) => {
+function showDeleteConfirmation(item: CustomAsset) {
   show(
     {
       title: t('asset_management.confirm_delete.title'),
       message: t('asset_management.confirm_delete.message', {
-        asset: item?.name ?? ''
-      })
+        asset: item?.name ?? '',
+      }),
     },
-    async () => await deleteAsset(item.identifier)
+    async () => await deleteAsset(item.identifier),
   );
-};
+}
 
 onMounted(async () => {
   await refresh();
@@ -132,18 +123,13 @@ onMounted(async () => {
   }
 });
 
-watch(identifier, assetId => {
+watch(identifier, (assetId) => {
   editAsset(assetId);
 });
 </script>
 
 <template>
-  <TablePageLayout
-    :title="[
-      t('navigation_menu.manage_assets'),
-      t('navigation_menu.manage_assets_sub.custom_assets')
-    ]"
-  >
+  <TablePageLayout :title="[t('navigation_menu.manage_assets'), t('navigation_menu.manage_assets_sub.custom_assets')]">
     <template #buttons>
       <RuiButton
         color="primary"
@@ -157,7 +143,11 @@ watch(identifier, assetId => {
         {{ t('common.refresh') }}
       </RuiButton>
 
-      <RuiButton data-cy="managed-asset-add-btn" color="primary" @click="add()">
+      <RuiButton
+        data-cy="managed-asset-add-btn"
+        color="primary"
+        @click="add()"
+      >
         <template #prepend>
           <RuiIcon name="add-line" />
         </template>
@@ -165,18 +155,16 @@ watch(identifier, assetId => {
       </RuiButton>
     </template>
     <CustomAssetTable
+      v-model:filters="filters"
+      v-model:expanded="expanded"
+      v-model:pagination="pagination"
+      v-model:sort="sort"
       :assets="state.data"
       :loading="loading"
       :server-item-length="state.found"
-      :filters="filters"
       :matchers="matchers"
-      :expanded="expanded"
-      :options="options"
       @edit="edit($event)"
       @delete-asset="showDeleteConfirmation($event)"
-      @update:pagination="setOptions($event)"
-      @update:filters="setFilter($event)"
-      @update:expanded="expanded = $event"
     />
     <CustomAssetFormDialog
       :title="dialogTitle"

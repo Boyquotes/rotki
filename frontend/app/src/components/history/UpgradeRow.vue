@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { isDefined } from '@vueuse/shared';
-
 withDefaults(
   defineProps<{
     colspan: number;
@@ -10,30 +8,32 @@ withDefaults(
     events?: boolean;
     timeStart?: number;
     timeEnd?: number;
-    found: number;
+    found?: number;
     entriesFoundTotal?: number;
   }>(),
   {
     events: false,
     timeStart: 0,
     timeEnd: 0,
-    entriesFoundTotal: undefined
-  }
+    found: undefined,
+    entriesFoundTotal: undefined,
+  },
 );
 
 const { t } = useI18n();
-const { premiumURL } = useInterop();
-const { xs } = useDisplay();
 </script>
 
 <template>
-  <tr class="tr">
-    <td :colspan="xs ? 2 : colspan" class="upgrade-row font-medium">
-      <i18n
+  <tr class="bg-transparent">
+    <td
+      :colspan="colspan"
+      class="font-medium py-2"
+    >
+      <i18n-t
         v-if="events"
-        tag="span"
-        path="upgrade_row.events"
-        class="flex flex-row justify-center items-end"
+        keypath="upgrade_row.events"
+        tag="div"
+        class="md:text-center"
       >
         <template #total>
           {{ total }}
@@ -45,52 +45,48 @@ const { xs } = useDisplay();
           {{ label }}
         </template>
         <template #link>
-          <BaseExternalLink
-            class="ml-1"
+          <ExternalLink
             :text="t('upgrade_row.rotki_premium')"
-            :href="premiumURL"
+            premium
+            color="primary"
           />
         </template>
         <template #from>
-          <DateDisplay class="mx-1" :timestamp="timeStart" />
+          <DateDisplay
+            class="mx-1"
+            :timestamp="timeStart"
+          />
         </template>
         <template #to>
-          <DateDisplay class="ms-1" :timestamp="timeEnd" />
+          <DateDisplay
+            class="ml-1"
+            :timestamp="timeEnd"
+          />
         </template>
-      </i18n>
-      <i18n
+      </i18n-t>
+      <i18n-t
         v-else
-        tag="span"
-        path="upgrade_row.upgrade"
-        class="flex flex-row justify-center items-end"
+        tag="div"
+        keypath="upgrade_row.upgrade"
+        class="md:text-center"
       >
         <template #total>
-          {{ isDefined(entriesFoundTotal) ? entriesFoundTotal : total }}
+          {{ entriesFoundTotal ? entriesFoundTotal : total }}
         </template>
         <template #limit>
-          {{ isDefined(entriesFoundTotal) ? found : limit }}
+          {{ found !== undefined ? found : limit }}
         </template>
         <template #label>
           {{ label }}
         </template>
         <template #link>
-          <BaseExternalLink
-            class="ml-1"
+          <ExternalLink
             :text="t('upgrade_row.rotki_premium')"
-            :href="premiumURL"
+            premium
+            color="primary"
           />
         </template>
-      </i18n>
+      </i18n-t>
     </td>
   </tr>
 </template>
-
-<style>
-.tr {
-  background: transparent !important;
-}
-
-.upgrade-row {
-  height: 60px;
-}
-</style>

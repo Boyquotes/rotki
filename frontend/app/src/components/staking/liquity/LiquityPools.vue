@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { type LiquityPoolDetailEntry } from '@rotki/common/lib/liquity';
 import { Section } from '@/types/status';
+import type { LiquityPoolDetailEntry } from '@rotki/common';
 
 withDefaults(
   defineProps<{
     pool: LiquityPoolDetailEntry | null;
   }>(),
   {
-    pool: null
-  }
+    pool: null,
+  },
 );
 
 const { t } = useI18n();
@@ -31,7 +31,7 @@ const loading = isLoading(Section.DEFI_LIQUITY_STAKING_POOLS);
           :loading="loading"
         />
       </div>
-      <VDivider class="my-4" />
+      <RuiDivider class="my-4" />
       <div class="flex flex-col gap-1">
         <div class="flex items-center justify-between">
           <div class="text-rui-text-secondary">
@@ -59,7 +59,10 @@ const loading = isLoading(Section.DEFI_LIQUITY_STAKING_POOLS);
         </div>
       </div>
     </template>
-    <div v-else class="text-center text-rui-text-secondary pb-4">
+    <div
+      v-else
+      class="text-center text-rui-text-secondary pb-4"
+    >
       {{ t('liquity_pools.no_lusd_deposited') }}
     </div>
   </RuiCard>

@@ -1,3 +1,4 @@
+import shutil
 from collections.abc import Callable
 from contextlib import ExitStack
 from pathlib import Path
@@ -17,6 +18,7 @@ from rotkehlchen.globaldb.upgrades.manager import UPGRADES_LIST
 from rotkehlchen.globaldb.utils import GLOBAL_DB_VERSION
 from rotkehlchen.history.types import HistoricalPrice, HistoricalPriceOracle
 from rotkehlchen.tests.utils.database import mock_db_schema_sanity_check
+from rotkehlchen.tests.utils.decoders import patch_decoder_reload_data
 from rotkehlchen.tests.utils.globaldb import patch_for_globaldb_upgrade_to
 from rotkehlchen.types import Price, Timestamp
 
@@ -68,6 +70,18 @@ def fixture_empty_global_addressbook() -> bool:
     return False
 
 
+@pytest.fixture(name='remove_global_assets')
+def fixture_remove_global_assets() -> list[str]:
+    """Asset identifiers to remove from the globalDB"""
+    return []
+
+
+@pytest.fixture(name='load_global_caches')
+def fixture_load_global_caches() -> list[str]:
+    """A list of counterparties of the decoders for which the global cache should be loaded."""
+    return []
+
+
 def create_globaldb(
         data_directory,
         sql_vm_instructions_cb,
@@ -93,7 +107,9 @@ def _initialize_fixture_globaldb(
         globaldb_migrations,
         run_globaldb_migrations,
         empty_global_addressbook,
-) -> GlobalDBHandler:
+        remove_global_assets,
+        load_global_caches,
+) -> tuple[GlobalDBHandler, Path]:
     # clean the previous resolver memory cache, as it
     # may have cached results from a discarded database
     AssetResolver().clean_memory_cache()
@@ -125,13 +141,21 @@ def _initialize_fixture_globaldb(
             stack.enter_context(mock_db_schema_sanity_check())
             patch_for_globaldb_upgrade_to(stack, target_globaldb_version)
 
+        stack.enter_context(patch_decoder_reload_data(load_global_caches))
         globaldb = create_globaldb(new_data_dir, sql_vm_instructions_cb)
 
     if empty_global_addressbook is True:
         with globaldb.conn.write_ctx() as cursor:
             cursor.execute('DELETE FROM address_book')
 
-    return globaldb
+    if len(remove_global_assets) > 0:
+        with globaldb.conn.write_ctx() as cursor:
+            cursor.executemany(
+                'DELETE FROM assets WHERE identifier=?;',
+                [(asset,) for asset in remove_global_assets],
+            )
+
+    return globaldb, new_data_dir
 
 
 @pytest.fixture(name='globaldb')
@@ -145,8 +169,10 @@ def fixture_globaldb(
         globaldb_migrations,
         run_globaldb_migrations,
         empty_global_addressbook,
+        remove_global_assets,
+        load_global_caches,
 ):
-    globaldb = _initialize_fixture_globaldb(
+    globaldb, new_data_dir = _initialize_fixture_globaldb(
         custom_globaldb=custom_globaldb,
         tmpdir_factory=tmpdir_factory,
         sql_vm_instructions_cb=sql_vm_instructions_cb,
@@ -156,10 +182,13 @@ def fixture_globaldb(
         globaldb_migrations=globaldb_migrations,
         run_globaldb_migrations=run_globaldb_migrations,
         empty_global_addressbook=empty_global_addressbook,
+        remove_global_assets=remove_global_assets,
+        load_global_caches=load_global_caches,
     )
     yield globaldb
 
     globaldb.cleanup()
+    shutil.rmtree(new_data_dir)
 
 
 @pytest.fixture(name='custom_globaldb')
@@ -168,7 +197,7 @@ def fixture_custom_globaldb() -> int | None:
 
 
 @pytest.fixture(name='historical_price_test_data')
-def fixture_historical_price_test_data(globaldb):  # noqa: PT004  # adding _ won't export it
+def fixture_historical_price_test_data(globaldb):
     data = [HistoricalPrice(
         from_asset=A_BTC,
         to_asset=A_EUR,

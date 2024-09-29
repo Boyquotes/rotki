@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+import pytest
+
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.assets import A_BTC
@@ -9,6 +11,13 @@ from rotkehlchen.fval import FVal
 from rotkehlchen.tests.utils.mock import MockResponse
 from rotkehlchen.types import AssetMovementCategory
 from rotkehlchen.utils.misc import ts_now
+
+TEST_BITMEX_WITHDRAWAL = """[{
+"transactID": "b6c6fd2c-4d0c-b101-a41c-fa5aa1ce7ef1", "account": 126541, "currency": "XBt",
+ "transactType": "Withdrawal", "amount": 16960386, "fee": 800, "transactStatus": "Completed",
+ "address": "", "tx": "", "text": "", "transactTime": "2018-09-15T12:30:56.475Z",
+ "walletBalance": 103394923, "marginBalance": null,
+ "timestamp": "2018-09-15T12:30:56.475Z"}]"""
 
 
 def test_name():
@@ -66,56 +75,51 @@ def test_bitmex_api_withdrawals_deposit_and_query_after_subquery(sandbox_bitmex)
         end_ts=now,
         only_cache=False,
     )
-    expected_result = [
-        AssetMovement(
-            location=Location.BITMEX,
-            category=AssetMovementCategory.DEPOSIT,
-            address=None,
-            transaction_id=None,
-            timestamp=1536486278,
-            asset=A_BTC,
-            amount=FVal('0.46966992'),
-            fee_asset=A_BTC,
-            fee=ZERO,
-            link='166b9aac-70ac-cedc-69a0-dbd12c0661bf',
-        ),
-        AssetMovement(
-            location=Location.BITMEX,
-            category=AssetMovementCategory.DEPOSIT,
-            address=None,
-            transaction_id=None,
-            timestamp=1537014656,
-            asset=A_BTC,
-            amount=FVal(0.16960386),
-            fee_asset=A_BTC,
-            fee=FVal(0E-8),
-            link='b6c6fd2c-4d0c-b101-a41c-fa5aa1ce7ef1',
-        ),
-        AssetMovement(
-            location=Location.BITMEX,
-            category=AssetMovementCategory.DEPOSIT,
-            address=None,
-            transaction_id=None,
-            timestamp=1536563759,
-            asset=A_BTC,
-            amount=FVal('0.38474377'),
-            fee_asset=A_BTC,
-            fee=ZERO,
-            link='72500751-d052-5bbb-18d7-08363edef812',
-        ),
-        AssetMovement(
-            location=Location.BITMEX,
-            category=AssetMovementCategory.WITHDRAWAL,
-            address='mv4rnyY3Su5gjcDNzbMLKBQkBicCtHUtFB',
-            transaction_id=None,
-            timestamp=1536536707,
-            asset=A_BTC,
-            amount=FVal('0.00700000'),
-            fee_asset=A_BTC,
-            fee=FVal('0.00300000'),
-            link='bf19ca4e-e084-11f9-12cd-6ae41e26f9db',
-        ),
-    ]
+    expected_result = [AssetMovement(
+        location=Location.BITMEX,
+        category=AssetMovementCategory.DEPOSIT,
+        address=None,
+        transaction_id=None,
+        timestamp=1536486278,
+        asset=A_BTC,
+        amount=FVal('0.46966992'),
+        fee_asset=A_BTC,
+        fee=ZERO,
+        link='166b9aac-70ac-cedc-69a0-dbd12c0661bf',
+    ), AssetMovement(
+        location=Location.BITMEX,
+        category=AssetMovementCategory.WITHDRAWAL,
+        address='mv4rnyY3Su5gjcDNzbMLKBQkBicCtHUtFB',
+        transaction_id=None,
+        timestamp=1536536707,
+        asset=A_BTC,
+        amount=FVal('0.00700000'),
+        fee_asset=A_BTC,
+        fee=FVal('0.00300000'),
+        link='bf19ca4e-e084-11f9-12cd-6ae41e26f9db',
+    ), AssetMovement(
+        location=Location.BITMEX,
+        category=AssetMovementCategory.DEPOSIT,
+        address=None,
+        transaction_id=None,
+        timestamp=1536563759,
+        asset=A_BTC,
+        amount=FVal('0.38474377'),
+        fee_asset=A_BTC,
+        fee=ZERO,
+        link='72500751-d052-5bbb-18d7-08363edef812',
+    ), AssetMovement(
+        location=Location.BITMEX,
+        category=AssetMovementCategory.DEPOSIT,
+        address=None,
+        transaction_id=None,
+        timestamp=1537014656,
+        asset=A_BTC,
+        amount=FVal(0.16960386),
+        fee_asset=A_BTC,
+        fee=FVal(0E-8),
+        link='b6c6fd2c-4d0c-b101-a41c-fa5aa1ce7ef1',
+    )]
     assert result == expected_result
     # also make sure that asset movements contain Asset and not strings
     for movement in result:
@@ -124,13 +128,7 @@ def test_bitmex_api_withdrawals_deposit_and_query_after_subquery(sandbox_bitmex)
 
 def test_bitmex_api_withdrawals_deposit_unexpected_data(sandbox_bitmex):
     """Test getting unexpected data in bitmex withdrawals deposit query is handled gracefully"""
-
-    original_input = """[{
-"transactID": "b6c6fd2c-4d0c-b101-a41c-fa5aa1ce7ef1", "account": 126541, "currency": "XBt",
- "transactType": "Withdrawal", "amount": 16960386, "fee": 800, "transactStatus": "Completed",
- "address": "", "tx": "", "text": "", "transactTime": "2018-09-15T12:30:56.475Z",
- "walletBalance": 103394923, "marginBalance": null,
- "timestamp": "2018-09-15T12:30:56.475Z"}]"""
+    original_input = TEST_BITMEX_WITHDRAWAL
     now = ts_now()
 
     def query_bitmex_and_test(input_str, expected_warnings_num, expected_errors_num):
@@ -163,10 +161,6 @@ def test_bitmex_api_withdrawals_deposit_unexpected_data(sandbox_bitmex):
     given_input = original_input.replace('"XBt"', '[]')
     query_bitmex_and_test(given_input, expected_warnings_num=0, expected_errors_num=1)
 
-    # unknown asset
-    given_input = original_input.replace('"XBt"', '"dadsdsa"')
-    query_bitmex_and_test(given_input, expected_warnings_num=1, expected_errors_num=0)
-
     # invalid amount
     given_input = original_input.replace('16960386', 'null')
     query_bitmex_and_test(given_input, expected_warnings_num=0, expected_errors_num=1)
@@ -188,6 +182,24 @@ def test_bitmex_api_withdrawals_deposit_unexpected_data(sandbox_bitmex):
     query_bitmex_and_test(given_input, expected_warnings_num=0, expected_errors_num=1)
 
 
+@pytest.mark.parametrize('function_scope_initialize_mock_rotki_notifier', [True])
+def test_bitmex_api_withdrawals_deposit_unknown_asset(mock_bitmex):
+    """Test getting unknown asset in bitmex withdrawals deposit query is handled gracefully"""
+
+    def mock_get_response(url, data, **kwargs):  # pylint: disable=unused-argument
+        return MockResponse(200, TEST_BITMEX_WITHDRAWAL.replace('"XBt"', '"dadsdsa"'))
+
+    with patch.object(mock_bitmex.session, 'get', side_effect=mock_get_response):
+        movements = mock_bitmex.query_online_deposits_withdrawals(
+            start_ts=0,
+            end_ts=ts_now(),
+        )
+
+    assert len(movements) == 0
+    assert len(mock_bitmex.msg_aggregator.rotki_notifier.messages) == 1
+
+
+@pytest.mark.vcr
 def test_bitmex_margin_history(sandbox_bitmex):
     result = sandbox_bitmex.query_margin_history(
         start_ts=1536492800,
@@ -195,113 +207,63 @@ def test_bitmex_margin_history(sandbox_bitmex):
     )
     assert len(result) == 0
 
-    until_9_results_ts = 1536615593
+    until_5_results_ts = 1536615593
     result = sandbox_bitmex.query_margin_history(
         start_ts=0,
-        end_ts=until_9_results_ts,
+        end_ts=until_5_results_ts,
     )
-    resulting_margin_positions = [
-        MarginPosition(
-            location=Location.BITMEX,
-            open_time=None,
-            close_time=1536580800,
-            profit_loss=FVal('0.00000003'),
-            pl_currency=A_BTC,
-            fee=ZERO,
-            fee_currency=A_BTC,
-            link='97402f76-828e-a8ea-5d26-920134924149',
-            notes='XBTZ18',
-        ),
-        MarginPosition(
-            location=Location.BITMEX,
-            open_time=None,
-            close_time=1536580800,
-            profit_loss=FVal('0.0000004'),
-            pl_currency=A_BTC,
-            fee=ZERO,
-            fee_currency=A_BTC,
-            link='c74e6967-1411-0ad1-e3e3-6f97a04d7202',
-            notes='XBTUSD',
-        ),
-        MarginPosition(
-            location=Location.BITMEX,
-            open_time=None,
-            close_time=1536580800,
-            profit_loss=FVal('0.00000183'),
-            pl_currency=A_BTC,
-            fee=ZERO,
-            fee_currency=A_BTC,
-            link='9c50e247-9bea-b10b-93c8-26845f202e9a',
-            notes='XBTJPY',
-        ),
-        MarginPosition(
-            location=Location.BITMEX,
-            open_time=None,
-            close_time=1536580800,
-            profit_loss=FVal('0.00000683'),
-            pl_currency=A_BTC,
-            fee=ZERO,
-            fee_currency=A_BTC,
-            link='9ab9f275-9132-64aa-4aa6-8c6503418ac6',
-            notes='ETHUSD',
-        ),
-        MarginPosition(
-            location=Location.BITMEX,
-            open_time=None,
-            close_time=1536494400,
-            profit_loss=FVal('0.00000002'),
-            pl_currency=A_BTC,
-            fee=ZERO,
-            fee_currency=A_BTC,
-            link='7366644c-15ba-baa4-b300-615b0c5db567',
-            notes='XRPU18',
-        ),
-        MarginPosition(
-            location=Location.BITMEX,
-            open_time=None,
-            close_time=1536494400,
-            profit_loss=FVal('0.00000003'),
-            pl_currency=A_BTC,
-            fee=ZERO,
-            fee_currency=A_BTC,
-            link='0227cf99-09d4-b6f0-86c3-69711cf8da1b',
-            notes='XBTUSD',
-        ),
-        MarginPosition(
-            location=Location.BITMEX,
-            open_time=None,
-            close_time=1536494400,
-            profit_loss=FVal('0.00000003'),
-            pl_currency=A_BTC,
-            fee=ZERO,
-            fee_currency=A_BTC,
-            link='fa0f5415-0867-6164-e366-d1c73c5558bd',
-            notes='XBTJPY',
-        ),
-        MarginPosition(
-            location=Location.BITMEX,
-            open_time=None,
-            close_time=1536494400,
-            profit_loss=FVal('0.00000005'),
-            pl_currency=A_BTC,
-            fee=ZERO,
-            fee_currency=A_BTC,
-            link='05c8bbc0-9b03-ff55-60b9-4f22fd2eeab2',
-            notes='ETHUSD',
-        ),
-        MarginPosition(
-            location=Location.BITMEX,
-            open_time=None,
-            close_time=1536494400,
-            profit_loss=FVal('-0.00007992'),
-            pl_currency=A_BTC,
-            fee=ZERO,
-            fee_currency=A_BTC,
-            link='df46338a-da5e-e16c-9753-3e863d83d92c',
-            notes='ETHU18',
-        ),
-    ]
-    assert result == resulting_margin_positions
+    expected_result = [MarginPosition(
+        location=Location.BITMEX,
+        open_time=None,
+        close_time=1536580800,
+        profit_loss=FVal('0.00000683'),
+        pl_currency=A_BTC,
+        fee=ZERO,
+        fee_currency=A_BTC,
+        link='9ab9f275-9132-64aa-4aa6-8c6503418ac6',
+        notes='ETHUSD',
+    ), MarginPosition(
+        location=Location.BITMEX,
+        open_time=None,
+        close_time=1536580800,
+        profit_loss=FVal('0.00000183'),
+        pl_currency=A_BTC,
+        fee=ZERO,
+        fee_currency=A_BTC,
+        link='9c50e247-9bea-b10b-93c8-26845f202e9a',
+        notes='XBTJPY',
+    ), MarginPosition(
+        location=Location.BITMEX,
+        open_time=None,
+        close_time=1536580800,
+        profit_loss=FVal('0.0000004'),
+        pl_currency=A_BTC,
+        fee=ZERO,
+        fee_currency=A_BTC,
+        link='c74e6967-1411-0ad1-e3e3-6f97a04d7202',
+        notes='XBTUSD',
+    ), MarginPosition(
+        location=Location.BITMEX,
+        open_time=None,
+        close_time=1536580800,
+        profit_loss=FVal('0.00000003'),
+        pl_currency=A_BTC,
+        fee=ZERO,
+        fee_currency=A_BTC,
+        link='97402f76-828e-a8ea-5d26-920134924149',
+        notes='XBTZ18',
+    ), MarginPosition(
+        location=Location.BITMEX,
+        open_time=None,
+        close_time=1536494400,
+        profit_loss=FVal('-0.00007992'),
+        pl_currency=A_BTC,
+        fee=ZERO,
+        fee_currency=A_BTC,
+        link='df46338a-da5e-e16c-9753-3e863d83d92c',
+        notes='ETHU18',
+    )]
+    assert result[:5] == expected_result
 
 
 def test_bitmex_query_balances(sandbox_bitmex):

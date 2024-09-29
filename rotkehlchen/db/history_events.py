@@ -1,4 +1,5 @@
 import copy
+import json
 import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal, Optional, overload
@@ -8,13 +9,24 @@ from pysqlcipher3 import dbapi2 as sqlcipher
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.constants import ZERO
 from rotkehlchen.constants.limits import FREE_HISTORY_EVENTS_LIMIT
-from rotkehlchen.db.constants import HISTORY_MAPPING_KEY_STATE, HISTORY_MAPPING_STATE_CUSTOMIZED
+from rotkehlchen.db.constants import (
+    ETH_STAKING_EVENT_FIELDS,
+    ETH_STAKING_FIELD_LENGTH,
+    EVM_EVENT_FIELDS,
+    EVM_FIELD_LENGTH,
+    EVMTX_DECODED,
+    HISTORY_BASE_ENTRY_FIELDS,
+    HISTORY_BASE_ENTRY_LENGTH,
+    HISTORY_MAPPING_KEY_STATE,
+    HISTORY_MAPPING_STATE_CUSTOMIZED,
+)
 from rotkehlchen.db.filtering import (
     ALL_EVENTS_DATA_JOIN,
     EVM_EVENT_JOIN,
     DBEqualsFilter,
     DBIgnoredAssetsFilter,
     DBIgnoreValuesFilter,
+    DBNotEqualFilter,
     EthDepositEventFilterQuery,
     EthWithdrawalFilterQuery,
     EvmEventFilterQuery,
@@ -35,10 +47,11 @@ from rotkehlchen.history.events.structures.eth2 import (
     EthWithdrawalEvent,
 )
 from rotkehlchen.history.events.structures.evm_event import EvmEvent
+from rotkehlchen.history.events.structures.types import HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.serialization.deserialize import deserialize_fval
 from rotkehlchen.types import (
-    EVM_CHAIN_IDS_WITH_TRANSACTIONS_TYPE,
+    EVM_EVMLIKE_LOCATIONS_TYPE,
     EVMTxHash,
     Location,
     Timestamp,
@@ -54,14 +67,27 @@ logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
 
-HISTORY_BASE_ENTRY_FIELDS = 'entry_type, history_events.identifier, event_identifier, sequence_index, timestamp, location, location_label, asset, amount, usd_value, notes, type, subtype '  # noqa: E501
-HISTORY_BASE_ENTRY_LENGTH = 12
+def filter_ignore_asset_query(include_ignored_assets: bool = False) -> str:
+    """Create and return the subquery to filter ignored assets. If `include_ignored_assets`
+    is true then the filter is returned to include them."""
+    ignored_asset_subquery = 'SELECT value FROM multisettings WHERE name="ignored_asset")'
+    if include_ignored_assets:
+        return f'WHERE (asset IN ({ignored_asset_subquery}) '
+    return f'WHERE (asset IS NULL OR asset NOT IN ({ignored_asset_subquery}) '
 
-EVM_EVENT_FIELDS = 'tx_hash, counterparty, product, address, extra_data'
-EVM_FIELD_LENGTH = 5
 
-ETH_STAKING_EVENT_FIELDS = 'validator_index, is_exit_or_blocknumber'
-ETH_STAKING_FIELD_LENGTH = 2
+def maybe_filter_ignore_asset(
+        filter_query: HistoryBaseEntryFilterQuery,
+        include_ignored_assets: bool = False,
+) -> str:
+    """An auxiliar function to find if query_filter contains `DBIgnoredAssetsFilter`. If it does
+    then return that filter clause. This is done where we want to filter ignored assets
+    before applying the free limit. If `include_ignored_assets` is true then the filter is returned
+    to include them."""
+    for fil in filter_query.filters:
+        if isinstance(fil, DBIgnoredAssetsFilter):
+            return filter_ignore_asset_query(include_ignored_assets)
+    return ''
 
 
 class DBHistoryEvents:
@@ -197,39 +223,69 @@ class DBHistoryEvents:
 
         return None
 
+    def delete_events_by_location(
+            self,
+            write_cursor: 'DBCursor',
+            location: EVM_EVMLIKE_LOCATIONS_TYPE,
+    ) -> None:
+        """Delete all relevant non-customized events for a given location
+
+        Also set evm_tx_mapping as non decoded so they can be redecoded later
+        """
+        customized_event_ids = self.get_customized_event_identifiers(cursor=write_cursor, location=location)  # noqa: E501
+        whereclause = 'WHERE location=?'
+        if (length := len(customized_event_ids)) != 0:
+            whereclause += f' AND history_events.identifier NOT IN ({", ".join(["?"] * length)})'
+            bindings = [location.serialize_for_db(), *customized_event_ids]
+        else:
+            bindings = (location.serialize_for_db(),)  # type: ignore  # different type of elements in the list
+
+        transaction_hashes = write_cursor.execute(f'SELECT evm_events_info.tx_hash FROM history_events INNER JOIN evm_events_info ON history_events.identifier=evm_events_info.identifier {whereclause}', bindings).fetchall()  # noqa: E501
+        write_cursor.execute(f'DELETE FROM history_events {whereclause}', bindings)
+
+        if location != Location.ZKSYNC_LITE and len(transaction_hashes) != 0:
+            write_cursor.executemany(
+                'DELETE from evm_tx_mappings WHERE tx_id IN (SELECT identifier FROM evm_transactions WHERE tx_hash=? AND chain_id=?) AND value=?',  # noqa: E501
+                [(x[0], location.to_chain_id(), EVMTX_DECODED) for x in transaction_hashes],
+            )
+
     def delete_events_by_tx_hash(
             self,
             write_cursor: 'DBCursor',
             tx_hashes: list[EVMTxHash],
-            chain_id: EVM_CHAIN_IDS_WITH_TRANSACTIONS_TYPE,
+            location: EVM_EVMLIKE_LOCATIONS_TYPE,
+            delete_customized: bool = False,
     ) -> None:
         """Delete all relevant (by transaction hash) history events except those that
-        are customized. Only use with limited number of transactions!!!
+        are customized. If delete_customized is True then delete those too.
+        Only use with limited number of transactions!!!
 
         If you want to reset all decoded events better use the _reset_decoded_events
         code in v37 -> v38 upgrade as that is not limited to the number of transactions
         and won't potentially raise a too many sql variables error
         """
-        customized_event_ids = self.get_customized_event_identifiers(cursor=write_cursor, chain_id=chain_id)  # noqa: E501
-        length = len(customized_event_ids)
+        customized_event_ids = []
+        if not delete_customized:
+            customized_event_ids = self.get_customized_event_identifiers(cursor=write_cursor, location=location)  # noqa: E501
         querystr = f'DELETE FROM history_events WHERE identifier IN (SELECT H.identifier from history_events H INNER JOIN evm_events_info E ON H.identifier=E.identifier AND E.tx_hash IN ({", ".join(["?"] * len(tx_hashes))}))'  # noqa: E501
-        if length != 0:
+        if (length := len(customized_event_ids)) != 0:
             querystr += f' AND identifier NOT IN ({", ".join(["?"] * length)})'
             bindings = [*tx_hashes, *customized_event_ids]
         else:
             bindings = tx_hashes  # type: ignore  # different type of elements in the list
+
         write_cursor.execute(querystr, bindings)
 
     def get_customized_event_identifiers(
             self,
             cursor: 'DBCursor',
-            chain_id: EVM_CHAIN_IDS_WITH_TRANSACTIONS_TYPE | None,
+            location: Location | None,
     ) -> list[int]:
         """Returns the identifiers of all the events in the database that have been customized
 
-        Optionally filter by chain_id
+        Optionally filter by Location
         """
-        if chain_id is None:
+        if location is None:
             cursor.execute(
                 'SELECT parent_identifier FROM history_events_mappings WHERE name=? AND value=?',
                 (HISTORY_MAPPING_KEY_STATE, HISTORY_MAPPING_STATE_CUSTOMIZED),
@@ -242,7 +298,7 @@ class DBHistoryEvents:
                 'JOIN history_events C ON C.identifier=A.parent_identifier AND C.location=?',
                 (
                     HISTORY_MAPPING_KEY_STATE, HISTORY_MAPPING_STATE_CUSTOMIZED,
-                    Location.from_chain_id(chain_id).serialize_for_db(),
+                    location.serialize_for_db(),
                 ),
             )
 
@@ -267,6 +323,46 @@ class DBHistoryEvents:
 
         return deserialized
 
+    def _create_history_events_query(
+            self,
+            filter_query: HistoryBaseEntryFilterQuery,
+            entries_limit: int,
+            has_premium: bool,
+            group_by_event_ids: bool = False,
+    ) -> tuple[str, list]:
+        """Returns the sql queries and bindings for the history events without pagination."""
+        base_suffix = f'{HISTORY_BASE_ENTRY_FIELDS}, {EVM_EVENT_FIELDS}, {ETH_STAKING_EVENT_FIELDS} {ALL_EVENTS_DATA_JOIN}'  # noqa: E501
+        if (ignore_asset_filter := maybe_filter_ignore_asset(filter_query, include_ignored_assets=True)) != '':  # noqa: E501
+            ignore_asset_filter = (
+                f' WHERE event_identifier NOT IN '
+                f'(SELECT DISTINCT event_identifier FROM history_events {ignore_asset_filter})'
+            )
+
+        premium_base_suffix = f'{base_suffix} {ignore_asset_filter}'
+        free_base_suffix = (
+            f'* FROM (SELECT {base_suffix}) WHERE event_identifier IN ('
+            f'SELECT DISTINCT event_identifier FROM history_events {ignore_asset_filter} '
+            'ORDER BY timestamp DESC,sequence_index ASC LIMIT ?)'  # free query only select the last LIMIT groups  # noqa: E501
+        )
+
+        if has_premium:
+            suffix, limit = premium_base_suffix, []
+        else:
+            suffix, limit = free_base_suffix, [entries_limit]
+
+        if group_by_event_ids:
+            filters, query_bindings = filter_query.prepare(
+                with_group_by=True,
+                with_pagination=False,
+                without_ignored_asset_filter=True,
+            )
+            prefix = 'SELECT COUNT(*), *'
+        else:
+            filters, query_bindings = filter_query.prepare(with_pagination=False)
+            prefix = 'SELECT *'
+
+        return f'{prefix} FROM (SELECT {suffix}) {filters}', limit + query_bindings
+
     @overload
     def get_history_events(
             self,
@@ -288,8 +384,8 @@ class DBHistoryEvents:
         ...
 
     @overload
-    def get_history_events(  # type: ignore  # cant match since EthDepositEvent is EvmEvent
-            self,  # no idea how to properly type this situation with overloads here
+    def get_history_events(
+            self,
             cursor: 'DBCursor',
             filter_query: EthDepositEventFilterQuery,
             has_premium: bool,
@@ -298,8 +394,8 @@ class DBHistoryEvents:
         ...
 
     @overload
-    def get_history_events(  # type: ignore  # cant match since EthDepositEvent is EvmEvent
-            self,  # no idea how to properly type this situation with overloads here
+    def get_history_events(
+            self,
             cursor: 'DBCursor',
             filter_query: EthDepositEventFilterQuery,
             has_premium: bool,
@@ -354,40 +450,21 @@ class DBHistoryEvents:
         TODO: To not query all columns with all joins for all cases, we perhaps can
         peek on the entry type of the filter and adjust the SELECT fields accordingly?
         """
-        free_query_group_by = ''
-        free_query_count = ''
-        base_prefix = 'SELECT '
-        type_idx = 0
-        special_free_query = False
-        if group_by_event_ids is True:
-            if has_premium:
-                base_prefix += 'COUNT(*), '
-            else:  # a bit ugly conditions to keep limit at groups for free users
-                free_query_count = 'COUNT(*), '
-                for fil in filter_query.filters:
-                    if isinstance(fil, DBIgnoredAssetsFilter):
-                        # Also don't count spam asset transactions in the limit
-                        free_query_group_by = 'WHERE (asset IS NULL OR asset NOT IN (SELECT value FROM multisettings WHERE name="ignored_asset")) '  # noqa: E501
-                        break
-                free_query_group_by += 'GROUP BY event_identifier'
-                special_free_query = True
-
-            type_idx = 1
-
-        prepared_query, bindings = filter_query.prepare(
-            with_group_by=group_by_event_ids,
-            special_free_query=special_free_query,
+        base_query, filters_bindings = self._create_history_events_query(
+            has_premium=has_premium,
+            filter_query=filter_query,
+            group_by_event_ids=group_by_event_ids,
+            entries_limit=FREE_HISTORY_EVENTS_LIMIT,
         )
 
-        if has_premium is True:
-            base_query = f'{base_prefix} {HISTORY_BASE_ENTRY_FIELDS}, {EVM_EVENT_FIELDS}, {ETH_STAKING_EVENT_FIELDS} {ALL_EVENTS_DATA_JOIN}'  # noqa: E501
-        else:
-            base_query = f'{base_prefix} * FROM (SELECT {free_query_count} {HISTORY_BASE_ENTRY_FIELDS}, {EVM_EVENT_FIELDS}, {ETH_STAKING_EVENT_FIELDS} {ALL_EVENTS_DATA_JOIN} {free_query_group_by} ORDER BY timestamp DESC, sequence_index ASC LIMIT ?) '  # noqa: E501
-            bindings.insert(0, FREE_HISTORY_EVENTS_LIMIT)
+        if filter_query.pagination is not None:
+            base_query = f'SELECT * FROM ({base_query}) {filter_query.pagination.prepare()}'
 
-        cursor.execute(base_query + prepared_query, bindings)
+        cursor.execute(base_query, filters_bindings)
         output: list[HistoryBaseEntry] | list[tuple[int, HistoryBaseEntry]] = []
+        type_idx = 1 if group_by_event_ids else 0
         data_start_idx = type_idx + 1
+        failed_to_deserialize = False
         for entry in cursor:
             entry_type = HistoryBaseEntryType(entry[type_idx])
             try:
@@ -426,16 +503,23 @@ class DBHistoryEvents:
                     deserialized_event = EthDepositEvent.deserialize_from_db(data)
 
                 else:
-                    data = entry[data_start_idx:HISTORY_BASE_ENTRY_LENGTH + 1]
-                    deserialized_event = HistoryEvent.deserialize_from_db(entry[data_start_idx:])
+                    data = entry[data_start_idx:]
+                    deserialized_event = HistoryEvent.deserialize_from_db(data)
             except (DeserializationError, UnknownAsset) as e:
-                log.debug(f'Failed to deserialize history event {entry} due to {e!s}')
+                log.error(f'Failed to deserialize history event {entry} due to {e!s}')
+                failed_to_deserialize = True
                 continue
 
             if group_by_event_ids is True:
                 output.append((entry[0], deserialized_event))  # type: ignore
             else:
                 output.append(deserialized_event)  # type: ignore
+
+        if failed_to_deserialize:
+            self.db.msg_aggregator.add_error(
+                'Could not deserialize one or more history event(s). '
+                'Try redecoding the event(s) or check the logs for more details.',
+            )
 
         return output
 
@@ -515,6 +599,13 @@ class DBHistoryEvents:
         new_query_filter = copy.deepcopy(query_filter)
         new_query_filter.filters.append(
             DBEqualsFilter(and_op=True, column='usd_value', value='0'),
+        )
+        new_query_filter.filters.append(  # exclude informational events
+            DBNotEqualFilter(
+                and_op=True,
+                column='type',
+                value=HistoryEventType.INFORMATIONAL.serialize(),
+            ),
         )
         if ignored_assets is not None:
             new_query_filter.filters.append(
@@ -598,26 +689,32 @@ class DBHistoryEvents:
         the number of events if any limit is applied, otherwise the second value matches
         the first.
         """
-        prepared_query, bindings = query_filter.prepare(with_pagination=False)
-        # we need to select everything because any column could be used in the filter
-        query = 'SELECT * ' + query_filter.get_join_query() + prepared_query
-        if group_by_event_ids:
-            query = f'SELECT event_identifier FROM ({query}) GROUP BY event_identifier'
-        query = f'SELECT COUNT(*) FROM ({query})'
-        count_without_limit = cursor.execute(query, bindings).fetchone()[0]
+        free_limit = FREE_HISTORY_EVENTS_LIMIT if entries_limit is None else entries_limit
+        premium_query, premium_bindings = self._create_history_events_query(
+            has_premium=True,
+            filter_query=query_filter,
+            group_by_event_ids=group_by_event_ids,
+            entries_limit=free_limit,
+        )
+        count_without_limit = cursor.execute(
+            f'SELECT COUNT(*) FROM ({premium_query})',
+            premium_bindings,
+        ).fetchone()[0]
 
-        if entries_limit is not None:
-            query = 'SELECT * ' + query_filter.get_join_query()
-            if group_by_event_ids:  # we take the groups before the limit has been applied
-                query += ' GROUP BY event_identifier '
-            query += ' ORDER BY timestamp DESC LIMIT ?'
-            bindings.insert(0, entries_limit)
-            query = f'SELECT COUNT(*) FROM ({query}) ' + prepared_query
+        if entries_limit is None:
+            return count_without_limit, count_without_limit
 
-            count_with_limit = cursor.execute(query, bindings).fetchone()[0]
-            return count_without_limit, count_with_limit
-
-        return count_without_limit, count_without_limit
+        free_query, free_bindings = self._create_history_events_query(
+            has_premium=False,
+            filter_query=query_filter,
+            group_by_event_ids=group_by_event_ids,
+            entries_limit=free_limit,
+        )
+        count_with_limit = cursor.execute(
+            f'SELECT COUNT(*) FROM ({free_query})',
+            free_bindings,
+        ).fetchone()[0]
+        return count_without_limit, count_with_limit
 
     def get_value_stats(
             self,
@@ -683,3 +780,17 @@ class DBHistoryEvents:
         )
         result = [x[0] for x in cursor]
         return result
+
+    def edit_event_extra_data(self, write_cursor: 'DBCursor', event: EvmEvent, extra_data: dict[str, Any]) -> None:  # noqa: E501
+        """Edit an event's extra data in the DB and save it. Does not turn it into
+        a customized event. This is meant to be used programmatically.
+
+        The given event should be one pulled from the DB, which means the identifier
+        field should be populated.
+        """
+        assert event.identifier is not None, 'event should have identifier populated'
+        write_cursor.execute(
+            'UPDATE evm_events_info SET extra_data=? WHERE identifier=?',
+            (json.dumps(extra_data), event.identifier),
+        )
+        event.extra_data = extra_data

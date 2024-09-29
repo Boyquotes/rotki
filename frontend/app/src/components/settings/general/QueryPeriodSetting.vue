@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import useVuelidate from '@vuelidate/core';
 import { between, helpers, required } from '@vuelidate/validators';
+import { toMessages } from '@/utils/validation';
 
 const queryPeriod = ref<string>('5');
 const minQueryPeriod = 5;
@@ -10,25 +11,22 @@ const { t } = useI18n();
 
 const rules = {
   queryPeriod: {
-    required: helpers.withMessage(
-      t('frontend_settings.validation.periodic_query.non_empty').toString(),
-      required
-    ),
+    required: helpers.withMessage(t('frontend_settings.validation.periodic_query.non_empty'), required),
     between: helpers.withMessage(
       t('frontend_settings.validation.periodic_query.invalid_period', {
         start: minQueryPeriod,
-        end: maxQueryPeriod
-      }).toString(),
-      between(minQueryPeriod, maxQueryPeriod)
-    )
-  }
+        end: maxQueryPeriod,
+      }),
+      between(minQueryPeriod, maxQueryPeriod),
+    ),
+  },
 };
 
 const { queryPeriod: currentPeriod } = storeToRefs(useFrontendSettingsStore());
 
-const resetQueryPeriod = () => {
+function resetQueryPeriod() {
   set(queryPeriod, get(currentPeriod).toString());
-};
+}
 
 const v$ = useVuelidate(rules, { queryPeriod }, { $autoDirty: true });
 const { callIfValid } = useValidation(v$);
@@ -57,9 +55,10 @@ onMounted(() => {
       @updated="restart()"
       @finished="resetQueryPeriod()"
     >
-      <VTextField
+      <RuiTextField
         v-model="queryPeriod"
-        outlined
+        variant="outlined"
+        color="primary"
         class="general-settings__fields__periodic-client-query-period"
         :label="t('frontend_settings.label.query_period')"
         :hint="t('frontend_settings.label.query_period_hint')"
@@ -67,8 +66,8 @@ onMounted(() => {
         :min="minQueryPeriod"
         :max="maxQueryPeriod"
         :success-messages="success"
-        :error-messages="error || v$.queryPeriod.$errors.map(e => e.$message)"
-        @change="callIfValid($event, update)"
+        :error-messages="error || toMessages(v$.queryPeriod)"
+        @update:model-value="callIfValid($event, update)"
       />
     </SettingsOption>
   </div>

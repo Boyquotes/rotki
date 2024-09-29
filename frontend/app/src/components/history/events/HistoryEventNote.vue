@@ -1,36 +1,35 @@
 <script setup lang="ts">
-import { type BigNumber } from '@rotki/common';
-import { Blockchain } from '@rotki/common/lib/blockchain';
-import { type ComputedRef } from 'vue';
+import { type BigNumber, Blockchain } from '@rotki/common';
 import { type NoteFormat, NoteType } from '@/composables/history/events/notes';
+import type { ExplorerUrls } from '@/types/asset/asset-urls';
 
 defineOptions({
-  inheritAttrs: false
+  inheritAttrs: false,
 });
 
 const props = withDefaults(
   defineProps<{
     notes?: string;
-    amount?: BigNumber | null;
+    amount?: BigNumber;
     asset?: string;
-    chain?: Blockchain;
+    chain?: string;
     noTxHash?: boolean;
-    validatorIndex?: number | null;
-    blockNumber?: number | null;
+    validatorIndex?: number;
+    blockNumber?: number;
+    counterparty?: string;
   }>(),
   {
     notes: '',
-    amount: null,
+    amount: undefined,
     asset: '',
     chain: Blockchain.ETH,
     noTxHash: false,
-    validatorIndex: null,
-    blockNumber: null
-  }
+    validatorIndex: undefined,
+    blockNumber: undefined,
+  },
 );
 
-const { notes, amount, asset, noTxHash, validatorIndex, blockNumber } =
-  toRefs(props);
+const { notes, amount, asset, noTxHash, validatorIndex, blockNumber, counterparty } = toRefs(props);
 
 const { formatNotes } = useHistoryEventNote();
 
@@ -40,47 +39,67 @@ const formattedNotes: ComputedRef<NoteFormat[]> = formatNotes({
   assetId: asset,
   noTxHash,
   validatorIndex,
-  blockNumber
+  blockNumber,
+  counterparty,
 });
 
-const css = useCssModule();
+function isLinkType(t: any): t is keyof ExplorerUrls {
+  return [NoteType.TX, NoteType.ADDRESS, NoteType.BLOCK].includes(t);
+}
 </script>
 
 <template>
-  <div>
-    <template v-for="(note, index) in formattedNotes">
+  <div
+    v-bind="$attrs"
+    class="inline-flex items-center gap-x-1 flex-wrap"
+  >
+    <template
+      v-for="(note, index) in formattedNotes"
+      :key="index"
+    >
+      <template v-if="note.type === NoteType.FLAG && note.countryCode">
+        <Flag
+          :iso="note.countryCode"
+          class="mr-1"
+        />
+      </template>
+      <template v-else-if="note.type === NoteType.WORD && note.word">
+        {{ note.word }}
+      </template>
       <HashLink
-        v-if="note.showHashLink"
+        v-else-if="note.showHashLink && isLinkType(note.type)"
         :key="index"
         class="inline-flex"
         :class="{
-          [css['address__content']]: true,
+          [$style.address]: true,
           'pl-2': !note.showIcon,
-          [css.address]: true
         }"
         :text="note.address"
         :type="note.type"
         :chain="note.chain ?? chain"
         :show-icon="!!note.showIcon"
       />
-
       <AmountDisplay
-        v-else-if="note.type === NoteType.AMOUNT"
+        v-else-if="note.type === NoteType.AMOUNT && note.amount"
         :key="`${index}-amount`"
+        no-truncate
         :asset="note.asset"
         :value="note.amount"
+        :resolution-options="{
+          collectionParent: false,
+        }"
       />
-
       <ExternalLink
         v-else-if="note.type === NoteType.URL && note.url"
         :key="`${index}-link`"
         :url="note.url"
-      >
-        {{ note.word }}
-      </ExternalLink>
-
+        class="text-wrap hover:underline"
+        :text="note.word"
+        color="primary"
+        custom
+      />
       <template v-else>
-        {{ note.word }}
+        {{ `${note.word} ` }}
       </template>
     </template>
   </div>
@@ -88,13 +107,12 @@ const css = useCssModule();
 
 <style lang="scss" module>
 .address {
-  vertical-align: middle;
+  @apply align-middle bg-rui-grey-300 pr-1 rounded-full m-0.5;
+}
 
-  &__content {
-    background: var(--v-rotki-light-grey-darken1);
-    padding-right: 0.25rem;
-    border-radius: 3rem;
-    margin: 2px;
+:global(.dark) {
+  .address {
+    @apply bg-rui-grey-800;
   }
 }
 </style>

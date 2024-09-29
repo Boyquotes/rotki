@@ -1,7 +1,7 @@
-import { Blockchain } from '@rotki/common/lib/blockchain';
+import { Blockchain } from '@rotki/common';
 import {
   BlockchainBalancesPage,
-  type FixtureBlockchainBalance
+  type FixtureBlockchainBalance,
 } from '../../pages/account-balances-page/blockchain-balances-page';
 import { DashboardPage } from '../../pages/dashboard-page';
 import { RotkiApp } from '../../pages/rotki-app';
@@ -27,11 +27,11 @@ describe('blockchain balances', () => {
 
     app.fasterLogin(username, '1234', true);
 
-    cy.fixture('account-balances/blockchain-balances').then(balances => {
+    cy.fixture('account-balances/blockchain-balances').then((balances) => {
       blockchainBalances = balances.map((balance: { blockchain: string }) => {
         const address = {
           [Blockchain.ETH]: Cypress.env('ETH_ADDRESS'),
-          [Blockchain.BTC]: Cypress.env('BTC_ADDRESS')
+          [Blockchain.BTC]: Cypress.env('BTC_ADDRESS'),
         }[balance.blockchain];
 
         return { ...balance, address };
@@ -43,13 +43,7 @@ describe('blockchain balances', () => {
   it('add an ETH account and view the account balance', () => {
     cy.get('[data-cy="add-blockchain-balance"]').should('be.visible');
     cy.get('[data-cy="add-blockchain-balance"]').click();
-    tagManager.addTag(
-      '[data-cy="account-tag-field"]',
-      'public',
-      'Public Accounts',
-      '#EF703C',
-      '#FFFFF8'
-    );
+    tagManager.addTag('[data-cy="account-tag-field"]', 'public', 'Public Accounts', 'EF703C', 'FFFFF8');
     blockchainBalancesPage.addBalance(blockchainBalances[0]);
     blockchainBalancesPage.isEntryVisible(0, blockchainBalances[0]);
   });
@@ -58,6 +52,7 @@ describe('blockchain balances', () => {
     cy.get('[data-cy="add-blockchain-balance"]').should('be.visible');
     cy.get('[data-cy="add-blockchain-balance"]').click();
     blockchainBalancesPage.addBalance(blockchainBalances[1]);
+    blockchainBalancesPage.openTab('bitcoin');
     blockchainBalancesPage.isEntryVisible(0, blockchainBalances[1]);
   });
 
@@ -66,20 +61,20 @@ describe('blockchain balances', () => {
 
     blockchainBalancesPage.getTotals().then(({ total, balances }) => {
       dashboardPage.visit();
-      dashboardPage.getOverallBalance().then($overallBalance => {
-        dashboardPage.getNonFungibleBalances().then($nonFungibleBalance => {
+      dashboardPage.getOverallBalance().then(($overallBalance) => {
+        dashboardPage.getNonFungibleBalances().then(($nonFungibleBalance) => {
           const totalPlusNft = total.plus($nonFungibleBalance);
           expect($overallBalance.toNumber(), 'overall balance').to.be.within(
             totalPlusNft.minus(PRECISION).toNumber(),
-            totalPlusNft.plus(PRECISION).toNumber()
+            totalPlusNft.plus(PRECISION).toNumber(),
           );
         });
       });
 
-      dashboardPage.getBlockchainBalances().then($dashboardBalances => {
+      dashboardPage.getBlockchainBalances().then(($dashboardBalances) => {
         expect(
           balances.filter(x => x.value.gt(0)).map(x => x.blockchain),
-          'dashboard and blockchain balances'
+          'dashboard and blockchain balances',
         ).to.have.members(Array.from($dashboardBalances.keys()));
 
         balances.forEach(({ blockchain, value }) => {
@@ -89,9 +84,10 @@ describe('blockchain balances', () => {
             expect(dashboardBalance, label).to.not.be.undefined;
             expect(dashboardBalance?.toNumber(), blockchain).to.be.within(
               value.minus(PRECISION).toNumber(),
-              value.plus(PRECISION).toNumber()
+              value.plus(PRECISION).toNumber(),
             );
-          } else {
+          }
+          else {
             expect(dashboardBalance, label).to.be.undefined;
           }
         });
@@ -102,11 +98,11 @@ describe('blockchain balances', () => {
   it('edit', () => {
     const newLabel = 'New ETH label';
     blockchainBalancesPage.visit();
-    blockchainBalancesPage.editBalance(blockchainBalances[0], 0, newLabel);
+    blockchainBalancesPage.editBalance(0, newLabel);
 
     blockchainBalancesPage.isEntryVisible(0, {
       ...blockchainBalances[0],
-      label: newLabel
+      label: newLabel,
     });
   });
 
@@ -114,9 +110,11 @@ describe('blockchain balances', () => {
     blockchainBalancesPage.visit();
 
     // Delete ETH entry
-    blockchainBalancesPage.deleteBalance(blockchainBalances[0], 0);
+    blockchainBalancesPage.openTab('evm');
+    blockchainBalancesPage.deleteBalance(0);
 
     // Delete BTC entry
-    blockchainBalancesPage.deleteBalance(blockchainBalances[1], 0);
+    blockchainBalancesPage.openTab('bitcoin');
+    blockchainBalancesPage.deleteBalance(0);
   });
 });

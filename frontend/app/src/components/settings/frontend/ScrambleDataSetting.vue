@@ -1,26 +1,23 @@
 <script setup lang="ts">
-const { scrambleData: enabled, scrambleMultiplier: multiplier } = storeToRefs(
-  useSessionSettingsStore()
-);
+const { scrambleData: enabled, scrambleMultiplier: multiplier } = storeToRefs(useSessionSettingsStore());
 
 const scrambleData = ref<boolean>(false);
 const scrambleMultiplier = ref<string>('0');
 
 const { t } = useI18n();
-const randomMultiplier = () => {
-  set(scrambleMultiplier, generateRandomScrambleMultiplier().toString());
-};
 
-const setData = () => {
+function randomMultiplier() {
+  set(scrambleMultiplier, generateRandomScrambleMultiplier().toString());
+}
+
+function setData() {
   set(scrambleData, get(enabled));
   set(scrambleMultiplier, get(multiplier).toString());
-};
+}
 
 onMounted(setData);
 
 watch([enabled, multiplier], setData);
-
-const css = useCssModule();
 </script>
 
 <template>
@@ -31,13 +28,14 @@ const css = useCssModule();
       session-setting
       :error-message="t('frontend_settings.validation.scramble.error')"
     >
-      <VSwitch
+      <RuiSwitch
         v-model="scrambleData"
-        class="general-settings__fields__scramble-data"
+        color="primary"
+        class="general-settings__fields__scramble-data my-2"
         :label="t('frontend_settings.label.scramble')"
         :success-messages="success"
         :error-messages="error"
-        @change="update($event)"
+        @update:model-value="update($event)"
       />
     </SettingsOption>
     <SettingsOption
@@ -46,13 +44,13 @@ const css = useCssModule();
       setting="scrambleMultiplier"
       session-setting
     >
-      <div :class="css.multiplier">
+      <div :class="$style.multiplier">
         <AmountInput
           v-model="scrambleMultiplier"
           class="general-settings__fields__scramble-multiplier"
           :label="t('frontend_settings.label.scramble_multiplier')"
           :hint="t('frontend_settings.subtitle.scramble_multiplier')"
-          outlined
+          variant="outlined"
           :disabled="!scrambleData"
           :success-messages="success"
           :error-messages="error"
@@ -62,7 +60,6 @@ const css = useCssModule();
             <RuiButton
               variant="text"
               icon
-              class="-mt-3"
               :disabled="!scrambleData"
               @click="randomMultiplier()"
             >

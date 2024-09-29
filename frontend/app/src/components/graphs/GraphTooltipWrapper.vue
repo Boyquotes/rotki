@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { type TooltipDisplayOption } from '@rotki/common/lib/settings/graphs';
+import type { TooltipDisplayOption } from '@rotki/common';
 
 withDefaults(
   defineProps<{
     tooltipOption?: TooltipDisplayOption;
   }>(),
   {
-    tooltipOption: undefined
-  }
+    tooltipOption: undefined,
+  },
 );
 </script>
 
@@ -15,16 +15,18 @@ withDefaults(
   <div
     v-if="tooltipOption"
     :id="tooltipOption.id"
-    :class="{
-      [$style.tooltip]: true,
-      [$style['tooltip__show']]: tooltipOption.visible
-    }"
+    :class="[
+      $style.tooltip,
+      {
+        [$style.tooltip__show]: tooltipOption.visible,
+      },
+    ]"
     class="bg-white dark:bg-black"
     :data-align-x="tooltipOption.xAlign"
     :data-align-y="tooltipOption.yAlign"
     :style="{
       left: `${tooltipOption.left}px`,
-      top: `${tooltipOption.top}px`
+      top: `${tooltipOption.top}px`,
     }"
   >
     <slot name="content" />
@@ -33,32 +35,16 @@ withDefaults(
 
 <style module lang="scss">
 .tooltip {
-  position: absolute;
-  opacity: 0;
-  visibility: hidden;
-  padding: 0.25rem 0.75rem;
-  font-family: 'Roboto', sans-serif;
-  font-size: 16px;
-  border-radius: 6px;
-  filter: drop-shadow(0 0 8px var(--v-rotki-grey-base));
-  pointer-events: none;
-  transition: 0.3s all;
-  white-space: nowrap;
-  line-height: 1.2rem;
+  @apply absolute opacity-0 invisible py-1 px-3 rounded-md pointer-events-none transition-all duration-300 whitespace-nowrap leading-5;
+  filter: drop-shadow(0 0 0.5rem rgba(var(--rui-grey-400)));
 
   &__show {
-    opacity: 0.9;
-    visibility: visible;
+    @apply opacity-90 visible;
   }
 
   &::before {
+    @apply absolute border-[6px] border-white w-0 h-0;
     content: '';
-    width: 0;
-    height: 0;
-    position: absolute;
-    border-width: 6px;
-    border-style: solid;
-    border-color: white;
   }
 
   &[data-align-x='left'],
@@ -136,6 +122,8 @@ withDefaults(
 
 :global(.dark) {
   .tooltip {
+    filter: drop-shadow(0 0 0.5rem rgba(var(--rui-grey-800)));
+
     &:before {
       border-color: black;
     }

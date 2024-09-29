@@ -1,8 +1,6 @@
-import { Blockchain } from '@rotki/common/lib/blockchain';
-import { EvmTokenKind } from '@rotki/common/lib/data';
+import { Blockchain, EvmTokenKind } from '@rotki/common';
 
 const BtcChains = [Blockchain.BTC, Blockchain.BCH] as const;
-const EthChains = [Blockchain.ETH, Blockchain.ETH2] as const;
 const RestChains = [
   Blockchain.KSM,
   Blockchain.DOT,
@@ -11,34 +9,39 @@ const RestChains = [
   Blockchain.POLYGON_POS,
   Blockchain.ARBITRUM_ONE,
   Blockchain.BASE,
-  Blockchain.GNOSIS
+  Blockchain.GNOSIS,
+  Blockchain.SCROLL,
+  Blockchain.ZKSYNC_LITE,
 ] as const;
 
 export type BtcChains = (typeof BtcChains)[number];
 
-export type EthChains = (typeof EthChains)[number];
-
 export type RestChains = (typeof RestChains)[number];
 
-export const isBtcChain = (chain: Blockchain): chain is BtcChains =>
-  BtcChains.includes(chain as any);
+export function isBtcChain(chain: string): chain is BtcChains {
+  return BtcChains.includes(chain as any);
+}
 
-export const isEthChain = (chain: Blockchain): chain is EthChains =>
-  EthChains.includes(chain as any);
+export function isRestChain(chain: string): chain is RestChains {
+  return RestChains.includes(chain as any);
+}
 
-export const isRestChain = (chain: Blockchain): chain is RestChains =>
-  RestChains.includes(chain as any);
+export function isBlockchain(chain: string): chain is Blockchain {
+  return Object.values(Blockchain).includes(chain as any);
+}
 
-export const isBlockchain = (chain: string): chain is Blockchain =>
-  Object.values(Blockchain).includes(chain as any);
+export interface EvmTokenData {
+  identifier: EvmTokenKind;
+  label: string;
+}
 
-export const evmTokenKindsData = [
+export const evmTokenKindsData: EvmTokenData[] = [
   {
     identifier: EvmTokenKind.ERC20,
-    label: 'ERC20'
+    label: 'ERC20',
   },
   {
     identifier: EvmTokenKind.ERC721,
-    label: 'ERC721'
-  }
+    label: 'ERC721',
+  },
 ];

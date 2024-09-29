@@ -5,24 +5,25 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.assets.asset import CryptoAsset, EvmToken
 from rotkehlchen.assets.utils import get_or_create_evm_token
-from rotkehlchen.chain.evm.constants import ETH_SPECIAL_ADDRESS
+from rotkehlchen.chain.evm.constants import ETH_SPECIAL_ADDRESS, ZERO_ADDRESS
 from rotkehlchen.chain.evm.decoding.constants import OUTGOING_EVENT_TYPES
 from rotkehlchen.constants import ONE, ZERO
-from rotkehlchen.constants.assets import A_ETH
+from rotkehlchen.fval import FVal
 from rotkehlchen.history.events.structures.evm_event import EvmEvent, EvmProduct
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.types import ChecksumEvmAddress, Timestamp
 
 if TYPE_CHECKING:
-    from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer, EvmNodeInquirerWithDSProxy
-    from rotkehlchen.chain.optimism_superchain.node_inquirer import (
-        DSProxyOptimismSuperchainInquirerWithCacheData,
+    from rotkehlchen.assets.asset import Asset
+    from rotkehlchen.assets.utils import TokenEncounterInfo
+    from rotkehlchen.chain.evm.l2_with_l1_fees.node_inquirer import (
+        DSProxyL2WithL1FeesInquirerWithCacheData,
     )
+    from rotkehlchen.chain.evm.node_inquirer import EvmNodeInquirer, EvmNodeInquirerWithDSProxy
     from rotkehlchen.db.dbhandler import DBHandler
     from rotkehlchen.db.drivers.gevent import DBCursor
-    from rotkehlchen.assets.asset import Asset
 
-from rotkehlchen.chain.ethereum.utils import token_normalized_value
+from rotkehlchen.chain.ethereum.utils import asset_normalized_value, token_normalized_value
 from rotkehlchen.chain.evm.structures import EvmTxReceiptLog
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import EvmTokenKind, EvmTransaction, EVMTxHash, Location
@@ -82,6 +83,11 @@ class BaseDecoderTools:
         If it is a proxy, it returns the owner of the proxy, otherwise `None`.
         """
         return None
+
+    def get_address_or_proxy_owner(self, address: ChecksumEvmAddress) -> ChecksumEvmAddress | None:  # pylint: disable=unused-argument
+        """If the address is a DS proxy return its owner, if not return address itself"""
+        owner = self.maybe_get_proxy_owner(address)
+        return owner or address
 
     def decode_direction(
             self,
@@ -310,23 +316,52 @@ class BaseDecoderTools:
             extra_data=extra_data,
         )
 
-    def get_or_create_evm_token(self, address: ChecksumEvmAddress) -> EvmToken:
+    def get_or_create_evm_token(
+            self,
+            address: ChecksumEvmAddress,
+            encounter: 'TokenEncounterInfo | None' = None,
+    ) -> EvmToken:
         """A version of get_create_evm_token to be called from the decoders"""
         return get_or_create_evm_token(
             userdb=self.database,
             evm_address=address,
             chain_id=self.evm_inquirer.chain_id,
             evm_inquirer=self.evm_inquirer,
+            encounter=encounter,
         )
 
     def get_or_create_evm_asset(self, address: ChecksumEvmAddress) -> CryptoAsset:
         """A version of get_create_evm_token to be called from the decoders
 
-        Also checks for special cases like the special ETH address used in some protocols
+        Also checks for special cases like the special ETH (or MATIC etc)
+        address used in some protocols
         """
         if address == ETH_SPECIAL_ADDRESS:
-            return A_ETH.resolve_to_crypto_asset()
+            return self.evm_inquirer.native_token
         return self.get_or_create_evm_token(address)
+
+    def resolve_tokens_data(
+            self,
+            token_addresses: list['ChecksumEvmAddress'],
+            token_amounts: list[int],
+    ) -> dict[str, FVal]:
+        """Returns the resolved evm tokens or native currency and their amounts"""
+        resolved_result: dict[str, FVal] = {}
+        for token_address, token_amount in zip(token_addresses, token_amounts, strict=True):
+            if token_address == ZERO_ADDRESS:
+                asset = self.evm_inquirer.native_token
+            else:
+                asset = get_or_create_evm_token(
+                    userdb=self.database,
+                    evm_inquirer=self.evm_inquirer,
+                    evm_address=token_address,
+                    chain_id=self.evm_inquirer.chain_id,
+                    token_kind=EvmTokenKind.ERC20,
+                )
+
+            resolved_result[asset.identifier] = asset_normalized_value(amount=token_amount, asset=asset)  # noqa: E501
+
+        return resolved_result
 
 
 class BaseDecoderToolsWithDSProxy(BaseDecoderTools):
@@ -335,7 +370,7 @@ class BaseDecoderToolsWithDSProxy(BaseDecoderTools):
     def __init__(
             self,
             database: 'DBHandler',
-            evm_inquirer: Union['EvmNodeInquirerWithDSProxy', 'DSProxyOptimismSuperchainInquirerWithCacheData'],  # noqa: E501
+            evm_inquirer: Union['EvmNodeInquirerWithDSProxy', 'DSProxyL2WithL1FeesInquirerWithCacheData'],  # noqa: E501
             is_non_conformant_erc721_fn: Callable[[ChecksumEvmAddress], bool],
             address_is_exchange_fn: Callable[[ChecksumEvmAddress], str | None],
     ) -> None:

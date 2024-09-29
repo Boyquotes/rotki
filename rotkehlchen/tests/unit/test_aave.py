@@ -5,11 +5,7 @@ import pytest
 from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.assets.asset import Asset, EvmToken
 from rotkehlchen.chain.ethereum.modules.aave.aave import Aave
-from rotkehlchen.chain.ethereum.modules.aave.common import (
-    AaveStats,
-    asset_to_aave_reserve_address,
-    atoken_to_asset,
-)
+from rotkehlchen.chain.ethereum.modules.aave.common import AaveStats, asset_to_aave_reserve_address
 from rotkehlchen.chain.evm.constants import ETH_SPECIAL_ADDRESS
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants import ONE
@@ -17,8 +13,7 @@ from rotkehlchen.constants.assets import A_ETH
 from rotkehlchen.constants.resolver import ethaddress_to_identifier
 from rotkehlchen.fval import FVal
 from rotkehlchen.globaldb.handler import GlobalDBHandler
-from rotkehlchen.premium.premium import Premium, PremiumCredentials
-from rotkehlchen.tests.utils.aave import ATOKENV1_TO_ASSET, ATOKENV2_ADDRESS_TO_RESERVE_ASSET
+from rotkehlchen.tests.utils.aave import ATOKENV1_TO_ASSET
 from rotkehlchen.types import ChainID, Timestamp, deserialize_evm_tx_hash
 from rotkehlchen.utils.misc import ts_now
 
@@ -28,6 +23,7 @@ if TYPE_CHECKING:
     from rotkehlchen.db.dbhandler import DBHandler
     from rotkehlchen.history.price import PriceHistorian
     from rotkehlchen.inquirer import Inquirer
+    from rotkehlchen.premium.premium import Premium
 
 
 def test_aave_reserve_mapping():
@@ -42,25 +38,6 @@ def test_aave_reserve_mapping():
         assert asset_to_aave_reserve_address(underlying_asset) == underlying_asset.evm_address
 
 
-def test_atoken_to_asset():
-    cursor = GlobalDBHandler().conn.cursor()
-    result = cursor.execute(
-        'SELECT A.identifier from evm_tokens as A LEFT OUTER JOIN common_asset_details as B '
-        'WHERE A.identifier=B.identifier AND A.protocol IN (?, ?)',
-        ('aave', 'aave-v2'),
-    )
-    for entry in result:
-        atoken = EvmToken(entry[0])
-        reserve_asset = atoken_to_asset(atoken)
-        if atoken in ATOKENV1_TO_ASSET:
-            assert reserve_asset == ATOKENV1_TO_ASSET[atoken]
-        else:
-            assert reserve_asset == ATOKENV2_ADDRESS_TO_RESERVE_ASSET[atoken.evm_address]
-
-    for atokenv1, reserve_asset in ATOKENV1_TO_ASSET.items():
-        assert atoken_to_asset(atokenv1.resolve_to_evm_token()) == reserve_asset
-
-
 @pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('ethereum_accounts', [['0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12']])
 @pytest.mark.parametrize('should_mock_price_queries', [True])
@@ -70,7 +47,7 @@ def test_aave_v1_events_stats(
         database: 'DBHandler',
         ethereum_inquirer: 'EthereumInquirer',
         ethereum_transaction_decoder: 'EthereumTransactionDecoder',
-        rotki_premium_credentials: 'PremiumCredentials',
+        rotki_premium_object: 'Premium',
         username: str,
         inquirer: 'Inquirer',  # pylint: disable=unused-argument
         price_historian: 'PriceHistorian',  # pylint: disable=unused-argument
@@ -98,7 +75,7 @@ def test_aave_v1_events_stats(
     aave = Aave(
         ethereum_inquirer=ethereum_inquirer,
         database=database,
-        premium=Premium(credentials=rotki_premium_credentials, username=username),
+        premium=rotki_premium_object,
         msg_aggregator=database.msg_aggregator,
     )
     stats = aave.get_stats_for_addresses(
@@ -106,6 +83,7 @@ def test_aave_v1_events_stats(
         from_timestamp=Timestamp(0),
         to_timestamp=ts_now(),
         given_defi_balances={},
+        given_eth_balances={},
     )
     expected_stats = {
         '0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12': AaveStats(

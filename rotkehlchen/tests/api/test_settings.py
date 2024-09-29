@@ -13,28 +13,30 @@ from rotkehlchen.db.settings import (
     ROTKEHLCHEN_DB_VERSION,
     CachedSettings,
     DBSettings,
+    ModifiableDBSettings,
 )
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_proper_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     assert_simple_ok_response,
 )
 from rotkehlchen.tests.utils.constants import A_JPY
 from rotkehlchen.tests.utils.factories import make_evm_address
 from rotkehlchen.tests.utils.mock import MockWeb3
 from rotkehlchen.types import (
-    ChainID,
     ChecksumEvmAddress,
     CostBasisMethod,
     ExchangeLocationID,
     Location,
     ModuleName,
+    SupportedBlockchain,
 )
 
 
-def test_cached_settings(rotkehlchen_api_server, username):
+@pytest.mark.parametrize('should_mock_settings', [False])
+def test_cached_settings(rotkehlchen_api_server, username, db_password):
     """Make sure that querying cached settings works"""
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
 
@@ -88,6 +90,35 @@ def test_cached_settings(rotkehlchen_api_server, username):
     # Make sure that the cached settings are reset after logout
     assert CachedSettings().get_settings() == DBSettings()
 
+    # Login again, we'd expect settings to remain updated
+    data = {'password': db_password, 'sync_approval': 'unknown', 'resume_from_backup': False}
+    response = requests.post(
+        api_url_for(rotkehlchen_api_server, 'usersbynameresource', name=username),
+        json=data,
+    )
+    assert_proper_response(response)
+    assert rotki.user_is_logged_in is True
+
+    # Cached settings and DBSettings match
+    with rotki.data.db.conn.read_ctx() as cursor:
+        db_settings = rotki.data.db.get_settings(cursor)
+
+    cached_settings = CachedSettings().get_settings()
+    for field in fields(cached_settings):
+        if field.name == 'last_write_ts':  # last_write_ts is not cached
+            continue
+        assert getattr(cached_settings, field.name) == getattr(db_settings, field.name)
+
+    # API gives us the expected (updated) settings
+    response = requests.get(api_url_for(rotkehlchen_api_server, 'settingsresource'))
+    assert_proper_response(response)
+    json_data = response.json()
+
+    assert json_data['result']['query_retry_limit'] == 3
+    assert json_data['result']['connect_timeout'] == 45
+    assert json_data['result']['read_timeout'] == 45
+    assert json_data['result']['submit_usage_analytics'] is True
+
 
 def test_querying_settings(rotkehlchen_api_server, username):
     """Make sure that querying settings works for logged in user"""
@@ -114,7 +145,7 @@ def test_querying_settings(rotkehlchen_api_server, username):
     assert_error_response(
         response=response,
         contained_in_msg='No user is currently logged in',
-        status_code=HTTPStatus.CONFLICT,
+        status_code=HTTPStatus.UNAUTHORIZED,
     )
 
 
@@ -124,15 +155,17 @@ def test_set_settings(rotkehlchen_api_server):
     response = requests.get(api_url_for(rotkehlchen_api_server, 'settingsresource'))
     assert_proper_response(response)
     json_data = response.json()
-    original_settings = json_data['result']
+    original_settings = {
+        name: value
+        for name, value in json_data['result'].items()
+        if name in ModifiableDBSettings._fields
+    }
     assert json_data['message'] == ''
     # Create new settings which modify all of the original ones
     new_settings = {}
     unmodifiable_settings = (
         'version',
         'last_write_ts',
-        'last_data_upload_ts',
-        'last_balance_save',
         'have_premium',
         'last_data_migration',
     )
@@ -158,6 +191,8 @@ def test_set_settings(rotkehlchen_api_server):
             value = 'http://kusama.node.com:9933'
         elif setting == 'dot_rpc_endpoint':
             value = 'http://polkadot.node.com:9934'
+        elif setting == 'beacon_rpc_endpoint':
+            value = 'http://lighthouse.mynode.com:6969'
         elif setting == 'current_price_oracles':
             value = ['coingecko', 'cryptocompare', 'uniswapv2', 'uniswapv3']
         elif setting == 'historical_price_oracles':
@@ -165,27 +200,24 @@ def test_set_settings(rotkehlchen_api_server):
         elif setting == 'non_syncing_exchanges':
             value = [ExchangeLocationID(name='test_name', location=Location.KRAKEN).serialize()]
         elif setting == 'evmchains_to_skip_detection':
-            value = [ChainID.POLYGON_POS.to_name(), ChainID.BASE.to_name()]
+            value = [x.serialize() for x in (SupportedBlockchain.POLYGON_POS, SupportedBlockchain.BASE, SupportedBlockchain.ETHEREUM, SupportedBlockchain.AVALANCHE)]  # noqa: E501
         elif setting == 'cost_basis_method':
             value = CostBasisMethod.LIFO.serialize()
         elif setting == 'address_name_priority':
             value = ['hardcoded_mappings', 'ethereum_tokens']
+        elif setting == 'csv_export_delimiter':
+            value = ';'
         else:
-            raise AssertionError(f'Unexpected settting {setting} encountered')
+            raise AssertionError(f'Unexpected setting {setting} encountered')
 
         new_settings[setting] = value
 
-    # modify the settings
-    block_query = patch(
-        'rotkehlchen.chain.ethereum.node_inquirer.EthereumInquirer.query_highest_block',
-        return_value=0,
-    )
     mock_web3 = patch('rotkehlchen.chain.ethereum.node_inquirer.Web3', MockWeb3)
     ksm_connect_node = patch(
         'rotkehlchen.chain.substrate.manager.SubstrateManager._connect_node',
         return_value=(True, ''),
     )
-    with block_query, mock_web3, ksm_connect_node:
+    with mock_web3, ksm_connect_node:
         response = requests.put(
             api_url_for(rotkehlchen_api_server, 'settingsresource'),
             json={'settings': new_settings},
@@ -503,7 +535,7 @@ def test_queried_addresses_per_protocol(rotkehlchen_api_server):
     response = requests.put(
         api_url_for(rotkehlchen_api_server, 'queriedaddressesresource'), json=data,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == {'aave': [address1]}
 
     address2 = make_evm_address()
@@ -511,7 +543,7 @@ def test_queried_addresses_per_protocol(rotkehlchen_api_server):
     response = requests.put(
         api_url_for(rotkehlchen_api_server, 'queriedaddressesresource'), json=data,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert_queried_addresses_match(result, {
         'aave': [address1],
         'makerdao_vaults': [address2],
@@ -522,7 +554,7 @@ def test_queried_addresses_per_protocol(rotkehlchen_api_server):
     response = requests.put(
         api_url_for(rotkehlchen_api_server, 'queriedaddressesresource'), json=data,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert_queried_addresses_match(result, {
         'aave': [address1, address2],
         'makerdao_vaults': [address2],
@@ -545,7 +577,7 @@ def test_queried_addresses_per_protocol(rotkehlchen_api_server):
     response = requests.put(
         api_url_for(rotkehlchen_api_server, 'queriedaddressesresource'), json=data,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert_queried_addresses_match(result, {
         'aave': [address1, address2],
         'makerdao_vaults': [address2],
@@ -555,7 +587,7 @@ def test_queried_addresses_per_protocol(rotkehlchen_api_server):
     response = requests.delete(
         api_url_for(rotkehlchen_api_server, 'queriedaddressesresource'), json=data,
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert_queried_addresses_match(result, {
         'aave': [address1, address2],
         'makerdao_vaults': [address2],
@@ -574,7 +606,7 @@ def test_queried_addresses_per_protocol(rotkehlchen_api_server):
 
     # test that getting the queried addresses per module works
     response = requests.get(api_url_for(rotkehlchen_api_server, 'queriedaddressesresource'))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert_queried_addresses_match(result, {
         'aave': [address1, address2],
         'makerdao_vaults': [address2],

@@ -15,19 +15,17 @@
     "user_agent": "User Agent:"
   },
   "account_balance_table": {
-    "liabilities": "Υποχρεώσεις",
-    "loopring": "Loopring"
+    "liabilities": "Υποχρεώσεις"
   },
   "account_balances": {
     "confirm_delete": {
-      "description_address": "Είστε σίγουροι οτι θέλτε να διαγράψετε {count} διεύθυνσ(η/εις)",
+      "description_address": "Είστε σίγουροι οτι θέλτε να διαγράψετε {address} διεύθυνση",
       "description_xpub": "Είστε σίγουροι οτι θέλτε να διαγράψετε {address}",
       "title": "Διαγραφή λογαριασμού"
     },
     "data_table": {
       "loading": "Παρακαλώ περιμένετε όσο το rotki ρωτάει το blockchain..."
     },
-    "delete_tooltip": "Διαγράφή των επιλεγμένων λογαριασμών",
     "detect_tokens": {
       "tooltip": {
         "last_detected": "Τελευταία σάρωση: {time}",
@@ -37,11 +35,7 @@
     },
     "edit_tooltip": "Επεξεργασία λογαριασμού",
     "headers": {
-      "num_of_detected_tokens": "Num. of detected tokens",
-      "ownership": "Ownership",
-      "usd_value": "{symbol} value",
-      "usd_value_eth": "Total {symbol} value of account's assets",
-      "validator": "Validator Index | Public Key"
+      "usd_value": "{symbol} value"
     },
     "refresh_tooltip": "Refresh {blockchain} balances ignoring any cached entries"
   },
@@ -58,7 +52,6 @@
       "blockchain": "Επιλέξτε blockchain | Επιλέξτε blockchains",
       "btc": {
         "derivation_path": "Derivation Path",
-        "derivation_path_hint": "Optional",
         "xpub": "XPUB"
       },
       "multiple": "Add multiple addresses"
@@ -67,14 +60,6 @@
       "address_non_empty": "The address cannot be empty",
       "xpub_non_empty": "The XPUB field cannot be empty"
     }
-  },
-  "account_group_header": {
-    "copy_tooltip": "Copy the xpub to the clipboard",
-    "delete_tooltip": "Delete the entry and all the accounts underneath it",
-    "derivation_path": "Derivation Path",
-    "edit_tooltip": "Edit the label and tags of the xpub",
-    "standalone": "Standalone",
-    "xpub": "xpub:"
   },
   "account_management": {
     "about_tooltip": "Show the application's about modal",
@@ -93,10 +78,10 @@
     },
     "csv_export_settings": {
       "labels": {
-        "export_csv_formulas": "Should formulas be exported as part of the PnL CSV?",
-        "have_csv_summary": "Should summary of all events be included in the all events CSV export?"
+        "export_csv_formulas": "Θα πρέπει οι τύποι να εξάγονται ως μέρος του CSV PnL;",
+        "have_csv_summary": "Θα πρέπει να περιλαμβάνεται σύνοψη όλων των συμβάντων στην εξαγωγή όλων των συμβάντων CSV;"
       },
-      "title": "CSV Export Settings"
+      "title": "Ρυθμίσεις εξαγωγής CSV"
     },
     "messages": {
       "account_for_assets_movements": "Error setting account for assets movements: {message}",
@@ -235,14 +220,10 @@
       },
       "blockchain_accounts_add": {
         "error": {
-          "description": "Failed to add {addresses} new {blockchain} accounts: {error}",
-          "empty_addresses_description": "Η διεύθυνση {address} δεν προστέθηκε επειδή είτε είναι contract είτε δεν έχει καμία δραστηριότητα σε καμία από τις υποστηριζόμενες EVM chains",
-          "failed_list_description": "Failed to add {addresses} new {blockchain} accounts. Please check again if these account(s) are valid:\n {list}",
-          "title": "Adding {blockchain} accounts"
+          "failed_list_description": "Failed to add {addresses} new {blockchain} accounts. Please check again if these account(s) are valid:\n {list}"
         },
         "no_new": {
-          "description": "The selected addresses are already tracked by rotki",
-          "title": "Adding {blockchain} accounts"
+          "description": "The selected addresses are already tracked by rotki"
         },
         "task": {
           "description": "Adding {address}",
@@ -358,15 +339,6 @@
         },
         "task": {
           "title": "Querying Balancer balances"
-        }
-      },
-      "balancer_events": {
-        "error": {
-          "description": "Failed to query Balancer events: {message}",
-          "title": "Querying Balancer events"
-        },
-        "task": {
-          "title": "Querying Balancer events"
         }
       },
       "balances": {
@@ -514,15 +486,6 @@
         "task": {
           "title": "Querying yearn.finance Vaults {version} balances"
         }
-      },
-      "yearn_vaults_history": {
-        "error": {
-          "description": "Failed to retrieve yearn.finance Vaults {version} history: {error}",
-          "title": "yearn.finance Vaults {version} history"
-        },
-        "task": {
-          "title": "Querying yearn.finance Vaults {version} history"
-        }
       }
     },
     "delete_eth2_validator": {
@@ -576,7 +539,7 @@
     },
     "history_events_export": {
       "message": {
-        "failure": "Αποτυχία εξαγωγής ιστορικών γεγονότων",
+        "failure": "Αποτυχία εξαγωγής ιστορικών γεγονότων: {description}",
         "success": "Επιτυχής εξαγωγή ιστορικών γεγονότων σε CSV"
       },
       "title": "Εξαγωγή Ιστορικών Γεγονότων"
@@ -817,22 +780,22 @@
     },
     "transactions_redecode": {
       "error": {
-        "description": "Failed to retrieve events from transactions: {error}",
-        "title": "Retrieving events from transactions"
+        "description": "Απέτυχε η αποκωδικοποίηση συμβάντων από συναλλαγές: {error}",
+        "title": "Αποκωδικοποίηση γεγονότων από συναλλαγές"
       },
       "task": {
-        "description": "Retrieving transactions events",
-        "title": "Evm Transactions Events Retrieval"
+        "description": "Αποκωδικοποίηση συμβάντων συναλλαγών για συναλλαγές: {tx} ({chain})",
+        "title": "Αποκωδικοποίηση συμβάντων συναλλαγής"
       }
     },
-    "transactions_redecode_missing": {
+    "transactions_redecode_by_chain": {
       "error": {
-        "description": "Failed to retrieve missing events from transactions for address {address} ({evmChain}): {error}",
-        "title": "Retrieving missing events from transactions"
+        "description": "Απέτυχε η αποκωδικοποίηση των συμβάντων {chain}: {error}",
+        "title": "Αποκωδικοποίηση γεγονότων από συναλλαγές"
       },
       "task": {
-        "description": "Retrieving transactions events for address: {address} ({evmChain})",
-        "title": "Evm Transaction Missing Events Retrieval"
+        "description": "Αποκωδικοποίηση συναλλαγών για γεγονότα {chain}",
+        "title": "Αποκωδικοποίηση συμβάντων συναλλαγής"
       }
     },
     "unignore": {
@@ -895,8 +858,7 @@
       "no_suggestions_available": "No Suggestions Available",
       "validation": {
         "address": "The address field cannot be empty",
-        "name": "The name field cannot be empty",
-        "valid": "Please input valid ETH address"
+        "name": "The name field cannot be empty"
       }
     },
     "hint": {
@@ -921,7 +883,9 @@
     "headers": {
       "source": "Source"
     },
-    "title": "Airdrops"
+    "title": "Airdrops",
+    "unknown_info": "Για αυτές τις διευθύνσεις είναι διαθέσιμες εναέριες ρίψεις, αλλά δεν μπορούμε ακόμη να αναλύσουμε αν έχουν διεκδικηθεί ή όχι.",
+    "unknown_tooltip": "Η διεύθυνση είναι επιλέξιμη για αυτό το airdrop, αλλά δεν μπορούμε ακόμα να αναλύσουμε αν έχει διεκδικηθεί ή όχι."
   },
   "alias_names": {
     "error": {
@@ -972,7 +936,7 @@
     "name_non_empty": "The name of the asset cannot be empty",
     "optional": "Optional Fields",
     "oracle_disable": "Disable/Enable the price fetching from the price oracle. If the oracle is not disabled, and there is no value specified, rotki will attempt to fetch a price using the asset symbol.",
-    "replaced": "This icon will be replaced with {name} on save.",
+    "replaced": "Αυτό το εικονίδιο θα εφαρμοστεί αφού κάνετε κλικ στην επιλογή \"«Αποθήκευση»\".",
     "type_non_empty": "The type of the asset cannot be empty",
     "types": {
       "error": "We could not load the asset types: {message}"
@@ -995,6 +959,31 @@
   },
   "asset_management": {
     "add_title": "Add a new asset",
+    "cex_mapping": {
+      "add_error": "Δεν μπόρεσε να προσθέσει την αντιστοίχιση: {message}",
+      "add_mapping": "Προσθήκη χαρτογράφησης",
+      "add_title": "Προσθήκη νέας χαρτογράφησης",
+      "all_exchanges": "Όλες οι ανταλλαγές",
+      "confirm_delete": {
+        "message": "Είστε σίγουροι ότι θέλετε να διαγράψετε την αντιστοίχιση περιουσιακών στοιχείων για το σύμβολο {asset} στο {location};",
+        "title": "Διαγραφή χαρτογράφησης περιουσιακών στοιχείων του χρηματιστηρίου"
+      },
+      "delete_error": "Δεν κατέστη δυνατή η διαγραφή της αντιστοίχισης: {message}",
+      "edit_error": "Δεν ήταν δυνατή η επεξεργασία της αντιστοίχισης: {message}",
+      "edit_title": "Επεξεργασία της χαρτογράφησης",
+      "exchange": "Exchange",
+      "filter_by_exchange": "Φιλτράρισμα με βάση την ανταλλαγή",
+      "form": {
+        "asset_non_empty": "Το πεδίο αναγνωρισμένο περιουσιακό στοιχείο δεν μπορεί να είναι κενό",
+        "location_non_empty": "Το πεδίο τοποθεσία δεν μπορεί να είναι κενό",
+        "location_symbol_non_empty": "Το πεδίο Σύμβολο περιουσιακού στοιχείου δεν μπορεί να είναι κενό"
+      },
+      "location_symbol": "Σύμβολο περιουσιακού στοιχείου",
+      "filter_by_location_symbol": "Φίλτρο ανά σύμβολο περιουσιακού στοιχείου",
+      "recognized_as": "Αναγνωρίζεται ως",
+      "save_for_all": "Αποθήκευση αυτής της αντιστοίχισης για όλες τις ανταλλαγές",
+      "subtitle": "Μπορείτε να συνδέσετε σύμβολα περιουσιακών στοιχείων σε ένα κεντρικό ανταλλακτήριο με περιουσιακά στοιχεία που αναγνωρίζονται από το rotki. Αυτό είναι απαραίτητο για να μπορεί το rotki να επεξεργάζεται περιουσιακά στοιχεία στα ανταλλακτήρια."
+    },
     "confirm_delete": {
       "message": "Are you sure you want to delete {asset} from the asset database?",
       "title": "Delete asset"
@@ -1020,6 +1009,7 @@
     "only_show_ignored": "Only show ignored assets ({length}) | Only show ignored assets",
     "only_show_owned": "Only show owned assets",
     "only_show_unignored": "Only show un-ignored assets",
+    "only_show_whitelisted": "Εμφάνιση μόνο των στοιχείων ενεργητικού που περιλαμβάνονται στη λίστα επιτρεπόμενων στοιχείων",
     "selected": "{count} asset(s) selected",
     "show_all": "Show all",
     "underlying_tokens": "Underlying Tokens"
@@ -1068,6 +1058,19 @@
     "amount": "Total Owned",
     "backup": {
       "missing_directory": "Please select a directory"
+    },
+    "custom_price": {
+      "delete": {
+        "error": {
+          "message": "Δεν ήταν δυνατή η διαγραφή της τελευταίας τιμής για το {asset}",
+          "title": "Διαγραφή προσαρμοσμένης τελευταίας τιμής"
+        },
+        "message": "Είστε σίγουροι ότι θέλετε να διαγράψετε την προσαρμοσμένη τιμή για το {asset}?",
+        "tooltip": "Διαγραφή της προσαρμοσμένης τιμής"
+      },
+      "edit": {
+        "tooltip": "Επεξεργαστείτε ή ορίστε την προσαρμοσμένη τιμή"
+      }
     },
     "filter": {
       "name": "Filter by the name of the asset",
@@ -1252,31 +1255,10 @@
   },
   "blockchain_balances": {
     "add_account": "Add Account",
-    "balances": {
-      "arbitrum_one": "Arbitrum One balances",
-      "avax": "Avalanche balances",
-      "base": "Base balances",
-      "bch": "Bitcoin Cash balances",
-      "btc": "Bitcoin balances",
-      "dot": "Polkadot balances",
-      "eth": "Ethereum balances",
-      "eth2": "ETH balances",
-      "ksm": "Kusama balances",
-      "loopring": "Loopring balances",
-      "optimism": "Optimism balances",
-      "polygon_pos": "Polygon PoS balances",
-      "gnosis": "Gnosis balances"
-    },
     "form_dialog": {
       "add_title": "Add blockchain account",
       "edit_subtitle": "Modify account details",
       "edit_title": "Edit blockchain account"
-    },
-    "metamask_import": {
-      "error": {
-        "description": "Adding addresses from metamask could not be completed: {error}",
-        "title": "Metamask address import"
-      }
     },
     "per_asset": {
       "title": "Blockchain Balances per Asset"
@@ -1354,9 +1336,12 @@
     "title": "Exchange Trades"
   },
   "collapsed_pending_tasks": {
-    "title": "{count} pending task | {count} pending tasks"
+    "title": "{count} εκκρεμής εργασία | {count} εκκρεμείς εργασίες",
+    "cancel_task": "Ακύρωση εργασίας",
+    "cancel_task_info": "Αυτή η ενέργεια θα αφήσει την εκτελούμενη διεργασία ({title}) σε ημιτελή κατάσταση, είστε σίγουροι ότι θέλετε να την ακυρώσετε;"
   },
   "common": {
+    "entry_type": "Τύπος εισόδου",
     "account": "Account",
     "actions": {
       "back": "Back",
@@ -1365,7 +1350,8 @@
       "close": "Close",
       "confirm": "Confirm",
       "continue": "Continue",
-      "copy": "Copy to clipboard",
+      "copy": "Copy",
+      "copy_to_clipboard": "Copy to clipboard",
       "create": "Create",
       "delete": "Delete",
       "dismiss": "Dismiss",
@@ -1383,7 +1369,8 @@
       "ok": "OK",
       "pull": "Pull",
       "push": "Push",
-      "save": "Save",
+      "save": "Αποθήκευση",
+      "save_continue": "Αποθήκευση & συνέχιση",
       "search": "Search",
       "skip": "Skip",
       "terminate": "Terminate",
@@ -1399,6 +1386,7 @@
     "balance": "Balance",
     "category": "Category",
     "claimed": "Διεκδικήθηκε",
+    "counterparty": "Counterparty",
     "datetime": "Date/Time",
     "deposits": "Deposits",
     "description": "Description",
@@ -1406,12 +1394,14 @@
     "events": "Events",
     "here": "here",
     "ignored_in_accounting": "Ignored in Accounting",
+    "important_notice": "Important notice:",
     "location": "Location",
     "name": "Name",
     "never": "Ποτέ",
     "no_premium": "No premium subscription detected. ",
     "notes": "σημειώσεις",
     "of": "από",
+    "optional": "Optional",
     "price": "Price",
     "price_in_symbol": "Price in {symbol}",
     "protocol": "Protocol",
@@ -1426,7 +1416,9 @@
     "unclaimed": "αδιεκδίκητος",
     "validator_index": "Validator Index",
     "value_in_symbol": "{symbol} Value",
-    "visit_website": "To get a premium subscription please visit our {0}"
+    "visit_website": "To get a premium subscription please visit our {0}.",
+    "unknown": "Άγνωστος",
+    "all": "Όλα"
   },
   "compound_lending": {
     "header": "Compound Loan ({asset})",
@@ -1437,11 +1429,17 @@
       "local": "Local",
       "remote": "Remote"
     },
-    "all_buttons_description": "For all conflicts",
-    "hint": "{conflicts} asset entries cannot be automatically updated. {remaining} remaining entry/ies require user input.",
-    "keep_local": "Keep Local",
-    "keep_remote": "Keep Remote",
-    "subtitle": "Local changes have been detected to the following assets. Select if you would like to keep the local version or overwrite it with the remote one.",
+    "action_hint": {
+      "top": "Εντοπίστηκαν τοπικές αλλαγές. Έχετε δύο επιλογές:",
+      "bottom": "Μπορείτε επίσης να διαχειριστείτε τις συγκρούσεις μεμονωμένα."
+    },
+    "hint": "Οι καταχωρήσεις περιουσιακών στοιχείων {conflicts} δεν μπορούν να ενημερωθούν αυτόματα. {remaining} Οι υπόλοιπες καταχωρήσεις απαιτούν την εισαγωγή δεδομένων από τον χρήστη.",
+    "resolve_all_hint": "Όλες οι συγκρούσεις θα επιλυθούν με τη χρήση δεδομένων {source}.",
+    "keep_local": "Κρατήστε τα όλα τοπικά",
+    "keep_remote": "Διατηρήστε όλα τα απομακρυσμένα",
+    "keep_local_tooltip": "Δεν θα ενημερωθεί κανένα επηρεαζόμενο περιουσιακό στοιχείο. Ενδέχεται να χρειαστούν χειροκίνητες ενημερώσεις.",
+    "keep_remote_tooltip": "Ενημερώστε όλα τα περιουσιακά στοιχεία. Δεν απαιτούνται περαιτέρω ενέργειες.",
+    "subtitle": "Οι καταχωρήσεις περιουσιακών στοιχείων {conflicts} δεν μπορούν να ενημερωθούν αυτόματα. {remaining} Οι υπόλοιπες καταχωρήσεις απαιτούν την εισαγωγή δεδομένων από τον χρήστη.",
     "table": {
       "headers": {
         "keep": "Keep",
@@ -1449,7 +1447,8 @@
         "remote": "Remote"
       }
     },
-    "title": "Conflicts detected"
+    "title": "Ανιχνεύονται συγκρούσεις",
+    "manage": "Διαχείριση συγκρούσεων"
   },
   "connection_failure": {
     "default": "Connect to default",
@@ -1500,7 +1499,6 @@
     },
     "premium": {
       "button_premium_approve": "Ναι, ενεργοποιήστε το premium",
-      "premium_link_text": "εδώ.",
       "premium_question": "Είστε ήδη χρήστης premium του rotki και θέλετε να ενεργοποιήσετε τις λειτουργίες premium?\nΑυτό είναι απαραίτητο εάν θέλετε να συγχρονίσετε τη βάση δεδομένων rotki από άλλη συσκευή κατά τη δημιουργία λογαριασμού. Μπορείτε να αγοράσετε premium {premiumLink}"
     },
     "steps": {
@@ -1611,7 +1609,6 @@
             },
             "nft": "NFT",
             "nft_hint": "Accepted format: \"_nft_{'ETH address'}_{'collection number'}\"",
-            "optional": "Optional",
             "preview": {
               "from": "From",
               "title": "This location value will be updated",
@@ -1674,16 +1671,17 @@
   "data_management": {
     "purge_data": {
       "confirm": {
-        "message": "Are you sure you want to purge the cached data for {source}?",
-        "title": "Confirm cached data purge"
-      },
-      "evm_transaction_purge_confirm": {
-        "message": "Είστε βέβαιοι ότι θέλετε να εκκαθαρίσετε τα αποθηκευμένα δεδομένα από τις συναλλαγές EVM; Αυτή η ενέργεια θα καταργήσει τις συναλλαγές και τις αποδείξεις και θα χρειαστεί πολύς χρόνος για να ζητήσετε τα πάντα."
+        "message": "Είστε σίγουροι ότι θέλετε να διαγράψετε τα αποθηκευμένα δεδομένα για {source} ({value})?",
+        "message_all": "Είστε σίγουροι ότι θέλετε να καθαρίσετε τα αποθηκευμένα δεδομένα για όλα τα {source}?",
+        "title": "Επιβεβαίωση εκκαθάρισης αποθηκευμένων δεδομένων"
       },
       "error": "Purging the cached data for {source} failed: {message}",
       "subtitle": "Allows you to purge data cached by rotki",
       "success": "Data was successfully deleted",
-      "title": "Purge Data"
+      "title": "Purge Data",
+      "transaction_purge_confirm": {
+        "message": "Είστε σίγουροι ότι θέλετε να διαγράψετε αυτά τα δεδομένα συναλλαγών; Αυτή η ενέργεια θα αφαιρέσει τις συναλλαγές και τις αποδείξεις και θα χρειαστεί πολύς χρόνος για να ξαναζητήσετε τα πάντα."
+      }
     },
     "purge_images_cache": {
       "confirm": {
@@ -1711,7 +1709,8 @@
       },
       "error": "Clear the cache for {source} failed: {message}",
       "label": {
-        "general_cache": "General cache (Curve, MakerDAO, Yearn)"
+        "general_cache": "γενική κρυφή μνήμη (Curve, MakerDAO, Yearn, Velodrome, Aerodrome, and Gearbox)",
+        "general_cache_short": "γενική κρυφή μνήμη (Curve, MakerDAO, κ.λπ.)"
       },
       "select_cache": "Select cache to refresh",
       "subtitle": "Allows you to refresh data cached by rotki",
@@ -1723,7 +1722,8 @@
   },
   "data_table": {
     "items_no": "Αντικείμενα #",
-    "rows_per_page": "Γραμμές ανα σελίδα"
+    "rows_per_page": "Γραμμές ανα σελίδα",
+    "no_data": "Δεν υπάρχουν διαθέσιμα στοιχεία"
   },
   "database_backups": {
     "action": {
@@ -1828,11 +1828,6 @@
   },
   "defi_wizard": {
     "steps": {
-      "select_accounts": {
-        "hint": "Select accounts for which data will be retrieved for each submodule. If no addresses are selected data will be retrieved for all available addresses",
-        "subtitle": "Select accounts",
-        "title": "Select accounts"
-      },
       "select_modules": {
         "hint": "If no modules are specified, querying for the supported modules will be disabled.",
         "subtitle": "Select the modules you would like to activate.",
@@ -1852,10 +1847,7 @@
     "filter": {
       "action": "filter by the action",
       "asset": "filter by the asset",
-      "date_hint": "format {format} HH:mm:ss (time/seconds are optional)",
-      "end_date": "filter by the ending date of the period",
-      "location": "filter by the location",
-      "start_date": "filter by the starting date of the period"
+      "location": "filter by the location"
     }
   },
   "deposits_withdrawals": {
@@ -1894,21 +1886,10 @@
   "eth2_input": {
     "ownership": {
       "hint": "*Optional: By default it is 100%",
-      "validation": "The value should be 0-100%"
+      "validation": "The value should be > 0% and <= 100%"
     },
     "ownership_percentage": "Ownership Percentage",
     "public_key": "Public Key"
-  },
-  "eth2_page": {
-    "no_premium": "ETH Staking is",
-    "toggle": {
-      "depositor": "Depositor",
-      "hint": "Switch the filtering and display mode between ETH staking validators and ETH1 Addresses",
-      "key": "Validator"
-    }
-  },
-  "eth2_validator_filter": {
-    "label": "Select Depositor address"
   },
   "eth2_validator_limit_row": {
     "label": "Validators"
@@ -2004,7 +1985,6 @@
     "inputs": {
       "api_key": "API Key",
       "api_secret": "API Secret",
-      "ftx_subaccount": "[Optional] FTX subaccount name",
       "kraken_account": "Select the type of your Kraken account",
       "passphrase": "Passphrase"
     },
@@ -2070,6 +2050,7 @@
       "hint": "Enter your Etherscan API key",
       "title": "Etherscan"
     },
+    "get_api_key": "You can apply for an API key {link}",
     "loopring": {
       "delete_tooltip": "Delete your Loopring API key",
       "description": "Used to query balances in Loopring. This API key will only be able to query the account that generated this key.",
@@ -2082,7 +2063,6 @@
       "delete_tooltip": "Delete your OpenSea API key",
       "description": "Used to query NFT information and balances from OpenSea.",
       "hint": "Enter your OpenSea API key",
-      "link": "You can apply for an API key {link}",
       "title": "Opensea"
     },
     "set": {
@@ -2105,8 +2085,7 @@
     },
     "buy_quote": "With",
     "date": {
-      "hint": "Time the trade took place",
-      "label": "Time"
+      "hint": "Time the trade took place"
     },
     "fee": {
       "hint": "[Optional] Fee if any of the trade that occurred",
@@ -2139,7 +2118,7 @@
     "summary": {
       "buy": "{label}: Buy {amount} {base} with {quote} for {rate} {quote} per {base}",
       "label": "Summary",
-      "sell": "{label}: Sell {amount} {base} with {quote} for {rate} {quote} per {base}"
+      "sell": "{label}: Sell {amount} {base} for {quote} for {rate} {quote} per {base}"
     },
     "trade_type": {
       "buy": "Buy",
@@ -2157,19 +2136,15 @@
     }
   },
   "file_upload": {
-    "change_file": "Change file",
     "date_input_format": {
       "hint": "Use this if date format in your file is: {format}",
       "placeholder": "Input custom date format",
       "switch_label": "Use custom date format to parsing your file"
     },
-    "drop_area": "Drop the file or",
     "import_complete": "Import was completed successfully.",
     "loading": "Loading",
     "many_files_selected": "One one file must be selected",
     "only_files": "Only {fileFilter} files are allowed",
-    "select_file": "Select file",
-    "selected_file": "Selected file: {name}",
     "task": {
       "title": "Importing csv for source: {source}"
     }
@@ -2305,13 +2280,25 @@
     "language_contribution_tooltip": "This feature is experimental and may not work as expected for some languages. This is because all static sentences in the app have to be manually translated and that is a long and ongoing process. Therefore, we need your contribution to speed it up. Click here for more information.",
     "nft_setting": {
       "label": {
-        "include_nfts": "Include NFTs in the graphs and total networth",
-        "include_nfts_hint": "By default graphs and dashboard include the value of all the NFTs"
+        "include_nfts": "Συμπεριλάβετε τα NFTs στα γραφήματα και τη συνολική καθαρή αξία",
+        "include_nfts_hint": "Από προεπιλογή τα γραφήματα και ο πίνακας οργάνων περιλαμβάνουν την αξία όλων των NFTs",
+        "render_setting": {
+          "allow_all": "Επιτρέψτε όλες τις εικόνες",
+          "only_allow_whitelisted": "Επιτρέψτε εικόνες μόνο από τομείς στη λίστα επιτρεπόμενων"
+        },
+        "whitelist_domains": "Προσθήκη διαδικτυακών τομέων στην λίστα επιτρεπομένων",
+        "whitelisted_domains": "Επιλεγμένοι τομείς",
+        "whitelisted_domains_hint": "Εισάγετε έναν ή περισσότερους τομείς που χωρίζονται με κόμμα. Πατήστε το κουμπί αποθήκευσης στα δεξιά για να αποθηκεύσετε τις αλλαγές",
+        "whitelisted_domain_entries": "Δεν υπάρχουν καταχωρήσεις | {count} μοναδική καταχώρηση | {count} μοναδικές καταχωρήσεις"
       },
       "subtitle": {
         "include_nfts": "Include NFTs in graphs and total amounts"
       },
-      "title": "NFT setting"
+      "title": "NFT setting",
+      "messages": {
+        "error": "Σφάλμα καθορισμού επιτρεπόμενων τομέων για την απεικόνιση των NFTs",
+        "success": "Οι επιτρεπόμενοι τομείς για την απεικόνιση των NFTs αποθηκεύτηκαν με επιτυχία"
+      }
     },
     "rpc_node_setting": {
       "title": "RPC node setting"
@@ -2486,8 +2473,9 @@
   },
   "import_data": {
     "binance": {
-      "line_one": "Imports: Deposits, Withdrawals, Trades, ETH Staking, Small assets exchange BNB, ETH Staking Rewards, Launchpool Interest, POS savings interest, POS savings purchase, POS savings redemption.",
-      "line_two": "Because of binance's csv format there is a chance that not all data will be imported. If this will happen, you will get warning.",
+      "line_one": "Οι στήλες που επεξεργαζόμαστε περιλαμβάνουν: User_ID, UTC_Time, Account, Operation, Coin, Change και Remark.",
+      "line_two": "Μπορείτε να λάβετε το αρχείο CSV από τη διεύθυνση {link}.",
+      "line_three": "Λόγω της μορφής CSV της Binance, υπάρχει πιθανότητα να μην εισαχθούν όλα τα δεδομένα. Εάν συμβεί αυτό, θα λάβετε μια προειδοποίηση.",
       "name": "Binance"
     },
     "bisq": {
@@ -2558,7 +2546,6 @@
     "note": "Important notes for importing data from {0}'s CSV exports.",
     "notice": "Those platforms could change their format in a backwards incompatible way quite often. As such this import may stop working. If that happens {link} and we will see what we can do.",
     "notice_link": "open an issue with rotki",
-    "notice_warning": "Important notice:",
     "select_source": {
       "title": "Select source"
     },
@@ -2576,23 +2563,26 @@
       "line_one": "[Experimental] If you find an issue with the imported data, let us know so we can adapt the code accordingly.",
       "line_two": "Uphold lets you export a transactions file. It can be found under activity at the top right of the activity list.",
       "name": "Uphold"
+    },
+    "kucoin": {
+      "import": "Εισαγωγή {0} από Kucoin",
+      "import_types": "συναλλαγές",
+      "line_one": "Υποστηρίζουμε την εισαγωγή εμπορικών συναλλαγών τύπου αρχείου csv.",
+      "name": "Kucoin"
     }
   },
   "input_mode_select": {
+    "import_from_wallet": {
+      "label": "Εισαγωγή διευθύνσεων από πορτοφόλι προγράμματος περιήγησης",
+      "missing": "Δεν μπορούμε να εντοπίσουμε κανένα πορτοφόλι σε αυτό το πρόγραμμα περιήγησης.",
+      "missing_tooltip": {
+        "wallet_is_not_installed": "Αυτό το πρόγραμμα περιήγησης δεν έχει εγκατεστημένα πορτοφόλια. Μπορείτε να μεταβείτε στο κατάστημα επεκτάσεων του προγράμματος περιήγησής σας και να εγκαταστήσετε ένα.",
+        "wallet_is_not_enabled": "Η επέκταση για το πορτοφόλι είναι απενεργοποιημένη. Μπορείτε να την ενεργοποιήσετε στο μενού Extensions/Add-Ons, ανάλογα με το πρόγραμμα περιήγησής σας.",
+        "title": "Εδώ είναι η κοινή αιτία:"
+      }
+    },
     "manual_add": {
       "label": "Manual"
-    },
-    "metamask_import": {
-      "label": "MetaMask",
-      "metamask": "* You will be prompted to import your addresses from MetaMask after pressing save.",
-      "missing": "* Importing addresses from MetaMask is disabled. MetaMask could not be detected.",
-      "missing_tooltip": {
-        "copy_url": "copy this page URL",
-        "metamask_is_not_enabled": "The MetaMask is not enabled yet. You can enable it in menu Extension / Add Ons, depends on your browser.",
-        "metamask_is_not_installed": "This browser doesn't have MetaMask installed. You can download MetaMask {link}.",
-        "metamask_is_not_supported_by_browser": "Make sure you open this page with supported browser listed {link}. If not, please {copy} and open it manually on supported browser.",
-        "title": "Here are the common cause:"
-      }
     },
     "xpub_add": {
       "label": "XPUB"
@@ -2779,8 +2769,7 @@
       "valid_username": "Ένα όνομα προφίλ πρέπει να περιέχει μόνο αλφαριθμητικούς χαρακτήρες και να μην έχει κενά"
     },
     "welcome_description": "Καλώς ήρθατε στον διαχειριστή χαρτοφυλακίου ανοιχτού κώδικα που προστατεύει το απόρρητό σας.",
-    "welcome_title": "Καλώς ήρθατε στο rotki",
-    "welcome_update_message": "Ξεκλειδώστε τον λογαριασμό σας για να εξερευνήσετε τις αλλαγές που κάναμε."
+    "welcome_title": "Καλώς ήρθατε στο rotki"
   },
   "macos_unsupported": {
     "header": "Unsupported macOS Version",
@@ -2844,9 +2833,6 @@
     }
   },
   "manual_balances_table": {
-    "columns": {
-      "label": "Label"
-    },
     "delete_dialog": {
       "message": "Are you sure you want to delete this entry?",
       "title": "Delete manually tracked balance"
@@ -2858,21 +2844,22 @@
     }
   },
   "merge_dialog": {
-    "done": "The asset merge is complete. The old asset will still appear in the frontend. To make sure the new one is shown everywhere either restart the application or manually refresh balances in each place the old asset appears.",
-    "error": "Merge was not successful",
-    "hint": "The source asset will be merged into the target asset and all its usages will be updated.",
-    "merge": "Merge",
+    "done": "Η συγχώνευση περιουσιακών στοιχείων ολοκληρώθηκε. Το παλιό περιουσιακό στοιχείο θα εξακολουθεί να εμφανίζεται στο frontend. Για να βεβαιωθείτε ότι το νέο εμφανίζεται παντού, είτε επανεκκινήστε την εφαρμογή είτε ανανεώστε χειροκίνητα τις ισορροπίες σε κάθε θέση που εμφανίζεται το παλιό asset.",
+    "error": "Η συγχώνευση δεν ήταν επιτυχής",
+    "hint": "Το αρχικό περιουσιακό στοιχείο θα συγχωνευτεί στο περιουσιακό στοιχείο-στόχο και θα ενημερωθούν όλες οι χρήσεις του",
+    "merge": "συγχώνευση",
     "source": {
-      "label": "Source",
-      "non_empty": "The source identifier cannot not be empty"
+      "label": "Πηγή",
+      "non_empty": "Το αναγνωριστικό πηγής δεν μπορεί να είναι κενό"
     },
-    "source_hint": "The asset identifier that you want to merge into the target",
-    "subtitle": "Merge two assets",
+    "source_hint": "Το αναγνωριστικό περιουσιακού στοιχείου που θέλετε να συγχωνεύσετε στο στόχο",
+    "subtitle": "Συγχώνευση δύο περιουσιακών στοιχείων",
     "target": {
-      "label": "Target",
-      "non_empty": "The target asset cannot be empty"
+      "label": "Στόχος",
+      "non_empty": "Το περιουσιακό στοιχείο-στόχος δεν μπορεί να είναι κενό"
     },
-    "title": "Merge Assets"
+    "target_hint": "Αναγνωριστικό: {identifier}",
+    "title": "Συγχώνευση περιουσιακών στοιχείων"
   },
   "message": {
     "error": {
@@ -2903,11 +2890,8 @@
     }
   },
   "module_settings": {
-    "active_modules": "Active modules",
     "active_modules_description": "Only data for the selected modules will be queried. If no modules are selected, querying for all the supported modules will be disabled.",
     "hint": "* Please remember that after activating a module, you need to logout and login again for the activation to take effect",
-    "select_accounts": "Selected accounts",
-    "select_accounts_description": "If no accounts are selected for a protocol, data for all accounts will be queried for that protocol.",
     "title": "Module Settings"
   },
   "navigation_menu": {
@@ -2948,19 +2932,20 @@
       "trades": "Συναλλαγές Ανταλλακτηρίων"
     },
     "import_data": "Εισαγωγή δεδομένων",
-    "locations": "Locations",
-    "manage_address_book": "Manage Address Book",
-    "manage_assets": "Manage Assets",
+    "locations": "Τοποθεσίες",
+    "manage_address_book": "Διαχείριση βιβλίου διευθύνσεων",
+    "manage_assets": "Διαχείριση περιουσιακών στοιχείων",
     "manage_assets_sub": {
-      "custom_assets": "Custom Assets",
-      "managed_assets": "Managed Assets"
+      "custom_assets": "Προσαρμοσμένα περιουσιακά στοιχεία",
+      "assets": "Περιουσιακά στοιχεία",
+      "newly_detected": "Πρόσφατα εντοπισμένα Tokens"
     },
-    "manage_prices": "Manage Prices",
+    "manage_prices": "Διαχείριση τιμών",
     "manage_prices_sub": {
       "historic_prices": "Ιστορικές τιμές",
       "latest_prices": "Πρόσφατε τιμές"
     },
-    "nfts": "NFTs",
+    "nfts": "NFTs Gallery",
     "profit_loss_report": "Λογαριασμός Κερδών και Ζημιών",
     "settings": "Ρυθμίσεις",
     "settings_sub": {
@@ -3006,23 +2991,8 @@
       "custom_price": "Custom Price",
       "price_in_asset": "Price in Asset"
     },
-    "delete": {
-      "error": {
-        "message": "Could not delete the latest price for {asset}",
-        "title": "Deleting custom latest price"
-      },
-      "message": "Are you sure wou want to delete the custom price for {asset}?",
-      "title": "Delete custom price"
-    },
-    "edit": {
-      "title": "Edit or set the price for the asset"
-    },
     "ignore": "Ignore NFT",
     "refresh": "Refresh the balances",
-    "row": {
-      "delete": "Delete the custom price",
-      "edit": "Edit or set the custom price"
-    },
     "title": "Non Fungible Balances"
   },
   "notes_menu": {
@@ -3051,11 +3021,6 @@
     },
     "tooltip": "Notes"
   },
-  "notification": {
-    "copy": "Copy",
-    "copy_tooltip": "Copy the message to clipboard",
-    "dismiss_tooltip": "Dismiss Notification"
-  },
   "notification_indicator": {
     "tooltip": "Notifications"
   },
@@ -3063,15 +3028,13 @@
     "backend": {
       "title": "Backend"
     },
-    "db_upload_result": {
-      "action": "Force push",
-      "message": "We could not complete the upload because {reason}",
-      "title": "Database sync failed"
-    },
     "missing_api_key": {
       "action": "Εισάγετε κλειδί",
-      "message": "Δεν έχετε διαμορφώσει ένα κλειδί API {location} {service}. Τα ερωτήματα rotki {location} {service} θα εξακολουθούν να λειτουργούν αλλά θα είναι πολύ αργά. Εάν δεν χρησιμοποιείτε τον δικό σας κόμβο {location}, συνιστάται να μεταβείτε στο {url}, να δημιουργήσετε ένα κλειδί API και, στη συνέχεια, να το εισαγάγετε στη ρύθμιση διαπιστευτηρίων εξωτερικής υπηρεσίας του rotki",
-      "title": "Κλειδί API {location} {service}"
+      "get_key": "Λήψη κλειδιού API",
+      "etherscan": {
+        "message": "Τα ερωτήματα Rotki για την αλυσίδα {location} λειτουργούν πιο αργά επειδή δεν έχετε {location} {service} API key configured. Πατήστε @.quote:notification_messages.missing_api_key.get_key για να φτιάξετε ένα ή @.quote:notification_messages.missing_api_key.action για να το προσθέσετε στην εφαρμογή.",
+        "title": "Κλειδί API {location} {service}"
+      }
     },
     "new_detected_token": {
       "action": "See more",
@@ -3100,7 +3063,6 @@
   },
   "notification_sidebar": {
     "clear_tooltip": "Clear all notifications",
-    "close_tooltip": "Close the notification area",
     "confirmation": {
       "message": "This action will clear all the active notifications. Do you want to proceed?",
       "title": "Clear active notifications"
@@ -3160,9 +3122,6 @@
       }
     }
   },
-  "pagination": {
-    "of": "of {length}"
-  },
   "percentage_display": {
     "symbol": "%"
   },
@@ -3177,7 +3136,8 @@
       "apr": "APR",
       "no_entries_found": "No {title} entries found",
       "pool": "Pool",
-      "profit_loss": "Profit/Loss"
+      "profit_loss": "Profit/Loss",
+      "select_address": "@:common.select_address"
     },
     "eth2_staking": {
       "based_of_performance": "Based of performance of",
@@ -3492,13 +3452,13 @@
       "taxfree_profit_loss": "Tax Free P/L"
     },
     "debug": {
-      "export_data": "Export data",
+      "export_data": "Export debug data",
       "export_message": {
         "failure": "Export PnL report debug data failed",
         "success": "PnL report debug data exported successfully",
         "title": "Export PnL report debug data"
       },
-      "import_data": "Import data",
+      "import_data": "Import debug data",
       "import_data_dialog": {
         "title": "Import PnL report debug data"
       },
@@ -3514,24 +3474,34 @@
       "message": "Η αναφορά PnL από {start} έως {end} έχει δημιουργηθεί.",
       "title": "Η αναφορά PnL έχει δημιουργηθεί"
     },
-    "title": "Saved Historical Reports"
+    "title": "Generated Reports"
   },
   "progress_screen": {
     "progress": "{progress} %"
   },
   "purge_selector": {
-    "all_decentralized_exchanges": "All Decentralized Exchanges",
-    "all_exchanges": "All Centralized Exchanges",
-    "all_modules": "All Modules",
-    "evm_transactions": "EVM Transactions",
-    "evm_chain_to_clear": {
-      "label": "EVM chain για εκκαθάριση",
-      "hint": "Καθαρίστε αυτό το πεδίο για να καταργήσετε τα δεδομένα συναλλαγών για όλα τα chains"
+    "centralized_exchanges": "Κεντρικοποιημένα ανταλλακτήρια",
+    "centralized_exchange_to_clear": {
+      "label": "Κεντρικοποιημένα ανταλλακτήρια για εκκαθάριση",
+      "hint": "Αδειάστε αυτό το πεδίο για να αφαιρέσετε τα δεδομένα για όλα τα κεντρικοποιημένα ανταλλακτήρια."
     },
-    "exchange": "Exchange: {name}",
-    "label": "Select a data source",
-    "module": "Module: {name}",
-    "tooltip": "Purge the cached data for the selected source"
+    "chain_to_clear": {
+      "label": "chain για εκκαθάριση",
+      "hint": "Αδειάστε αυτό το πεδίο για να αφαιρέσετε τα δεδομένα συναλλαγής για όλες τις αλυσίδες"
+    },
+    "decentralized_exchanges": "Αποκεντρωμένα ανταλλακτήρια",
+    "decentralized_exchange_to_clear": {
+      "label": "Αποκεντρωμένα ανταλλακτήρια για εκκαθάριση",
+      "hint": "Αδειάστε αυτό το πεδίο για να καταργήσετε τα δεδομένα για όλα τα αποκεντρωμένα ανταλλακτήρια"
+    },
+    "defi_modules": "DeFi Modules",
+    "defi_module_to_clear": {
+      "label": "Μονάδα DeFi για εκκαθάριση",
+      "hint": "Αδειάστε αυτό το πεδίο για να αφαιρέσετε τα δεδομένα για όλες τις μονάδες defi"
+    },
+    "label": "Επιλέξτε μια πηγή δεδομένων",
+    "tooltip": "Εκκαθάριση των αποθηκευμένων δεδομένων για την επιλεγμένη πηγή",
+    "transactions": "Συναλλαγές"
   },
   "queried_address_dialog": {
     "add": "Add address",
@@ -3541,12 +3511,8 @@
     "title": "Queried Addresses"
   },
   "reports_table": {
-    "delete": {
-      "tooltip": "Delete the report"
-    },
-    "load": {
-      "tooltip": "Load the report"
-    }
+    "delete": "Delete report",
+    "load": "Load report"
   },
   "rounding_settings": {
     "amount_rounding": "Amount Rounding",
@@ -3667,11 +3633,9 @@
       "example": "type != evm event"
     },
     "hint": {
-      "description": "* type the filter and then press enter e.g.",
+      "description": "Type the filter and then press enter e.g.",
       "example": "start = 26/05/2022"
     },
-    "hint_filter": "The combined filters will be applied at the same time",
-    "no_suggestions": "No suggestions found for {search}",
     "saved_filters": {
       "actions": {
         "add": "Save current filter to list",
@@ -3686,6 +3650,7 @@
         "title": "Failed to save filter"
       }
     },
+    "start_typing": "Πληκτρολογήστε την τιμή για το φίλτρο {search}",
     "title": "Available filters",
     "unsupported_filter": "Unsupported filter:"
   },
@@ -3735,7 +3700,18 @@
     "actions": {
       "add_event": "Add a new event",
       "redecode_events": "Redecode events",
-      "reset_customized_events": "Reset customized events"
+      "delete_transaction": "Διαγραφή συναλλαγών και συμβάντων"
+    },
+    "dialog": {
+      "add_tx": "Προσθήκη συναλλαγής με hash tx",
+      "delete": {
+        "message": "Είστε σίγουροι ότι θέλετε να διαγράψετε αυτή τη συναλλαγή και τα συμβάντα της; Θα πρέπει να καθαρίσετε όλες τις συναλλαγές ή να προσθέσετε από τη συναλλαγή έχει να τα αποκαταστήσετε.",
+        "title": "Διαγραφή συναλλαγής και συμβάντων",
+        "error": {
+          "message": "Απέτυχε: {message}",
+          "title": "Διαγραφή συναλλαγής EVM"
+        }
+      }
     },
     "events": {
       "actions": {
@@ -3753,8 +3729,11 @@
           "title": "Cannot Delete Event"
         },
         "reset": {
-          "message": "Are you sure you want to reset these events. This action will delete all customized events, and re-decode them.",
-          "title": "Reset events"
+          "message": "Υπάρχουν προσαρμοσμένα συμβάντα σε αυτή τη συναλλαγή",
+          "options": {
+            "keep_custom_events": "Μην αφαιρείτε τα προσαρμοσμένα συμβάντα μου",
+            "remove_custom_events": "Αφαίρεση προσαρμοσμένων συμβάντων και επανακωδικοποίηση της συναλλαγής"
+          }
         }
       },
       "customized_event": "Customized event",
@@ -3767,9 +3746,7 @@
         }
       },
       "export": {
-        "confirmation_message": "Είστε σίγουροι ότι θέλετε να εξάγετε αυτό το έγγραφο με τα επιλεγμένα φίλτρα εφαρμοσμένα;",
-        "csv_export_error": "Παρουσιάστηκε σφάλμα κατά την εξαγωγή σε CSV",
-        "download_failed": "Η λήψη του CSV δεν είναι δυνατή"
+        "confirmation_message": "Είστε σίγουροι ότι θέλετε να εξάγετε αυτό το έγγραφο με τα επιλεγμένα φίλτρα εφαρμοσμένα;"
       },
       "form": {
         "amount": {
@@ -3782,12 +3759,8 @@
             "non_empty": "The asset field cannot be empty"
           }
         },
-        "counterparty": {
-          "label": "Counterparty"
-        },
         "datetime": {
-          "hint": "The date & time of when the event happened",
-          "label": "Date & time"
+          "hint": "The date & time of when the event happened"
         },
         "event_subtype": {
           "label": "Event Subtype",
@@ -3872,9 +3845,9 @@
       "date_range": "Querying {status} for {address} between {start} and {end}",
       "done_date_range": "Done querying all transactions for {address} between {start} and {end}",
       "done_end_date": "Done querying all transactions for {address} until {end}",
-      "done_group": "Done querying all transactions information for {length} address(es)",
+      "done_group": "Done querying all transactions information for {count} address | Done querying all transactions information for {count} addresses",
       "end_date": "Querying {status} for {address} until {end}",
-      "group": "Querying evm transactions information for {length} address(es)",
+      "group": "Querying evm transactions information for {count} address | Querying evm transactions information for {count} addresses",
       "latest_period_date_range": "Latest successfully queried period is between {start} and {end}",
       "latest_period_end_date": "Latest successfully queried period is until {end}",
       "statuses": {
@@ -3882,7 +3855,23 @@
         "querying_internal_transactions": "evm internal transactions",
         "querying_transactions": "evm transactions"
       },
-      "title": "Ethereum Transaction Query Status"
+      "title": "Evm Transactions Κατάσταση ερωτήματος"
+    },
+    "query_status_events": {
+      "date_range": "Αναζήτηση συμβάντων για {name} μεταξύ {start} και {end}",
+      "done_date_range": "Ολοκληρώθηκε η αναζήτηση όλων των συμβάντων για {name} μεταξύ {start} και {end}",
+      "done_end_date": "Ολοκληρώθηκε η αναζήτηση όλων των συμβάντων για {name} μέχρι {end}",
+      "done_group": "Ολοκληρώθηκε η αναζήτηση όλων των συμβάντων για την τοποθεσία {count} | Ολοκληρώθηκε η αναζήτηση όλων των συμβάντων για τις τοποθεσίες {count}",
+      "end_date": "Αναζήτηση συμβάντων για {name} μέχρι {end}",
+      "group": "Ερώτηση συμβάντων για την τοποθεσία {count} | Ερώτηση συμβάντων για τοποθεσίες {count}",
+      "latest_period_date_range": "Η τελευταία περίοδος που ζητήθηκε επιτυχώς είναι μεταξύ {start} και {end}",
+      "latest_period_end_date": "Η τελευταία περίοδος που ζητήθηκε επιτυχώς είναι μέχρι το {end}",
+      "title": "Ιστορικό Γεγονότα Κατάσταση ερώτησης"
+    },
+    "query_all": {
+      "done_group": "Ολοκληρώθηκε η αναζήτηση όλων των συμβάντων και των συναλλαγών",
+      "group": "Διερεύνηση συμβάντων και συναλλαγών",
+      "modal_title": "Κατάσταση ερώτησης"
     },
     "refresh_tooltip": "Fetch latest events",
     "title": "History Events",

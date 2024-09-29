@@ -12,11 +12,19 @@ const { copy } = useClipboard({ source: value });
 <template>
   <RuiTooltip
     :popper="{ placement: 'top', offsetDistance: 0 }"
-    open-delay="400"
+    :open-delay="400"
   >
     <template #activator>
-      <RuiButton :size="size" variant="text" icon @click="copy()">
-        <RuiIcon size="16" name="file-copy-line" />
+      <RuiButton
+        :size="size"
+        variant="text"
+        icon
+        @click="copy()"
+      >
+        <RuiIcon
+          size="16"
+          name="file-copy-line"
+        />
       </RuiButton>
     </template>
     <span>{{ tooltip }}</span>

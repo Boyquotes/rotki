@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CollectionCommonFields } from '@/types/collection';
+import type { PaginationRequestPayload } from '@/types/common';
 
 export const UserNote = z.object({
   identifier: z.number(),
@@ -7,22 +8,18 @@ export const UserNote = z.object({
   content: z.string(),
   location: z.string(),
   lastUpdateTimestamp: z.number(),
-  isPinned: z.boolean()
+  isPinned: z.boolean(),
 });
 
 export type UserNote = z.infer<typeof UserNote>;
 
 export const UserNoteCollectionResponse = CollectionCommonFields.extend({
-  entries: z.array(UserNote)
+  entries: z.array(UserNote),
 });
 
-export interface UserNotesFilter {
+export interface UserNotesRequestPayload extends PaginationRequestPayload<UserNote> {
   titleSubstring: string;
-  limit: number;
-  offset: number;
   location: string;
-  orderByAttributes: string[];
-  ascending: boolean[];
 }
 
 export enum NoteLocation {
@@ -48,5 +45,6 @@ export enum NoteLocation {
   SETTINGS_ACCOUNTING = 'SETTINGS_ACCOUNTING',
   SETTINGS_DATA_SECURITY = 'SETTINGS_DATA_SECURITY',
   SETTINGS_MODULES = 'SETTINGS_MODULES',
-  LOCATIONS = 'LOCATIONS'
+  LOCATIONS = 'LOCATIONS',
+  CALENDAR = 'CALENDAR',
 }

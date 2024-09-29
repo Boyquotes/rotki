@@ -4,8 +4,11 @@ from dataclasses import InitVar, dataclass, field
 from functools import total_ordering
 from typing import Any, NamedTuple, Optional, Union
 
-from rotkehlchen.assets.exchanges_mappings.bittrex import WORLD_TO_BITTREX
+from eth_utils import to_checksum_address
+
 from rotkehlchen.assets.resolver import AssetResolver
+from rotkehlchen.chain.evm.decoding.aave.constants import CPT_AAVE_V3
+from rotkehlchen.chain.evm.decoding.aave.v3.constants import DEBT_TOKEN_SYMBOL_REGEX
 from rotkehlchen.constants.misc import NFT_DIRECTIVE
 from rotkehlchen.constants.resolver import ChainID, evm_address_to_identifier
 from rotkehlchen.errors.asset import UnknownAsset, UnsupportedAsset, WrongAssetType
@@ -68,9 +71,7 @@ class Asset:
             )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            'identifier': self.identifier,
-        }
+        return {'identifier': self.identifier}
 
     def serialize(self) -> str:
         return self.identifier
@@ -80,7 +81,7 @@ class Asset:
         if isinstance(self, AssetWithNameAndType):
             return self.asset_type
 
-        return AssetResolver().get_asset_type(self.identifier)
+        return AssetResolver.get_asset_type(self.identifier)
 
     def exists(self, query_packaged_db: bool = True) -> bool:
         """Returns True if this asset exists. False otherwise
@@ -104,7 +105,7 @@ class Asset:
         May raise:
         - UnknownAsset
         """
-        normalized_id = AssetResolver().check_existence(self.identifier, query_packaged_db=query_packaged_db)  # noqa: E501
+        normalized_id = AssetResolver.check_existence(self.identifier, query_packaged_db=query_packaged_db)  # noqa: E501
         object.__setattr__(self, 'identifier', normalized_id)
         return self
 
@@ -139,40 +140,40 @@ class Asset:
                 chain_id=ChainID.ETHEREUM,
             )
 
-        return AssetResolver().resolve_asset(identifier=self.identifier)
+        return AssetResolver.resolve_asset(identifier=self.identifier)
 
     def resolve_to_asset_with_name_and_type(self) -> 'AssetWithNameAndType':
-        return AssetResolver().resolve_asset_to_class(
+        return AssetResolver.resolve_asset_to_class(
             identifier=self.identifier,
             expected_type=AssetWithNameAndType,
         )
 
     def resolve_to_asset_with_symbol(self) -> 'AssetWithSymbol':
-        return AssetResolver().resolve_asset_to_class(
+        return AssetResolver.resolve_asset_to_class(
             identifier=self.identifier,
             expected_type=AssetWithSymbol,
         )
 
     def resolve_to_crypto_asset(self) -> 'CryptoAsset':
-        return AssetResolver().resolve_asset_to_class(
+        return AssetResolver.resolve_asset_to_class(
             identifier=self.identifier,
             expected_type=CryptoAsset,
         )
 
     def resolve_to_evm_token(self) -> 'EvmToken':
-        return AssetResolver().resolve_asset_to_class(
+        return AssetResolver.resolve_asset_to_class(
             identifier=self.identifier,
             expected_type=EvmToken,
         )
 
     def resolve_to_asset_with_oracles(self) -> 'AssetWithOracles':
-        return AssetResolver().resolve_asset_to_class(
+        return AssetResolver.resolve_asset_to_class(
             identifier=self.identifier,
             expected_type=AssetWithOracles,
         )
 
     def resolve_to_fiat_asset(self) -> 'FiatAsset':
-        return AssetResolver().resolve_asset_to_class(
+        return AssetResolver.resolve_asset_to_class(
             identifier=self.identifier,
             expected_type=FiatAsset,
         )
@@ -221,7 +222,7 @@ class Asset:
 
 
 @dataclass(init=True, repr=False, eq=False, order=False, unsafe_hash=False, frozen=True)
-class AssetWithNameAndType(Asset, metaclass=abc.ABCMeta):
+class AssetWithNameAndType(Asset, abc.ABC):
     asset_type: AssetType = field(init=False)
     name: str = field(init=False)
 
@@ -238,7 +239,7 @@ class AssetWithNameAndType(Asset, metaclass=abc.ABCMeta):
         return f'{self.identifier}({self.name})'
 
 
-class AssetWithSymbol(AssetWithNameAndType, metaclass=abc.ABCMeta):
+class AssetWithSymbol(AssetWithNameAndType, abc.ABC):
     symbol: str = field(init=False)
 
     def to_dict(self) -> dict[str, Any]:
@@ -248,7 +249,7 @@ class AssetWithSymbol(AssetWithNameAndType, metaclass=abc.ABCMeta):
         return f'<Asset identifier:{self.identifier} name:{self.name} symbol:{self.symbol}>'
 
 
-class AssetWithOracles(AssetWithSymbol, metaclass=abc.ABCMeta):
+class AssetWithOracles(AssetWithSymbol, abc.ABC):
     # None means no special mapping. '' means not supported
     cryptocompare: str | None = field(init=False)
     coingecko: str | None = field(init=False)
@@ -259,13 +260,12 @@ class AssetWithOracles(AssetWithSymbol, metaclass=abc.ABCMeta):
         May raise:
             - UnsupportedAsset if the asset is not supported by cryptocompare
         """
-        cryptocompare_str = self.symbol if self.cryptocompare is None else self.cryptocompare
         # There is an asset which should not be queried in cryptocompare
-        if cryptocompare_str is None or cryptocompare_str == '':
+        if self.cryptocompare is None or self.cryptocompare == '':
             raise UnsupportedAsset(f'{self.identifier} is not supported by cryptocompare')
 
         # Seems cryptocompare capitalizes everything. So cDAI -> CDAI
-        return cryptocompare_str.upper()  # pylint: disable=no-member
+        return self.cryptocompare.upper()  # pylint: disable=no-member
 
     def to_coingecko(self) -> str:
         """
@@ -284,9 +284,6 @@ class AssetWithOracles(AssetWithSymbol, metaclass=abc.ABCMeta):
 
     def has_oracle(self) -> bool:
         return self.has_coingecko() or self.cryptocompare is not None
-
-    def to_bittrex(self) -> str:
-        return WORLD_TO_BITTREX.get(self.identifier, self.identifier)
 
     def to_dict(self) -> dict[str, Any]:
         return super().to_dict() | {
@@ -473,8 +470,8 @@ class EvmToken(CryptoAsset):
     evm_address: ChecksumEvmAddress = field(init=False)
     chain_id: ChainID = field(init=False)
     token_kind: EvmTokenKind = field(init=False)
-    decimals: int = field(init=False)
-    protocol: str = field(init=False)
+    decimals: int | None = field(init=False)
+    protocol: str | None = field(init=False)
     underlying_tokens: list[UnderlyingToken] = field(init=False)
 
     def __post_init__(self, direct_field_initialization: bool) -> None:
@@ -569,6 +566,16 @@ class EvmToken(CryptoAsset):
             'underlying_tokens': underlying_tokens,
         }
 
+    def get_decimals(self) -> int:
+        return 18 if self.decimals is None else self.decimals
+
+    def is_liability(self) -> bool:
+        """Returns True if the token is a liability token, False if it's an asset token"""
+        return (
+            self.protocol == CPT_AAVE_V3 and
+            DEBT_TOKEN_SYMBOL_REGEX.match(self.symbol) is not None
+        )
+
 
 class Nft(EvmToken):
 
@@ -579,7 +586,7 @@ class Nft(EvmToken):
         identifier_parts = self.identifier[len(NFT_DIRECTIVE):].split('_')
         if len(identifier_parts) == 0 or len(identifier_parts[0]) == 0:
             raise UnknownAsset(self.identifier)
-        address = identifier_parts[0]
+        address = to_checksum_address(identifier_parts[0])
         object.__setattr__(self, 'asset_type', AssetType.EVM_TOKEN)
         object.__setattr__(self, 'name', f'nft with id {self.identifier}')
         object.__setattr__(self, 'symbol', self.identifier[len(NFT_DIRECTIVE):])

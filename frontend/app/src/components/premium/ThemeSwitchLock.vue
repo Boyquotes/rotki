@@ -12,11 +12,14 @@ const { t } = useI18n();
     color="default"
   >
     <template #icon>
-      <RuiIcon name="lock-line" color="primary" size="14" />
+      <RuiIcon
+        name="lock-line"
+        color="primary"
+        size="14"
+      />
     </template>
     <MenuTooltipButton
       :tooltip="t('theme_switch_lock.tooltip')"
-      class-name="secondary--text text--lighten-4"
       :href="href"
       @click="onLinkClick()"
     >

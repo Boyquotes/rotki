@@ -1,127 +1,86 @@
 <script setup lang="ts">
 import { between, required, requiredIf } from '@vuelidate/validators';
-import { type Blockchain } from '@rotki/common/lib/blockchain';
-import { isEmpty, omit } from 'lodash-es';
-import { type EvmRpcNode, getPlaceholderNode } from '@/types/settings/rpc';
+import { isEmpty } from 'lodash-es';
+import useVuelidate from '@vuelidate/core';
 import { toMessages } from '@/utils/validation';
-import { ApiValidationError } from '@/types/api/errors';
+import type { ValidationErrors } from '@/types/api/errors';
+import type { EvmRpcNodeManageState } from '@/types/settings/rpc';
 
 const props = defineProps<{
-  value: EvmRpcNode;
-  chain: Blockchain;
-  chainName: string;
-  isEtherscan: boolean;
-  editMode: boolean;
+  modelValue: EvmRpcNodeManageState;
 }>();
 
 const emit = defineEmits<{
-  (e: 'input', value: EvmRpcNode): void;
+  (e: 'update:model-value', value: EvmRpcNodeManageState): void;
 }>();
 
 const { t } = useI18n();
 
-const { chain, chainName, value, isEtherscan, editMode } = toRefs(props);
-const state = reactive<EvmRpcNode>(getPlaceholderNode(get(chain)));
+const errors = defineModel<ValidationErrors>('errorMessages', { required: true });
+const node = useSimplePropVModel(props, 'node', emit);
+const owned = useRefPropVModel(node, 'owned');
+const name = useRefPropVModel(node, 'name');
+const endpoint = useRefPropVModel(node, 'endpoint');
+const active = useRefPropVModel(node, 'active');
+const numericWeight = useRefPropVModel(node, 'weight');
+
+function getWeight(value?: string): number {
+  if (!value)
+    return 0;
+
+  const parsedValue = parseInt(value);
+  return Number.isNaN(parsedValue) ? 0 : parsedValue;
+}
+
+const weight = computed<string>({
+  get() {
+    return get(numericWeight).toString();
+  },
+  set(value?: string) {
+    set(numericWeight, getWeight(value));
+  },
+});
+
+const isEtherscan = computed<boolean>(() => {
+  const rpcNode = get(node);
+  return !rpcNode.endpoint && rpcNode.name.includes('etherscan');
+});
 
 const rules = {
   name: { required },
   endpoint: { required: requiredIf(logicNot(isEtherscan)) },
-  weight: { required, between: between(0, 100) }
+  weight: { required, between: between(0, 100) },
 };
 
-const errorMessages = ref<Record<string, string[] | string>>({});
+const v$ = useVuelidate(
+  rules,
+  {
+    name,
+    endpoint,
+    weight,
+    active,
+    owned,
+  },
+  {
+    $autoDirty: true,
+    $externalResults: errors,
+  },
+);
 
-const { setValidation, setSubmitFunc } = useEvmRpcNodeForm(chain);
-
-const v$ = setValidation(rules, state, {
-  $autoDirty: true,
-  $externalResults: errorMessages
-});
-
-watch(errorMessages, errors => {
-  if (!isEmpty(errors)) {
+watch(errors, (errors) => {
+  if (!isEmpty(errors))
     get(v$).$validate();
-  }
 });
 
-const updateState = (selectedNode: EvmRpcNode): void => {
-  state.identifier = selectedNode.identifier;
-  state.name = selectedNode.name;
-  state.endpoint = selectedNode.endpoint;
-  state.weight = selectedNode.weight;
-  state.active = selectedNode.active;
-  state.owned = selectedNode.owned;
-};
-
-onMounted(() => {
-  updateState(get(value));
+defineExpose({
+  validate: async () => await get(v$).$validate(),
 });
-
-watch(value, node => {
-  if (node === get(state)) {
-    return;
-  }
-  updateState(node);
-});
-
-watch(state, state => {
-  emit('input', state);
-});
-
-const api = useEvmNodesApi(get(chain));
-const { setMessage } = useMessageStore();
-
-const save = async () => {
-  const editing = get(editMode);
-  try {
-    const node = get(value);
-    if (editing) {
-      return await api.editEvmNode(node);
-    }
-    return await api.addEvmNode(omit(node, 'identifier'));
-  } catch (e: any) {
-    const chainProp = get(chainName);
-    const errorTitle = editing
-      ? t('evm_rpc_node_manager.edit_error.title', { chain: chainProp })
-      : t('evm_rpc_node_manager.add_error.title', { chain: chainProp });
-
-    if (e instanceof ApiValidationError) {
-      const messages = e.errors;
-
-      set(errorMessages, messages);
-
-      const keys = Object.keys(messages);
-      const knownKeys = Object.keys(get(value));
-      const unknownKeys = keys.filter(key => !knownKeys.includes(key));
-
-      if (unknownKeys.length > 0) {
-        setMessage({
-          title: errorTitle,
-          description: unknownKeys
-            .map(key => `${key}: ${messages[key]}`)
-            .join(', '),
-          success: false
-        });
-      }
-    } else {
-      setMessage({
-        title: errorTitle,
-        description: e.message,
-        success: false
-      });
-    }
-
-    return false;
-  }
-};
-
-setSubmitFunc(save);
 </script>
 
 <template>
   <form class="flex flex-col gap-2">
     <RuiTextField
-      v-model="state.name"
+      v-model="name"
       variant="outlined"
       color="primary"
       data-cy="node-name"
@@ -131,7 +90,7 @@ setSubmitFunc(save);
       @blur="v$.name.$touch()"
     />
     <RuiTextField
-      v-model="state.endpoint"
+      v-model="endpoint"
       variant="outlined"
       color="primary"
       data-cy="node-endpoint"
@@ -142,44 +101,46 @@ setSubmitFunc(save);
     />
 
     <div class="flex items-center gap-4">
-      <VSlider
-        :value="state.weight"
-        :disabled="state.owned"
+      <RuiSlider
+        v-model="numericWeight"
+        class="flex-1"
+        :disabled="owned"
         :error-messages="toMessages(v$.weight)"
         :label="t('rpc_node_form.weight')"
-        min="0"
-        max="100"
-        persistent-hint
-        :hint="t('rpc_node_form.weight_hint', { weight: state.weight })"
-        step="1"
-        class="grow"
-        thumb-label
-        @change="state.weight = $event"
+        :min="0"
+        :max="100"
+        :hint="t('rpc_node_form.weight_hint', { weight })"
+        :step="1"
+        show-thumb-label
         @blur="v$.weight.$touch()"
       />
       <AmountInput
-        :disabled="state.owned"
-        :value="state.weight.toString()"
+        v-model="weight"
+        :disabled="owned"
         :error-messages="toMessages(v$.weight).length > 0 ? [''] : []"
-        outlined
+        variant="outlined"
         hide-details
-        class="shrink ml-2 w-[8rem]"
-        @input="state.weight = $event"
-      />
-      {{ t('rpc_node_form.weight_per_hundred') }}
+        class="w-[8rem] [&>div]:min-w-0"
+      >
+        <template #append>
+          {{ t('rpc_node_form.weight_per_hundred') }}
+        </template>
+      </AmountInput>
     </div>
 
-    <VSwitch
-      v-model="state.owned"
+    <RuiSwitch
+      v-model="owned"
+      color="primary"
+      class="mt-4"
       :label="t('rpc_node_form.owned')"
-      persistent-hint
       :disabled="isEtherscan"
       :hint="t('rpc_node_form.owned_hint')"
     />
-    <VSwitch
-      v-model="state.active"
+    <RuiSwitch
+      v-model="active"
+      color="primary"
+      class="mt-4"
       :label="t('rpc_node_form.active')"
-      persistent-hint
       :disabled="isEtherscan"
       :hint="t('rpc_node_form.active_hint')"
     />

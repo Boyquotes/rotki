@@ -26,7 +26,7 @@ def _wait_for_listening_port(
         gevent.sleep(sleep)
         # macoOS requires root access for the connections api to work
         # so get connections of the current process only
-        connections = psutil.Process(pid).connections()
+        connections = psutil.Process(pid).net_connections()
         for conn in connections:
             if conn.status == 'LISTEN' and conn.laddr[1] == port_number:
                 return
@@ -78,7 +78,7 @@ def assert_simple_ok_response(response: requests.Response) -> None:
     assert data['message'] == ''
 
 
-def assert_proper_response_with_result(
+def assert_proper_sync_response_with_result(
         response: requests.Response | None,
         message: str | None = None,
         status_code: HTTPStatus = HTTPStatus.OK,
@@ -93,6 +93,20 @@ def assert_proper_response_with_result(
     return data['result']
 
 
+def assert_proper_response_with_result(
+        response: requests.Response,
+        rotkehlchen_api_server: APIServer,
+        async_query: bool = False,
+        timeout: int = ASYNC_TASK_WAIT_TIMEOUT,
+) -> Any:
+    """Asserts that the response (sync or async) is okay and returns the result."""
+    return wait_for_async_task_with_result(
+        server=rotkehlchen_api_server,
+        task_id=assert_ok_async_response(response),
+        timeout=timeout,
+    ) if async_query else assert_proper_sync_response_with_result(response)
+
+
 def _check_error_response_properties(
         response_data: dict[str, Any],
         contained_in_msg: str | list[str] | None,
@@ -103,7 +117,7 @@ def _check_error_response_properties(
         if result_exists:
             assert response_data['result'] is not None
         else:
-            assert response_data['result'] is None
+            assert response_data['result'] in (None, False)
     if contained_in_msg:
         if isinstance(contained_in_msg, str):
             assert contained_in_msg in response_data['message']

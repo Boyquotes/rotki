@@ -86,7 +86,7 @@ class EvmContract(NamedTuple):
 
     def encode(self, method_name: str, arguments: list[Any] | None = None) -> str:
         contract = WEB3.eth.contract(address=self.address, abi=self.abi)
-        return contract.encodeABI(method_name, args=arguments if arguments else [])
+        return contract.encode_abi(method_name, args=arguments or [])
 
     def decode(
             self,
@@ -94,13 +94,18 @@ class EvmContract(NamedTuple):
             method_name: str,
             arguments: list[Any] | None = None,
     ) -> tuple[Any, ...]:
+        """Decodes the result of a contract call given the method name and arguments
+
+        May raise:
+            DeserializationError: If the decoding fails
+        """
         contract = WEB3.eth.contract(address=self.address, abi=self.abi)
         fn_abi = contract._find_matching_fn_abi(
             fn_identifier=method_name,
-            args=arguments if arguments else [],
+            args=arguments or [],
         )
         output_types = get_abi_output_types(fn_abi)
-        return WEB3.codec.decode_abi(output_types, result)
+        return WEB3.codec.decode(output_types, result)
 
     def decode_event(
             self,
@@ -112,6 +117,8 @@ class EvmContract(NamedTuple):
 
         Perhaps we can have a faster version of this method where instead of name
         and argument names we just give the index of event abi in the list if we know it
+
+        TODO: Look at this method too as the more standard way: https://web3py.readthedocs.io/en/stable/web3.contract.html#web3.contract.ContractEvents.myEvent
         """
         contract = WEB3.eth.contract(address=self.address, abi=self.abi)
         event_abi = contract._find_matching_event_abi(
@@ -167,7 +174,7 @@ class EvmContracts(Generic[T]):
                 return EvmContract(
                     address=address,
                     abi=json.loads(result[0]),  # not handling json error -- assuming DB consistency  # noqa: E501
-                    deployed_block=result[1] if result[1] else 0,
+                    deployed_block=result[1] or 0,
                 )
 
             if fallback_to_packaged_db is False:
@@ -204,7 +211,7 @@ class EvmContracts(Generic[T]):
         return EvmContract(
             address=address,
             abi=json.loads(result[4]),  # not handling json error -- assuming DB consistency
-            deployed_block=result[2] if result[2] else 0,
+            deployed_block=result[2] or 0,
         )
 
     def contract(self, address: ChecksumEvmAddress) -> EvmContract:
@@ -278,6 +285,10 @@ class EvmContracts(Generic[T]):
 
     @overload
     def abi(self: 'EvmContracts[Literal[ChainID.GNOSIS]]', name: Literal['']) -> list[dict[str, Any]]:  # noqa: E501
+        ...
+
+    @overload
+    def abi(self: 'EvmContracts[Literal[ChainID.SCROLL]]', name: Literal['']) -> list[dict[str, Any]]:  # noqa: E501
         ...
 
     def abi(self, name: str) -> list[dict[str, Any]]:

@@ -19,10 +19,8 @@ from rotkehlchen.fval import FVal
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
-    assert_ok_async_response,
     assert_proper_response,
     assert_proper_response_with_result,
-    wait_for_async_task_with_result,
 )
 from rotkehlchen.tests.utils.checks import assert_serialized_lists_equal
 from rotkehlchen.tests.utils.factories import make_evm_address
@@ -105,7 +103,6 @@ def mock_etherscan_for_dsr(
         contracts: EvmContracts,
         account1: ChecksumEvmAddress,
         account2: ChecksumEvmAddress,
-        account3: ChecksumEvmAddress,
         original_requests_get,
         params: DSRMockParameters,
 ) -> _patch:
@@ -117,10 +114,7 @@ def mock_etherscan_for_dsr(
 
     proxy1 = make_evm_address()
     proxy2 = make_evm_address()
-    targets = [address_to_32byteshexstr(proxy1), address_to_32byteshexstr(proxy2), '0x0000000000000000000000000000000000000000000000000000000000000000']  # noqa: E501
-
-    sorted_accounts = sorted(zip([account1, account2, account3], targets, strict=True), key=lambda x: x[0])  # noqa: E501
-    proxies = [y[1] for y in sorted_accounts]
+    proxies = [address_to_32byteshexstr(proxy1), address_to_32byteshexstr(proxy2), '0x0000000000000000000000000000000000000000000000000000000000000000']  # noqa: E501
 
     account1_join1_event = f"""{{"address": "{makerdao_pot.address}", "topics": ["0x049878f300000000000000000000000000000000000000000000000000000000", "{address_to_32byteshexstr(proxy1)}", "{int_to_32byteshexstr(params.account1_join1_normalized_balance)}", "0x0000000000000000000000000000000000000000000000000000000000000000"], "data": "0x1", "blockNumber": "{hex(params.account1_join1_blocknumber)}", "timeStamp": "{hex(blocknumber_to_timestamp(params.account1_join1_blocknumber))}", "gasPrice": "0x1", "gasUsed": "0x1", "logIndex": "0x6c", "transactionHash": "0xd81bddb97599cfab91b9ee52b5c505ffa730b71f1e484dc46d0f4ecb57893d2f", "transactionIndex": "0x79"}}"""  # noqa: E501
 
@@ -177,7 +171,7 @@ def mock_etherscan_for_dsr(
                 assert fn_abi['name'] == 'aggregate', 'Abi position of multicall aggregate changed'
                 output_types = get_abi_output_types(fn_abi)
                 args = [1, proxies]
-                result = '0x' + web3.codec.encode_abi(output_types, args).hex()
+                result = '0x' + web3.codec.encode(output_types, args).hex()
                 response = f'{{"status":"1","message":"OK","result":"{result}"}}'
             elif to_address == makerdao_pot.address:
                 if input_data.startswith('0x0bebac86'):  # pie
@@ -293,8 +287,7 @@ def setup_tests_for_dsr(
         original_requests_get,
 ) -> DSRTestSetup:
     account1 = accounts[0]
-    account2 = accounts[2]
-    account3 = accounts[1]
+    account2 = accounts[1]
 
     current_dsr = 1000000002440418608258400030
     current_chi = 1123323222211111111111001249911111
@@ -322,13 +315,12 @@ def setup_tests_for_dsr(
         contracts=contracts,
         account1=account1,
         account2=account2,
-        account3=account3,
         original_requests_get=original_requests_get,
         params=params,
     )
 
     dsr_balance_response = {
-        'current_dsr': '8.022774065220581075333120100',
+        'current_dsr': '8.02277406522058107533312007531401770762840532683385494120377820398034738503100',  # noqa: E501
         'balances': {
             account1: _dsrdai_to_dai(params.account1_current_normalized_balance * current_chi),
             account2: _dsrdai_to_dai(params.account2_current_normalized_balance * current_chi),
@@ -468,11 +460,11 @@ def test_query_current_dsr_balance(
             rotkehlchen_api_server,
             'makerdaodsrbalanceresource',
         ), json={'async_query': async_query})
-        if async_query:
-            task_id = assert_ok_async_response(response)
-            outcome = wait_for_async_task_with_result(rotkehlchen_api_server, task_id)
-        else:
-            outcome = assert_proper_response_with_result(response)
+        outcome = assert_proper_response_with_result(
+            response=response,
+            rotkehlchen_api_server=rotkehlchen_api_server,
+            async_query=async_query,
+        )
 
     assert_dsr_current_result_is_correct(outcome, setup)
 
@@ -499,7 +491,7 @@ def test_query_historical_dsr_non_premium(
     assert_error_response(
         response=response,
         contained_in_msg='Currently logged in user testuser does not have a premium subscription',
-        status_code=HTTPStatus.CONFLICT,
+        status_code=HTTPStatus.FORBIDDEN,
     )
 
 
@@ -563,15 +555,16 @@ def test_query_historical_dsr(
             rotkehlchen_api_server,
             'makerdaodsrhistoryresource',
         ), json={'async_query': async_query})
-        if async_query:
-            task_id = assert_ok_async_response(response)
-            outcome = wait_for_async_task_with_result(rotkehlchen_api_server, task_id)
-        else:
-            outcome = assert_proper_response_with_result(response)
+        outcome = assert_proper_response_with_result(
+            response=response,
+            rotkehlchen_api_server=rotkehlchen_api_server,
+            async_query=async_query,
+        )
 
     assert_dsr_history_result_is_correct(outcome, setup)
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('ethereum_accounts', [[TEST_ADDRESS_1]])
 @pytest.mark.parametrize('ethereum_modules', [['makerdao_dsr']])
 @pytest.mark.parametrize('start_with_valid_premium', [True])

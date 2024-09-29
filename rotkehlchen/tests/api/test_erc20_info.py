@@ -8,7 +8,7 @@ from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
 )
 
 
@@ -21,6 +21,7 @@ def assert_default_erc20_info_response(result: Any) -> None:
             assert value is None
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('number_of_eth_accounts', [0])
 def test_query_token_with_info(rotkehlchen_api_server):
     """Test api for querying evm token details"""
@@ -34,7 +35,7 @@ def test_query_token_with_info(rotkehlchen_api_server):
             'evm_chain': 'ethereum',
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['decimals'] == 18
     assert result['symbol'] == 'DAI'
     assert result['name'] == 'Dai Stablecoin'
@@ -48,7 +49,7 @@ def test_query_token_with_info(rotkehlchen_api_server):
             'evm_chain': 'optimism',
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['decimals'] == 6
     assert result['symbol'] == 'USDT'
     assert result['name'] == 'Tether USD'
@@ -64,7 +65,7 @@ def test_query_token_with_info(rotkehlchen_api_server):
         },
     )
 
-    result_2 = assert_proper_response_with_result(response_2)
+    result_2 = assert_proper_sync_response_with_result(response_2)
     assert_default_erc20_info_response(result_2)
 
     # Test an address that is not a contract
@@ -78,7 +79,7 @@ def test_query_token_with_info(rotkehlchen_api_server):
         },
     )
 
-    result_3 = assert_proper_response_with_result(response_3)
+    result_3 = assert_proper_sync_response_with_result(response_3)
     assert_default_erc20_info_response(result_3)
 
     # Test an address that is not valid (this one has extra chars)

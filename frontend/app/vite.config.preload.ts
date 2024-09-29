@@ -1,4 +1,5 @@
 import { builtinModules } from 'node:module';
+import process from 'node:process';
 import { join } from 'node:path';
 import { defineConfig } from 'vite';
 
@@ -10,8 +11,9 @@ export default defineConfig({
   envDir: process.cwd(),
   resolve: {
     alias: {
-      '@': `${join(PACKAGE_ROOT, 'src')}/`
-    }
+      '@electron': `${join(PACKAGE_ROOT, 'electron')}/`,
+      '@shared': `${join(PACKAGE_ROOT, 'shared')}/`,
+    },
   },
   build: {
     sourcemap: isDevelopment ? 'inline' : false,
@@ -19,15 +21,15 @@ export default defineConfig({
     assetsDir: '.',
     minify: !isDevelopment,
     lib: {
-      entry: 'src/preload.ts',
-      formats: ['cjs']
+      entry: 'electron/preload/index.ts',
+      formats: ['cjs'],
     },
     rollupOptions: {
       external: ['electron', ...builtinModules.flatMap(p => [p, `node:${p}`])],
       output: {
-        entryFileNames: '[name].js'
-      }
+        entryFileNames: 'preload.js',
+      },
     },
-    emptyOutDir: false
-  }
+    emptyOutDir: false,
+  },
 });

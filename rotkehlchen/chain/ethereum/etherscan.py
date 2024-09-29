@@ -4,11 +4,8 @@ from typing import TYPE_CHECKING
 from pysqlcipher3 import dbapi2 as sqlcipher
 
 from rotkehlchen.accounting.structures.balance import Balance
-from rotkehlchen.chain.ethereum.modules.eth2.constants import (
-    WITHDRAWALS_IDX_PREFIX,
-    WITHDRAWALS_TS_PREFIX,
-)
 from rotkehlchen.chain.structures import TimestampOrBlockRange
+from rotkehlchen.db.cache import DBCacheDynamic
 from rotkehlchen.db.history_events import DBHistoryEvents
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.externalapis.etherscan import Etherscan
@@ -45,31 +42,37 @@ class EthereumEtherscan(Etherscan):
             self,
             address: ChecksumEvmAddress,
             period: TimestampOrBlockRange,
-    ) -> None:
+    ) -> set[int]:
         """Query etherscan for ethereum withdrawals of an address for a specific period
-        and save them in the DB.
+        and save them in the DB. Returns newly detected validators that were not tracked in the DB.
 
         May raise:
         - RemoteError if the etherscan query fails for some reason
         - DeserializationError if we can't decode the response properly
         """
         options = self._process_timestamp_or_blockrange(period, {'sort': 'asc', 'address': address})  # noqa: E501
-        range_name = f'{WITHDRAWALS_TS_PREFIX}_{address}'
-        idx_range_name = f'{WITHDRAWALS_IDX_PREFIX}_{address}'
         last_withdrawal_idx = -1
+        touched_indices = set()
         with self.db.conn.read_ctx() as cursor:
-            if (idx_result := self.db.get_used_query_range(cursor, idx_range_name)) is not None:
-                last_withdrawal_idx = idx_result[1]
+            if (idx_result := self.db.get_dynamic_cache(
+                cursor=cursor,
+                name=DBCacheDynamic.WITHDRAWALS_IDX,
+                address=address,
+            )) is not None:
+                last_withdrawal_idx = idx_result
         dbevents = DBHistoryEvents(self.db)
         while True:
             result = self._query(module='account', action='txsBeaconWithdrawal', options=options)
             if (result_length := len(result)) == 0:
-                return
+                return set()
 
+            withdrawals = []
             try:
-                withdrawals = [
-                    EthWithdrawalEvent(
-                        validator_index=int(entry['validatorIndex']),
+                for entry in result:
+                    validator_index = int(entry['validatorIndex'])
+                    touched_indices.add(validator_index)
+                    withdrawals.append(EthWithdrawalEvent(
+                        validator_index=validator_index,
                         timestamp=ts_sec_to_ms(deserialize_timestamp(entry['timestamp'])),
                         balance=Balance(amount=from_gwei(deserialize_fval(
                             value=entry['amount'],
@@ -78,9 +81,10 @@ class EthereumEtherscan(Etherscan):
                         ))),
                         withdrawal_address=address,
                         is_exit=False,  # is figured out later in a periodic task
-                    ) for entry in result
-                ]
+                    ))
+
                 last_withdrawal_idx = max(last_withdrawal_idx, int(result[-1]['withdrawalIndex']))
+
             except (KeyError, ValueError) as e:
                 msg = str(e)
                 if isinstance(e, KeyError):
@@ -93,15 +97,31 @@ class EthereumEtherscan(Etherscan):
             try:
                 with self.db.user_write() as write_cursor:
                     dbevents.add_history_events(write_cursor, history=withdrawals)
-                    self.db.update_used_query_range(write_cursor, range_name, Timestamp(0), Timestamp(int(result[-1]['timestamp'])))  # noqa: E501
+                    self.db.set_dynamic_cache(
+                        write_cursor=write_cursor,
+                        name=DBCacheDynamic.WITHDRAWALS_TS,
+                        value=Timestamp(int(result[-1]['timestamp'])),
+                        address=address,
+                    )
             except sqlcipher.IntegrityError as e:  # pylint: disable=no-member
                 log.error(f'Could not write {result_length} withdrawals to {address} due to {e!s}')
-                return
+                return set()
 
             if (new_options := self._maybe_paginate(result=result, options=options)) is None:
                 break  # no need to paginate further
             options = new_options
 
+        with self.db.conn.read_ctx() as cursor:
+            cursor.execute('SELECT validator_index from eth2_validators WHERE validator_index IS NOT NULL')  # noqa: E501
+            tracked_indices = {x[0] for x in cursor}
+
         if last_withdrawal_idx != - 1:  # let's also update index if needed
             with self.db.user_write() as write_cursor:
-                self.db.update_used_query_range(write_cursor, idx_range_name, Timestamp(0), last_withdrawal_idx)  # type: ignore  # noqa: E501
+                self.db.set_dynamic_cache(
+                    write_cursor=write_cursor,
+                    name=DBCacheDynamic.WITHDRAWALS_IDX,
+                    value=last_withdrawal_idx,
+                    address=address,
+                )
+
+        return touched_indices - tracked_indices

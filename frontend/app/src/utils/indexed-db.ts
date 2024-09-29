@@ -1,25 +1,29 @@
-import * as logger from 'loglevel';
+import { type ConsolaInstance, LogLevels, createConsola } from 'consola';
 
 const ROWLIMIT = 50000;
 
-export default class IndexedDb {
+export class IndexedDb {
+  private logger: ConsolaInstance;
+
   constructor(
     private dbName: string,
     private dbVersion: number,
-    private store: string
-  ) {}
+    private store: string,
+  ) {
+    this.logger = createConsola({
+      level: LogLevels.error,
+    });
+  }
 
   get db(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-      if (!window.indexedDB) {
-        reject('Unsupported indexedDB');
-      }
+      if (!window.indexedDB)
+        reject(new Error('Unsupported indexedDB'));
 
-      const request = (
-        window.indexedDB ||
-        (window as any).mozIndexedDB ||
-        (window as any).webkitIndexedDB
-      ).open(this.dbName, this.dbVersion);
+      const request = (window.indexedDB || (window as any).mozIndexedDB || (window as any).webkitIndexedDB).open(
+        this.dbName,
+        this.dbVersion,
+      );
 
       request.onsuccess = (e): void => {
         resolve((e.target as any).result);
@@ -32,7 +36,7 @@ export default class IndexedDb {
         if (!db.objectStoreNames.contains(this.store)) {
           db.createObjectStore(this.store, {
             keyPath: 'id',
-            autoIncrement: true
+            autoIncrement: true,
           });
         }
       };
@@ -46,9 +50,7 @@ export default class IndexedDb {
   async add(data: any, callback?: (e: any) => void): Promise<void> {
     try {
       const db = await this.db;
-      const objectStore = db
-        .transaction(this.store, 'readwrite')
-        .objectStore(this.store);
+      const objectStore = db.transaction(this.store, 'readwrite').objectStore(this.store);
 
       const request = objectStore.put(data);
 
@@ -63,41 +65,38 @@ export default class IndexedDb {
             const firstId = cursor.value.id;
             const length = currentId - firstId + 1;
             const totalExceeded = length - ROWLIMIT;
-            if (totalExceeded > 0) {
-              objectStore.delete(
-                IDBKeyRange.bound(firstId, firstId + totalExceeded - 1)
-              );
-            }
+            if (totalExceeded > 0)
+              objectStore.delete(IDBKeyRange.bound(firstId, firstId + totalExceeded - 1));
           }
         };
       };
 
       request.onerror = (e: any): void => callback?.(e.target.error);
-    } catch (e: any) {
-      logger.getLogger('console-only').log(e);
+    }
+    catch (error: any) {
+      this.logger.error(error);
     }
   }
 
   async getAll(callback: (result: any[]) => void): Promise<void> {
     try {
       const db = await this.db;
-      const request = db
-        .transaction(this.store)
-        .objectStore(this.store)
-        .openCursor();
+      const request = db.transaction(this.store).objectStore(this.store).openCursor();
       const results: any[] = [];
       request.onsuccess = (e: any): void => {
         const cursor = e.target.result;
         if (cursor) {
           cursor.continue();
           results.push(cursor.value);
-        } else {
+        }
+        else {
           callback(results);
         }
       };
       request.onerror = (e: any): void => callback(e.target.error);
-    } catch (e: any) {
-      logger.getLogger('console-only').log(e);
+    }
+    catch (error: any) {
+      this.logger.error(error);
     }
   }
 }

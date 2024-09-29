@@ -1,42 +1,37 @@
-import { type MaybeRef } from '@vueuse/core';
 import flushPromises from 'flush-promises';
-import {
-  type ExchangeSavingsCollection,
-  type ExchangeSavingsEvent,
-  type ExchangeSavingsRequestPayload,
-  SupportedExchange
-} from '@/types/exchanges';
+import { afterEach, assertType, beforeAll, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
+import type { MaybeRef } from '@vueuse/core';
+import type { ExchangeSavingsCollection, ExchangeSavingsEvent, ExchangeSavingsRequestPayload } from '@/types/exchanges';
 import type Vue from 'vue';
 
-vi.mock('vue-router/composables', () => ({
-  useRoute: vi.fn().mockReturnValue(
-    reactive({
-      query: {}
-    })
-  ),
-  useRouter: vi.fn().mockReturnValue({
-    push: vi.fn(({ query }) => {
-      useRoute().query = query;
-      return true;
-    })
-  })
-}));
+vi.mock('vue-router', () => {
+  const route = ref({
+    query: {},
+  });
+  return {
+    useRoute: vi.fn().mockReturnValue(route),
+    useRouter: vi.fn().mockReturnValue({
+      push: vi.fn(({ query }) => {
+        set(route, { query });
+        return true;
+      }),
+    }),
+  };
+});
 
 vi.mock('vue', async () => {
-  const mod = await vi.importActual<Vue>('vue');
+  const mod = await vi.importActual<typeof Vue>('vue');
 
   return {
     ...mod,
-    onBeforeMount: vi.fn()
+    onBeforeMount: vi.fn().mockImplementation((fn: Function) => fn()),
   };
 });
 
 describe('composables::history/filter-paginate', () => {
-  let fetchExchangeSavings: (
-    payload: MaybeRef<ExchangeSavingsRequestPayload>
-  ) => Promise<ExchangeSavingsCollection>;
-  const exchange: MaybeRef<SupportedExchange> = ref(SupportedExchange.BINANCE);
-  const mainPage: Ref<boolean> = ref(false);
+  let fetchExchangeSavings: (payload: MaybeRef<ExchangeSavingsRequestPayload>) => Promise<ExchangeSavingsCollection>;
+  const exchange = ref<string>('binance');
+  const mainPage = ref<boolean>(false);
   const router = useRouter();
   const route = useRoute();
 
@@ -50,8 +45,8 @@ describe('composables::history/filter-paginate', () => {
   });
 
   describe('components::exchanges/BinanceSavingDetail.vue', () => {
-    const extraParams = computed(() => ({
-      location: get(exchange).toString()
+    const defaultParams = computed(() => ({
+      location: get(exchange).toString(),
     }));
 
     const defaultCollectionState = (): ExchangeSavingsCollection => ({
@@ -61,42 +56,37 @@ describe('composables::history/filter-paginate', () => {
       total: 0,
       totalUsdValue: Zero,
       assets: [],
-      received: []
+      received: [],
     });
 
     beforeEach(() => {
       set(mainPage, true);
     });
 
-    test('initialize composable correctly', async () => {
-      const {
-        userAction,
-        filters,
-        options,
-        state,
-        fetchData,
-        applyRouteFilter,
-        isLoading
-      } = usePaginationFilters<
+    it('initialize composable correctly', async () => {
+      const { userAction, filters, sort, state, fetchData, applyRouteFilter, isLoading } = usePaginationFilters<
         ExchangeSavingsEvent,
         ExchangeSavingsRequestPayload,
         ExchangeSavingsEvent,
         ExchangeSavingsCollection
       >(exchange, mainPage, useEmptyFilter, fetchExchangeSavings, {
         defaultCollection: defaultCollectionState,
-        extraParams,
+        defaultParams,
         defaultSortBy: {
-          ascending: [true]
-        }
+          ascending: [true],
+        },
       });
 
-      expect(get(userAction)).toBe(false);
+      expect(get(userAction)).toBe(true);
       expect(get(isLoading)).toBe(false);
       expect(get(filters)).to.toStrictEqual(undefined);
-      expect(get(options).sortBy[0]).toEqual('timestamp');
-      expect(get(options).sortDesc[0]).toEqual(false);
-      expect(get(options).sortBy).toHaveLength(1);
-      expect(get(options).sortDesc).toHaveLength(1);
+      expect(get(sort)).toHaveLength(1);
+      expect(get(sort)).toMatchObject([
+        {
+          column: 'timestamp',
+          direction: 'asc',
+        },
+      ]);
       expect(get(state).data).toHaveLength(0);
       expect(get(state).assets).toHaveLength(0);
       expect(get(state).received).toHaveLength(0);
@@ -107,11 +97,12 @@ describe('composables::history/filter-paginate', () => {
       fetchData().catch(() => {});
       expect(get(isLoading)).toBe(true);
       await flushPromises();
+      await flushPromises();
       expect(get(isLoading)).toBe(false);
       expect(get(state).total).toEqual(260);
     });
 
-    test('check the return types', async () => {
+    it('check the return types', () => {
       const { isLoading, state, filters, matchers } = usePaginationFilters<
         ExchangeSavingsEvent,
         ExchangeSavingsRequestPayload,
@@ -119,10 +110,10 @@ describe('composables::history/filter-paginate', () => {
         ExchangeSavingsCollection
       >(exchange, mainPage, useEmptyFilter, fetchExchangeSavings, {
         defaultCollection: defaultCollectionState,
-        extraParams,
+        defaultParams,
         defaultSortBy: {
-          ascending: [true]
-        }
+          ascending: [true],
+        },
       });
 
       expect(get(isLoading)).toBe(false);
@@ -134,7 +125,7 @@ describe('composables::history/filter-paginate', () => {
       expectTypeOf(get(matchers)).toEqualTypeOf<undefined[]>();
     });
 
-    test('modify filters and fetch data correctly', async () => {
+    it('modify filters and fetch data correctly', async () => {
       const pushSpy = vi.spyOn(router, 'push');
       const query = { sortDesc: ['false'] };
 
@@ -145,19 +136,19 @@ describe('composables::history/filter-paginate', () => {
         ExchangeSavingsCollection
       >(exchange, mainPage, useEmptyFilter, fetchExchangeSavings, {
         defaultCollection: defaultCollectionState,
-        extraParams,
+        defaultParams,
         defaultSortBy: {
-          ascending: [false]
-        }
+          ascending: [false],
+        },
       });
 
       await router.push({
-        query
+        query,
       });
 
       expect(pushSpy).toHaveBeenCalledOnce();
       expect(pushSpy).toHaveBeenCalledWith({ query });
-      expect(route.query).toEqual(query);
+      expect(get(route).query).toEqual(query);
       expect(get(isLoading)).toBe(true);
       await flushPromises();
       expect(get(isLoading)).toBe(false);

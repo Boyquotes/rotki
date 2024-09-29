@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 from rotkehlchen.accounting.mixins.event import AccountingEventType
 from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.accounting.structures.types import ActionType
+from rotkehlchen.accounting.types import EventAccountingRuleStatus
 from rotkehlchen.assets.asset import Asset
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.errors.serialization import DeserializationError
@@ -57,9 +58,10 @@ class EvmProduct(SerializableEnumNameMixin):
     POOL = auto()
     STAKING = auto()
     GAUGE = auto()
+    BRIBE = auto()
 
 
-class EvmEvent(HistoryBaseEntry):  # noqa: PLW1641  # hash in superclass
+class EvmEvent(HistoryBaseEntry):  # hash in superclass
     """This is a class for storing evm events data and it extends HistoryBaseEntry.
 
     It adds the following fields:
@@ -171,14 +173,14 @@ class EvmEvent(HistoryBaseEntry):  # noqa: PLW1641  # hash in superclass
             customized_event_ids: list[int],
             ignored_ids_mapping: dict[ActionType, set[str]],
             hidden_event_ids: list[int],
-            missing_accounting_rule: bool,
+            event_accounting_rule_status: EventAccountingRuleStatus,
             grouped_events_num: int | None = None,
     ) -> dict[str, Any]:
         result = super().serialize_for_api(
             customized_event_ids=customized_event_ids,
             ignored_ids_mapping=ignored_ids_mapping,
             hidden_event_ids=hidden_event_ids,
-            missing_accounting_rule=missing_accounting_rule,
+            event_accounting_rule_status=event_accounting_rule_status,
             grouped_events_num=grouped_events_num,
         )
         if self.has_details():

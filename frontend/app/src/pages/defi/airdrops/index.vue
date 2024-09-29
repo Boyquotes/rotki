@@ -1,162 +1,191 @@
 <script setup lang="ts">
-import { type GeneralAccount } from '@rotki/common/lib/account';
-import { Blockchain } from '@rotki/common/lib/blockchain';
-import { type Ref } from 'vue';
-import { type DataTableHeader } from '@/types/vuetify';
+import { type BigNumber, Blockchain } from '@rotki/common';
 import {
   AIRDROP_POAP,
   type Airdrop,
   type AirdropDetail,
   Airdrops,
-  type PoapDelivery
+  type PoapDelivery,
+  type PoapDeliveryDetails,
 } from '@/types/defi/airdrops';
 import { TaskType } from '@/types/task-type';
-import { type TaskMeta } from '@/types/task';
 import AirdropDisplay from '@/components/defi/airdrops/AirdropDisplay.vue';
+import type { AddressData, BlockchainAccount } from '@/types/blockchain/accounts';
+import type { DataTableColumn, TablePaginationData } from '@rotki/ui-library';
+import type { TaskMeta } from '@/types/task';
 
+type AirdropWithIndex = Omit<Airdrop, 'amount'> & { index: number; amount: BigNumber };
+
+type Statuses = '' | 'unknown' | 'unclaimed' | 'claimed' | 'missed';
 const ETH = Blockchain.ETH;
 const { t } = useI18n();
 const { awaitTask } = useTaskStore();
 const { notify } = useNotificationsStore();
 const { fetchAirdrops: fetchAirdropsCaller } = useDefiApi();
+const hideUnknownAlert = useLocalStorage('rotki.airdrops.hide_unknown_alert', false);
 
-const expanded: Ref<Airdrop[]> = ref([]);
-const selectedAccounts: Ref<GeneralAccount[]> = ref([]);
-const statusFilters: Ref<{ text: string; value: boolean }[]> = ref([
-  { text: t('common.unclaimed'), value: false },
-  { text: t('common.claimed'), value: true }
+const airdrops = ref<Airdrops>({});
+const expanded = ref<AirdropWithIndex[]>([]);
+const loading = ref<boolean>(false);
+const status = ref<Statuses>('');
+const pagination = ref<TablePaginationData>();
+const selectedAccounts = ref<BlockchainAccount<AddressData>[]>([]);
+const statusFilters = ref<{ text: string; value: Statuses }[]>([
+  { text: t('common.all'), value: '' },
+  { text: t('common.unknown'), value: 'unknown' },
+  { text: t('common.unclaimed'), value: 'unclaimed' },
+  { text: t('common.claimed'), value: 'claimed' },
+  { text: t('common.missed'), value: 'missed' },
 ]);
-const status: Ref<boolean> = ref(false);
-const loading: Ref<boolean> = ref(false);
 
-const refreshTooltip: ComputedRef<string> = computed(() =>
+const refreshTooltip = computed<string>(() =>
   t('helpers.refresh_header.tooltip', {
-    title: t('airdrops.title').toLocaleLowerCase()
-  })
+    title: t('airdrops.title').toLocaleLowerCase(),
+  }),
 );
-const airdrops: Ref<Airdrops> = ref({});
 
-const airdropAddresses = computed(() => Object.keys(get(airdrops)));
+const airdropAddresses = computed<string[]>(() => Object.keys(get(airdrops)));
 
-const entries = computed(() => {
-  const addresses = get(selectedAccounts).map(({ address }) => address);
-  const airdrops = get(airdropList(addresses));
-  return airdrops
-    .filter(airdrop => airdrop.claimed === get(status))
+const rows = computed<AirdropWithIndex[]>(() => {
+  const addresses = get(selectedAccounts).map(account => getAccountAddress(account));
+  const data = filterByAddress(get(airdrops), addresses);
+  return data
+    .filter((airdrop) => {
+      const currentStatus = get(status);
+      const currentTime = Date.now() / 1000;
+      switch (currentStatus) {
+        case 'unknown':
+          return !airdrop.hasDecoder;
+        case 'missed':
+          return (
+            airdrop.hasDecoder
+            && !airdrop.claimed
+            && typeof airdrop.cutoffTime !== 'undefined'
+            && airdrop.cutoffTime !== null
+            && airdrop.cutoffTime < currentTime
+          );
+        case 'unclaimed':
+          return airdrop.hasDecoder && !airdrop.claimed;
+        case 'claimed':
+          return airdrop.claimed;
+        default:
+          return true;
+      }
+    })
     .map((value, index) => ({
       ...value,
-      index
+      amount: value.amount ?? Zero,
+      index,
     }));
 });
 
-const tableHeaders = computed<DataTableHeader[]>(() => [
+const cols = computed<DataTableColumn<AirdropWithIndex>[]>(() => [
   {
-    text: t('airdrops.headers.source'),
-    value: 'source',
-    width: '200px'
+    label: t('airdrops.headers.source'),
+    key: 'source',
+    width: '200px',
   },
   {
-    text: t('common.address'),
-    value: 'address'
+    label: t('common.address'),
+    key: 'address',
   },
   {
-    text: t('common.amount'),
-    value: 'amount',
-    align: 'end'
-  },
-  {
-    text: t('common.status'),
-    value: 'claimed'
-  },
-  {
-    text: '',
-    value: 'link',
+    label: t('common.amount'),
+    key: 'amount',
     align: 'end',
-    width: '50px'
-  }
+  },
+  {
+    label: t('common.status'),
+    key: 'claimed',
+  },
 ]);
 
-const airdropList = (addresses: string[]): ComputedRef<Airdrop[]> =>
-  computed(() => {
-    const result: Airdrop[] = [];
-    const data = get(airdrops);
-    for (const address in data) {
-      if (addresses.length > 0 && !addresses.includes(address)) {
-        continue;
-      }
-      const airdrop = data[address];
-      for (const source in airdrop) {
-        const element = airdrop[source];
-        if (source === AIRDROP_POAP) {
-          const details = element as PoapDelivery[];
-          result.push({
-            address,
-            source,
-            details: details.map(({ link, name, event }) => ({
-              amount: bigNumberify('1'),
-              link,
-              name,
-              event,
-              claimed: false
-            }))
-          });
-        } else {
-          const { amount, asset, link, claimed } = element as AirdropDetail;
-          result.push({
-            address,
-            amount,
+function filterByAddress(data: Airdrops, addresses: string[]): Airdrop[] {
+  const result: Airdrop[] = [];
+  for (const address in data) {
+    if (addresses.length > 0 && !addresses.includes(address))
+      continue;
+
+    const airdrop = data[address];
+    for (const source in airdrop) {
+      const element = airdrop[source];
+      if (source === AIRDROP_POAP) {
+        const details = element as PoapDelivery[];
+        result.push({
+          address,
+          source,
+          details: details.map(({ link, name, event }) => ({
+            amount: bigNumberify('1'),
             link,
-            source,
-            asset,
-            claimed
-          });
-        }
+            name,
+            event,
+            claimed: false,
+          })),
+        });
+      }
+      else {
+        const { amount, asset, link, claimed, cutoffTime, hasDecoder } = element as AirdropDetail;
+        result.push({
+          address,
+          amount,
+          link,
+          source,
+          asset,
+          claimed,
+          cutoffTime,
+          hasDecoder,
+        });
       }
     }
-    return result;
-  });
+  }
+  return result;
+}
 
-const fetchAirdrops = async () => {
+async function fetchAirdrops() {
   set(loading, true);
   try {
     const { taskId } = await fetchAirdropsCaller();
-    const { result } = await awaitTask<Airdrops, TaskMeta>(
-      taskId,
-      TaskType.DEFI_AIRDROPS,
-      {
-        title: t('actions.defi.airdrops.task.title').toString()
-      }
-    );
-    set(airdrops, Airdrops.parse(result));
-  } catch (e: any) {
-    logger.error(e);
-    notify({
-      title: t('actions.defi.airdrops.error.title').toString(),
-      message: t('actions.defi.airdrops.error.description', {
-        error: e.message
-      }).toString(),
-      display: true
+    const { result } = await awaitTask<Airdrops, TaskMeta>(taskId, TaskType.DEFI_AIRDROPS, {
+      title: t('actions.defi.airdrops.task.title'),
     });
-  } finally {
+    set(airdrops, Airdrops.parse(result));
+  }
+  catch (error: any) {
+    if (!isTaskCancelled(error)) {
+      logger.error(error);
+      notify({
+        title: t('actions.defi.airdrops.error.title'),
+        message: t('actions.defi.airdrops.error.description', {
+          error: error.message,
+        }),
+        display: true,
+      });
+    }
+  }
+  finally {
     set(loading, false);
   }
-};
+}
 
-const hasDetails = (source: string): boolean => [AIRDROP_POAP].includes(source);
+function hasDetails(details?: PoapDeliveryDetails[]): details is PoapDeliveryDetails[] {
+  return !!details && details.length > 0;
+}
 
-const expand = (item: Airdrop) => {
+function expand(item: AirdropWithIndex) {
   set(expanded, get(expanded).includes(item) ? [] : [item]);
-};
+}
 
 onMounted(async () => {
   await fetchAirdrops();
 });
+
+watch([status, selectedAccounts], () => {
+  set(pagination, { ...get(pagination), page: 1 });
+});
 </script>
 
 <template>
-  <TablePageLayout
-    :title="[t('navigation_menu.defi'), t('navigation_menu.defi_sub.airdrops')]"
-  >
+  <TablePageLayout :title="[t('navigation_menu.defi'), t('navigation_menu.defi_sub.airdrops')]">
     <template #buttons>
       <RuiTooltip :open-delay="400">
         <template #activator>
@@ -177,82 +206,126 @@ onMounted(async () => {
     </template>
 
     <RuiCard>
-      <div class="flex flex-row flex-wrap items-center gap-2 mb-4">
+      <div class="flex flex-col md:flex-row flex-wrap items-start gap-4 mb-4">
         <BlockchainAccountSelector
           v-model="selectedAccounts"
-          multiple
           class="w-full flex-1 !shadow-none !border-none !p-0"
-          no-padding
           dense
           outlined
           :chains="[ETH]"
           :usable-addresses="airdropAddresses"
         />
-        <VSelect
+        <RuiMenuSelect
           v-model="status"
-          :items="statusFilters"
+          :options="statusFilters"
           class="w-full flex-1"
-          item-value="value"
-          item-text="text"
-          hide-details
+          key-attr="value"
+          text-attr="text"
           dense
-          outlined
+          hide-details
+          variant="outlined"
         />
       </div>
 
-      <DataTable
-        :items="entries"
-        :headers="tableHeaders"
+      <RuiAlert
+        v-if="!hideUnknownAlert && status === 'unknown'"
+        type="info"
+        class="mb-4"
+        closeable
+        @close="hideUnknownAlert = true"
+      >
+        {{ t('airdrops.unknown_info') }}
+      </RuiAlert>
+
+      <RuiDataTable
+        v-model:pagination="pagination"
+        v-model:expanded="expanded"
+        outlined
+        :rows="rows"
+        :cols="cols"
         :loading="loading"
         single-expand
-        :expanded.sync="expanded"
-        item-key="index"
+        row-attr="index"
       >
-        <template #item.address="{ item }">
-          <HashLink :text="item.address" />
+        <template #item.address="{ row }">
+          <HashLink :text="row.address" />
         </template>
-        <template #item.amount="{ item }">
+        <template #item.amount="{ row }">
           <AmountDisplay
-            v-if="!hasDetails(item.source)"
-            :value="item.amount"
-            :asset="item.asset"
+            v-if="!hasDetails(row.details)"
+            :value="row.amount"
+            :asset="row.asset"
           />
-          <span v-else>{{ item.details.length }}</span>
+          <span v-else>{{ row.details.length }}</span>
         </template>
-        <template #item.claimed="{ item: { claimed } }">
-          <RuiChip
-            :color="claimed ? 'success' : 'grey'"
-            :label="claimed ? t('common.claimed') : t('common.unclaimed')"
-            size="sm"
-          />
-        </template>
-        <template #item.source="{ item }">
-          <AirdropDisplay :source="item.source" />
-        </template>
-        <template #item.link="{ item }">
-          <ExternalLinkButton
-            v-if="!hasDetails(item.source)"
-            icon
-            color="primary"
-            :url="item.link"
-            variant="text"
+        <template #item.claimed="{ row: { claimed, cutoffTime, hasDecoder } }">
+          <RuiTooltip
+            v-if="!hasDecoder"
+            :popper="{ placement: 'top' }"
+            :open-delay="400"
+            tooltip-class="max-w-[12rem]"
           >
-            <RuiIcon size="16" name="external-link-line" />
-          </ExternalLinkButton>
-          <RowExpander
+            <template #activator>
+              <RuiChip
+                color="info"
+                size="sm"
+              >
+                {{ t('common.unknown') }}
+              </RuiChip>
+            </template>
+
+            {{ t('airdrops.unknown_tooltip') }}
+          </RuiTooltip>
+          <RuiChip
             v-else
-            :expanded="expanded.includes(item)"
-            @click="expand(item)"
+            :color="claimed ? 'success' : 'grey'"
+            size="sm"
+          >
+            {{
+              claimed
+                ? t('common.claimed')
+                : cutoffTime && cutoffTime < Date.now() / 1000
+                  ? t('common.missed')
+                  : t('common.unclaimed')
+            }}
+          </RuiChip>
+        </template>
+        <template #item.source="{ row }">
+          <AirdropDisplay
+            :source="row.source"
+            :icon-url="row.iconUrl"
           />
         </template>
-        <template #expanded-item="{ headers, item }">
+        <template #item.expand="{ row }">
+          <ExternalLink
+            v-if="!hasDetails(row.details)"
+            :url="row.link"
+            custom
+          >
+            <RuiButton
+              variant="text"
+              color="primary"
+              icon
+            >
+              <RuiIcon
+                size="16"
+                name="external-link-line"
+              />
+            </RuiButton>
+          </ExternalLink>
+          <RuiTableRowExpander
+            v-else
+            :expanded="expanded.includes(row)"
+            @click="expand(row)"
+          />
+        </template>
+        <template #expanded-item="{ row }">
           <PoapDeliveryAirdrops
-            :items="item.details"
-            :colspan="headers.length"
-            :visible="hasDetails(item.source)"
+            v-if="hasDetails(row.details)"
+            :items="row.details"
           />
         </template>
-      </DataTable>
+      </RuiDataTable>
     </RuiCard>
   </TablePageLayout>
 </template>

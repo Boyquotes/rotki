@@ -1,18 +1,13 @@
 <script setup lang="ts">
 import useVuelidate from '@vuelidate/core';
-import {
-  and,
-  helpers,
-  minValue,
-  numeric,
-  required
-} from '@vuelidate/validators';
-import { type Ref } from 'vue';
+import { and, helpers, minValue, numeric, required } from '@vuelidate/validators';
 import { isEqual } from 'lodash-es';
-import { type BackendOptions } from '@/electron-main/ipc';
-import { type Writeable } from '@/types';
-import { LogLevel } from '@/utils/log-level';
-import { type BackendConfiguration } from '@/types/backend';
+import { LogLevel } from '@shared/log-level';
+import { toMessages } from '@/utils/validation';
+import type { RuiIcons } from '@rotki/ui-library';
+import type { BackendOptions } from '@shared/ipc';
+import type { Writeable } from '@rotki/common';
+import type { BackendConfiguration } from '@/types/backend';
 
 const emit = defineEmits<{
   (e: 'dismiss'): void;
@@ -22,23 +17,40 @@ const { t } = useI18n();
 
 const { dataDirectory, defaultBackendArguments } = storeToRefs(useMainStore());
 
-const userDataDirectory: Ref<string> = ref('');
-const userLogDirectory: Ref<string> = ref('');
-const logFromOtherModules: Ref<boolean> = ref(false);
-const maxLogSize: Ref<number> = ref(0);
-const sqliteInstructions: Ref<number> = ref(0);
-const maxLogFiles: Ref<number> = ref(0);
-const valid: Ref<boolean> = ref(false);
+const userDataDirectory = ref<string>('');
+const userLogDirectory = ref<string>('');
+const logFromOtherModules = ref<boolean>(false);
+const valid = ref<boolean>(false);
+
+const maxLogSize = ref<string>('0');
+const sqliteInstructions = ref<string>('0');
+const maxLogFiles = ref<string>('0');
 
 const { backendSettings } = useSettingsApi();
 
-const selecting: Ref<boolean> = ref(false);
-const confirmReset: Ref<boolean> = ref(false);
-const configuration: Ref<BackendConfiguration> = asyncComputed(() =>
-  backendSettings()
-);
+const selecting = ref<boolean>(false);
+const confirmReset = ref<boolean>(false);
+const configuration: Ref<BackendConfiguration> = asyncComputed(() => backendSettings());
 
-const initialOptions: ComputedRef<Partial<BackendOptions>> = computed(() => {
+function parseValue(value?: string) {
+  if (!value)
+    return 0;
+
+  const parsedValue = Number.parseInt(value);
+  return Number.isNaN(parsedValue) ? 0 : parsedValue;
+}
+
+function stringifyValue(value?: number) {
+  if (!value)
+    return '0';
+
+  return value.toString();
+}
+
+const { resetOptions, saveOptions, fileConfig, logLevel, defaultLogLevel, defaultLogDirectory, options }
+  = useBackendManagement(loaded);
+
+const initialOptions = computed<Partial<BackendOptions>>(() => {
   const config = get(configuration);
   const opts = get(options);
   const defaults = get(defaultBackendArguments);
@@ -47,103 +59,77 @@ const initialOptions: ComputedRef<Partial<BackendOptions>> = computed(() => {
     dataDirectory: opts.dataDirectory ?? get(dataDirectory),
     logDirectory: opts.logDirectory ?? get(defaultLogDirectory),
     logFromOtherModules: opts.logFromOtherModules ?? false,
-    maxLogfilesNum:
-      opts.maxLogfilesNum ??
-      config?.maxLogfilesNum?.value ??
-      defaults.maxLogfilesNum,
-    maxSizeInMbAllLogs:
-      opts.maxSizeInMbAllLogs ??
-      config?.maxSizeInMbAllLogs?.value ??
-      defaults.maxSizeInMbAllLogs,
-    sqliteInstructions:
-      opts.sqliteInstructions ??
-      config?.sqliteInstructions?.value ??
-      defaults.sqliteInstructions
+    maxLogfilesNum: opts.maxLogfilesNum ?? config?.maxLogfilesNum?.value ?? defaults.maxLogfilesNum,
+    maxSizeInMbAllLogs: opts.maxSizeInMbAllLogs ?? config?.maxSizeInMbAllLogs?.value ?? defaults.maxSizeInMbAllLogs,
+    sqliteInstructions: opts.sqliteInstructions ?? config?.sqliteInstructions?.value ?? defaults.sqliteInstructions,
   };
 });
 
-const loaded = async () => {
+function loaded() {
   const initial = get(initialOptions);
 
   set(logLevel, initial.loglevel);
   set(userDataDirectory, initial.dataDirectory);
   set(userLogDirectory, initial.logDirectory);
   set(logFromOtherModules, initial.logFromOtherModules);
-  set(maxLogFiles, initial.maxLogfilesNum);
-  set(maxLogSize, initial.maxSizeInMbAllLogs);
-  set(sqliteInstructions, initial.sqliteInstructions);
-};
-
-const {
-  resetOptions,
-  saveOptions,
-  fileConfig,
-  logLevel,
-  defaultLogLevel,
-  defaultLogDirectory,
-  options
-} = useBackendManagement(loaded);
+  set(maxLogFiles, stringifyValue(initial.maxLogfilesNum));
+  set(maxLogSize, stringifyValue(initial.maxSizeInMbAllLogs));
+  set(sqliteInstructions, stringifyValue(initial.sqliteInstructions));
+}
 
 const isMaxLogFilesDefault = computed(() => {
   const defaults = get(defaultBackendArguments);
-  return defaults.maxLogfilesNum === get(maxLogFiles);
+  return defaults.maxLogfilesNum === parseValue(get(maxLogFiles));
 });
 
 const isMaxSizeDefault = computed(() => {
   const defaults = get(defaultBackendArguments);
-  return defaults.maxSizeInMbAllLogs === get(maxLogSize);
+  return defaults.maxSizeInMbAllLogs === parseValue(get(maxLogSize));
 });
 
 const isSqliteInstructionsDefaults = computed(() => {
   const defaults = get(defaultBackendArguments);
-  return defaults.sqliteInstructions === get(sqliteInstructions);
+  return defaults.sqliteInstructions === parseValue(get(sqliteInstructions));
 });
 
-const resetDefaultArguments = (field: 'files' | 'size' | 'instructions') => {
+function resetDefaultArguments(field: 'files' | 'size' | 'instructions') {
   const defaults = get(defaultBackendArguments);
-  if (field === 'files') {
-    set(maxLogFiles, defaults.maxLogfilesNum);
-  } else if (field === 'size') {
-    set(maxLogSize, defaults.maxSizeInMbAllLogs);
-  } else if (field === 'instructions') {
-    set(sqliteInstructions, defaults.sqliteInstructions);
-  }
-};
+  if (field === 'files')
+    set(maxLogFiles, stringifyValue(defaults.maxLogfilesNum));
+  else if (field === 'size')
+    set(maxLogSize, stringifyValue(defaults.maxSizeInMbAllLogs));
+  else if (field === 'instructions')
+    set(sqliteInstructions, stringifyValue(defaults.sqliteInstructions));
+}
 
 const newUserOptions = computed(() => {
   const initial = get(initialOptions);
   const newOptions: Writeable<Partial<BackendOptions>> = {};
 
   const level = get(logLevel);
-  if (level !== initial.loglevel) {
+  if (level !== initial.loglevel)
     newOptions.loglevel = level;
-  }
 
   const userData = get(userDataDirectory);
-  if (userData !== initial.dataDirectory) {
+  if (userData !== initial.dataDirectory)
     newOptions.dataDirectory = userData;
-  }
 
   const userLog = get(userLogDirectory);
-  if (userLog !== initial.logDirectory) {
+  if (userLog !== initial.logDirectory)
     newOptions.logDirectory = userLog;
-  }
 
   const logFromOther = get(logFromOtherModules);
-  if (logFromOther !== initial.logFromOtherModules) {
+  if (logFromOther !== initial.logFromOtherModules)
     newOptions.logFromOtherModules = logFromOther;
-  }
-  if (!get(isMaxLogFilesDefault)) {
-    newOptions.maxLogfilesNum = get(maxLogFiles);
-  }
 
-  if (!get(isMaxSizeDefault)) {
-    newOptions.maxSizeInMbAllLogs = get(maxLogSize);
-  }
+  if (!get(isMaxLogFilesDefault))
+    newOptions.maxLogfilesNum = parseValue(get(maxLogFiles));
 
-  if (!get(isSqliteInstructionsDefaults)) {
-    newOptions.sqliteInstructions = get(sqliteInstructions);
-  }
+  if (!get(isMaxSizeDefault))
+    newOptions.maxSizeInMbAllLogs = parseValue(get(maxLogSize));
+
+  if (!get(isSqliteInstructionsDefaults))
+    newOptions.sqliteInstructions = parseValue(get(sqliteInstructions));
 
   return newOptions;
 });
@@ -154,9 +140,9 @@ const anyValueChanged = computed(() => {
     dataDirectory: get(userDataDirectory),
     logDirectory: get(userLogDirectory),
     logFromOtherModules: get(logFromOtherModules),
-    maxSizeInMbAllLogs: get(maxLogSize),
-    sqliteInstructions: get(sqliteInstructions),
-    maxLogfilesNum: get(maxLogFiles)
+    maxSizeInMbAllLogs: parseValue(get(maxLogSize)),
+    sqliteInstructions: parseValue(get(sqliteInstructions)),
+    maxLogfilesNum: parseValue(get(maxLogFiles)),
   };
 
   return !isEqual(form, get(initialOptions));
@@ -165,20 +151,14 @@ const anyValueChanged = computed(() => {
 const { openDirectory } = useInterop();
 
 const nonNegativeNumberRules = {
-  required: helpers.withMessage(
-    t('backend_settings.errors.non_empty'),
-    required
-  ),
-  nonNegative: helpers.withMessage(
-    t('backend_settings.errors.min', { min: 0 }),
-    and(numeric, minValue(0))
-  )
+  required: helpers.withMessage(t('backend_settings.errors.non_empty'), required),
+  nonNegative: helpers.withMessage(t('backend_settings.errors.min', { min: 0 }), and(numeric, minValue(0))),
 };
 
 const rules = {
   maxLogSize: nonNegativeNumberRules,
   maxLogFiles: nonNegativeNumberRules,
-  sqliteInstructions: nonNegativeNumberRules
+  sqliteInstructions: nonNegativeNumberRules,
 };
 
 const v$ = useVuelidate(
@@ -186,31 +166,31 @@ const v$ = useVuelidate(
   {
     maxLogSize,
     maxLogFiles,
-    sqliteInstructions
+    sqliteInstructions,
   },
-  { $autoDirty: true }
+  { $autoDirty: true },
 );
 
 watch(v$, ({ $invalid }) => {
   set(valid, !$invalid);
 });
 
-const icon = (level: LogLevel): string => {
-  if (level === LogLevel.DEBUG) {
+function icon(level: LogLevel): RuiIcons {
+  if (level === LogLevel.DEBUG)
     return 'bug-line';
-  } else if (level === LogLevel.INFO) {
+  else if (level === LogLevel.INFO)
     return 'information-line';
-  } else if (level === LogLevel.WARNING) {
+  else if (level === LogLevel.WARNING)
     return 'alert-line';
-  } else if (level === LogLevel.ERROR) {
+  else if (level === LogLevel.ERROR)
     return 'error-warning-line';
-  } else if (level === LogLevel.CRITICAL) {
+  else if (level === LogLevel.CRITICAL)
     return 'virus-line';
-  } else if (level === LogLevel.TRACE) {
+  else if (level === LogLevel.TRACE)
     return 'file-search-line';
-  }
+
   throw new Error(`Invalid option: ${level}`);
-};
+}
 
 const reset = async function () {
   set(confirmReset, false);
@@ -219,17 +199,16 @@ const reset = async function () {
 };
 
 const selectDataDirectory = async function () {
-  if (get(selecting)) {
+  if (get(selecting))
     return;
-  }
 
   try {
     const title = t('backend_settings.data_directory.select');
     const directory = await openDirectory(title);
-    if (directory) {
+    if (directory)
       set(userDataDirectory, directory);
-    }
-  } finally {
+  }
+  finally {
     set(selecting, false);
   }
 };
@@ -240,27 +219,25 @@ async function save() {
 }
 
 async function selectLogsDirectory() {
-  if (get(selecting)) {
+  if (get(selecting))
     return;
-  }
+
   set(selecting, true);
   try {
-    const directory = await openDirectory(
-      t('backend_settings.log_directory.select')
-    );
-    if (directory) {
+    const directory = await openDirectory(t('backend_settings.log_directory.select'));
+    if (directory)
       set(userLogDirectory, directory);
-    }
-  } finally {
+  }
+  finally {
     set(selecting, false);
   }
 }
 
-const dismiss = () => {
+function dismiss() {
   emit('dismiss');
-};
+}
 
-watch(dataDirectory, directory => {
+watch(dataDirectory, (directory) => {
   set(userDataDirectory, get(options).dataDirectory ?? directory);
 });
 
@@ -268,39 +245,53 @@ const levels = Object.values(LogLevel);
 
 const { show } = useConfirmStore();
 
-const showResetConfirmation = () => {
+function showResetConfirmation() {
   show(
     {
       title: t('backend_settings.confirm.title'),
-      message: t('backend_settings.confirm.message')
+      message: t('backend_settings.confirm.message'),
     },
-    reset
+    reset,
   );
-};
+}
+
+const [CreateLabel, ReuseLabel] = createReusableTemplate<{ item: LogLevel }>();
 </script>
 
 <template>
-  <Card contained class="pt-4">
-    <div class="mb-4">
-      <CardTitle class="font-medium">
-        {{ t('frontend_settings.title') }}
-      </CardTitle>
-    </div>
-
+  <BigDialog
+    display
+    :title="t('frontend_settings.title')"
+    @cancel="dismiss()"
+  >
     <div class="mb-8">
-      <LanguageSetting use-local-setting class="mb-10" />
+      <LanguageSetting
+        use-local-setting
+        class="mb-10"
+      />
     </div>
 
     <div class="mb-4">
-      <CardTitle class="font-medium">
-        {{ t('backend_settings.title') }}
-      </CardTitle>
-      <VCardSubtitle class="pa-0">
-        {{ t('backend_settings.subtitle') }}
-      </VCardSubtitle>
+      <RuiCardHeader class="p-0">
+        <template #header>
+          {{ t('backend_settings.title') }}
+        </template>
+        <template #subheader>
+          {{ t('backend_settings.subtitle') }}
+        </template>
+      </RuiCardHeader>
     </div>
 
     <div class="flex flex-col gap-4">
+      <CreateLabel #default="{ item }">
+        <div class="flex items-center gap-3">
+          <RuiIcon
+            class="text-rui-text-secondary"
+            :name="icon(item)"
+          />
+          <span class="capitalize"> {{ item }} </span>
+        </div>
+      </CreateLabel>
       <RuiTextField
         v-model="userDataDirectory"
         data-cy="user-data-directory-input"
@@ -309,7 +300,6 @@ const showResetConfirmation = () => {
         variant="outlined"
         color="primary"
         :disabled="!!fileConfig.dataDirectory || !userDataDirectory"
-        persistent-hint
         :hint="
           !!fileConfig.dataDirectory
             ? t('backend_settings.config_file_disabled')
@@ -334,12 +324,7 @@ const showResetConfirmation = () => {
         v-model="userLogDirectory"
         data-cy="user-log-directory-input"
         :disabled="!!fileConfig.logDirectory"
-        :persistent-hint="!!fileConfig.logDirectory"
-        :hint="
-          !!fileConfig.logDirectory
-            ? t('backend_settings.config_file_disabled')
-            : null
-        "
+        :hint="!!fileConfig.logDirectory ? t('backend_settings.config_file_disabled') : undefined"
         variant="outlined"
         color="primary"
         :label="t('backend_settings.settings.log_directory.label')"
@@ -347,151 +332,148 @@ const showResetConfirmation = () => {
         @click="selectLogsDirectory()"
       >
         <template #append>
-          <RuiButton variant="text" icon @click="selectLogsDirectory()">
+          <RuiButton
+            variant="text"
+            icon
+            @click="selectLogsDirectory()"
+          >
             <RuiIcon name="folder-line" />
           </RuiButton>
         </template>
       </RuiTextField>
 
-      <VSelect
+      <RuiMenuSelect
         v-model="logLevel"
-        :items="levels"
+        :options="levels"
         class="loglevel-input"
         :disabled="!!fileConfig.loglevel"
         :label="t('backend_settings.settings.log_level.label')"
-        :persistent-hint="!!fileConfig.loglevel"
-        :hint="
-          !!fileConfig.loglevel
-            ? t('backend_settings.config_file_disabled')
-            : null
-        "
-        outlined
+        :hide-details="!fileConfig.loglevel"
+        :hint="!!fileConfig.loglevel ? t('backend_settings.config_file_disabled') : undefined"
+        variant="outlined"
       >
         <template #item="{ item }">
-          <div class="flex items-center gap-4">
-            <RuiIcon class="text-rui-text-secondary" :name="icon(item)" />
-            {{ item.toLocaleLowerCase() }}
-          </div>
+          <ReuseLabel :item="item" />
         </template>
+
         <template #selection="{ item }">
-          <div class="flex items-center gap-4">
-            <RuiIcon class="text-rui-text-secondary" :name="icon(item)" />
-            {{ item.toLocaleLowerCase() }}
-          </div>
+          <ReuseLabel :item="item" />
         </template>
-      </VSelect>
-
-      <VExpansionPanels flat>
-        <VExpansionPanel>
-          <VExpansionPanelHeader data-cy="onboarding-setting__advance-toggle">
-            {{ t('backend_settings.advanced') }}
-          </VExpansionPanelHeader>
-          <VExpansionPanelContent>
-            <RuiTextField
-              v-model.number="maxLogSize"
-              data-cy="max-log-size-input"
-              class="mb-4"
-              variant="outlined"
-              color="primary"
-              :hint="
-                !!fileConfig.maxSizeInMbAllLogs
-                  ? t('backend_settings.config_file_disabled')
-                  : t('backend_settings.max_log_size.hint')
-              "
-              :label="t('backend_settings.max_log_size.label')"
-              :disabled="fileConfig.maxSizeInMbAllLogs"
-              :persistent-hint="!!fileConfig.maxSizeInMbAllLogs"
-              :loading="!configuration || !defaultBackendArguments"
-              :error-messages="v$.maxLogSize.$errors.map(e => e.$message)"
-              type="number"
-            >
-              <template #append>
-                <SettingResetButton
-                  v-if="!isMaxSizeDefault"
-                  data-cy="reset-max-log-size"
-                  @click="resetDefaultArguments('size')"
-                />
-              </template>
-            </RuiTextField>
-            <RuiTextField
-              v-model.number="maxLogFiles"
-              data-cy="max-log-files-input"
-              variant="outlined"
-              color="primary"
-              class="mb-4"
-              :hint="t('backend_settings.max_log_files.hint')"
-              :label="
-                !!fileConfig.maxLogfilesNum
-                  ? t('backend_settings.config_file_disabled')
-                  : t('backend_settings.max_log_files.label')
-              "
-              :disabled="fileConfig.maxLogfilesNum"
-              :persistent-hint="!!fileConfig.maxLogfilesNum"
-              :loading="!configuration || !defaultBackendArguments"
-              :error-messages="v$.maxLogFiles.$errors.map(e => e.$message)"
-              type="number"
-            >
-              <template #append>
-                <SettingResetButton
-                  v-if="!isMaxLogFilesDefault"
-                  data-cy="reset-max-log-files"
-                  @click="resetDefaultArguments('files')"
-                />
-              </template>
-            </RuiTextField>
-
-            <RuiTextField
-              v-model.number="sqliteInstructions"
-              data-cy="sqlite-instructions-input"
-              variant="outlined"
-              color="primary"
-              class="mb-4"
-              :hint="
-                !!fileConfig.sqliteInstructions
-                  ? t('backend_settings.config_file_disabled')
-                  : t('backend_settings.sqlite_instructions.hint')
-              "
-              :label="t('backend_settings.sqlite_instructions.label')"
-              :disabled="fileConfig.sqliteInstructions"
-              :persistent-hint="!!fileConfig.sqliteInstructions"
-              :loading="!configuration || !defaultBackendArguments"
-              :error-messages="
-                v$.sqliteInstructions.$errors.map(e => e.$message)
-              "
-              type="number"
-            >
-              <template #append>
-                <SettingResetButton
-                  v-if="!isSqliteInstructionsDefaults"
-                  data-cy="reset-sqlite-instructions"
-                  @click="resetDefaultArguments('instructions')"
-                />
-              </template>
-            </RuiTextField>
-
-            <RuiCheckbox
-              v-model="logFromOtherModules"
-              color="primary"
-              data-cy="log-from-other-modules-checkbox"
-              :label="t('backend_settings.log_from_other_modules.label')"
-              :disabled="fileConfig.logFromOtherModules"
-              persistent-hint
-              :hint="
-                fileConfig.logFromOtherModules
-                  ? t('backend_settings.config_file_disabled')
-                  : t('backend_settings.log_from_other_modules.hint')
-              "
-            >
-              {{ t('backend_settings.log_from_other_modules.label') }}
-            </RuiCheckbox>
-          </VExpansionPanelContent>
-        </VExpansionPanel>
-      </VExpansionPanels>
+      </RuiMenuSelect>
     </div>
 
-    <template #buttons>
+    <RuiAccordions>
+      <RuiAccordion
+        data-cy="onboarding-setting__advance"
+        header-class="py-4"
+        eager
+      >
+        <template #header>
+          {{ t('backend_settings.advanced') }}
+        </template>
+        <div class="py-2">
+          <RuiTextField
+            v-model="maxLogSize"
+            data-cy="max-log-size-input"
+            class="mb-4"
+            variant="outlined"
+            color="primary"
+            :hint="
+              !!fileConfig.maxSizeInMbAllLogs
+                ? t('backend_settings.config_file_disabled')
+                : t('backend_settings.max_log_size.hint')
+            "
+            :label="t('backend_settings.max_log_size.label')"
+            :disabled="!!fileConfig.maxSizeInMbAllLogs"
+            :loading="!configuration || !defaultBackendArguments"
+            :error-messages="toMessages(v$.maxLogSize)"
+            type="number"
+          >
+            <template #append>
+              <SettingResetButton
+                v-if="!isMaxSizeDefault"
+                data-cy="reset-max-log-size"
+                @click="resetDefaultArguments('size')"
+              />
+            </template>
+          </RuiTextField>
+          <RuiTextField
+            v-model="maxLogFiles"
+            data-cy="max-log-files-input"
+            variant="outlined"
+            color="primary"
+            class="mb-4"
+            :hint="t('backend_settings.max_log_files.hint')"
+            :label="
+              !!fileConfig.maxLogfilesNum
+                ? t('backend_settings.config_file_disabled')
+                : t('backend_settings.max_log_files.label')
+            "
+            :disabled="!!fileConfig.maxLogfilesNum"
+            :loading="!configuration || !defaultBackendArguments"
+            :error-messages="toMessages(v$.maxLogFiles)"
+            type="number"
+          >
+            <template #append>
+              <SettingResetButton
+                v-if="!isMaxLogFilesDefault"
+                data-cy="reset-max-log-files"
+                @click="resetDefaultArguments('files')"
+              />
+            </template>
+          </RuiTextField>
+
+          <RuiTextField
+            v-model="sqliteInstructions"
+            data-cy="sqlite-instructions-input"
+            variant="outlined"
+            color="primary"
+            class="mb-4"
+            :hint="
+              !!fileConfig.sqliteInstructions
+                ? t('backend_settings.config_file_disabled')
+                : t('backend_settings.sqlite_instructions.hint')
+            "
+            :label="t('backend_settings.sqlite_instructions.label')"
+            :disabled="!!fileConfig.sqliteInstructions"
+            :loading="!configuration || !defaultBackendArguments"
+            :error-messages="toMessages(v$.sqliteInstructions)"
+            type="number"
+          >
+            <template #append>
+              <SettingResetButton
+                v-if="!isSqliteInstructionsDefaults"
+                data-cy="reset-sqlite-instructions"
+                @click="resetDefaultArguments('instructions')"
+              />
+            </template>
+          </RuiTextField>
+
+          <RuiCheckbox
+            v-model="logFromOtherModules"
+            color="primary"
+            data-cy="log-from-other-modules-checkbox"
+            :label="t('backend_settings.log_from_other_modules.label')"
+            :disabled="fileConfig.logFromOtherModules"
+            :hint="
+              fileConfig.logFromOtherModules
+                ? t('backend_settings.config_file_disabled')
+                : t('backend_settings.log_from_other_modules.hint')
+            "
+          >
+            {{ t('backend_settings.log_from_other_modules.label') }}
+          </RuiCheckbox>
+        </div>
+      </RuiAccordion>
+    </RuiAccordions>
+
+    <template #footer>
       <div class="flex justify-end w-full gap-2">
-        <RuiButton variant="text" color="primary" @click="dismiss()">
+        <RuiButton
+          variant="text"
+          color="primary"
+          @click="dismiss()"
+        >
           {{ t('common.actions.cancel') }}
         </RuiButton>
         <RuiButton
@@ -511,21 +493,5 @@ const showResetConfirmation = () => {
         </RuiButton>
       </div>
     </template>
-  </Card>
+  </BigDialog>
 </template>
-
-<style scoped lang="scss">
-:deep(.v-expansion-panel) {
-  .v-expansion-panel {
-    &-content {
-      &__wrap {
-        padding: 0 0 16px;
-      }
-    }
-
-    &-header {
-      padding: 16px 0;
-    }
-  }
-}
-</style>

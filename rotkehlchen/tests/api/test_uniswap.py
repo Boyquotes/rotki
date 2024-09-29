@@ -18,7 +18,7 @@ from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_ok_async_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     wait_for_async_task,
 )
 from rotkehlchen.tests.utils.constants import A_DOLLAR_BASED
@@ -56,6 +56,7 @@ def test_get_balances_module_not_activated(
     )
 
 
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
 @pytest.mark.parametrize('ethereum_accounts', [[LP_HOLDER_ADDRESS]])
 @pytest.mark.parametrize('ethereum_modules', [['uniswap']])
 @pytest.mark.parametrize('network_mocking', [False])
@@ -73,10 +74,8 @@ def test_get_balances(
     """
     tx_hex = deserialize_evm_tx_hash('0x856a5b5d95623f85923938e1911dfda6ad1dd185f45ab101bac99371aeaed329')  # noqa: E501
     ethereum_inquirer = rotkehlchen_api_server.rest_api.rotkehlchen.chains_aggregator.ethereum.node_inquirer  # noqa: E501
-    database = rotkehlchen_api_server.rest_api.rotkehlchen.data.db
     get_decoded_events_of_transaction(
         evm_inquirer=ethereum_inquirer,
-        database=database,
         tx_hash=tx_hex,
     )
     async_query = random.choice([False, True])
@@ -99,7 +98,7 @@ def test_get_balances(
         assert outcome['message'] == ''
         result = outcome['result']
     else:
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
 
     address_balances = result[LP_HOLDER_ADDRESS]
     for lp in address_balances:
@@ -162,8 +161,6 @@ def test_get_events_history_filtering_by_timestamp(
     """
     rotki = rotkehlchen_api_server.rest_api.rotkehlchen
     ethereum_inquirer = rotki.chains_aggregator.ethereum.node_inquirer
-    database = rotki.data.db
-
     expected_events_balances_1 = [
         LiquidityPoolEventsBalance(
             pool_address=string_to_evm_address('0x55111baD5bC368A2cb9ecc9FBC923296BeDb3b89'),
@@ -180,7 +177,6 @@ def test_get_events_history_filtering_by_timestamp(
     for tx_hex in (tx_hex_1, tx_hex_2):
         get_decoded_events_of_transaction(
             evm_inquirer=ethereum_inquirer,
-            database=database,
             tx_hash=tx_hex,
         )
 
@@ -211,7 +207,7 @@ def test_get_events_history_filtering_by_timestamp(
             assert outcome['message'] == ''
             result = outcome['result']
         else:
-            result = assert_proper_response_with_result(response)
+            result = assert_proper_sync_response_with_result(response)
 
     events_balances = result[ethereum_accounts[0]]
     assert len(events_balances) == 1
@@ -235,7 +231,7 @@ def test_get_v3_balances_premium(rotkehlchen_api_server):
             version='3',
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
 
     if LP_V3_HOLDER_ADDRESS not in result or len(result[LP_V3_HOLDER_ADDRESS]) == 0:
         test_warnings.warn(
@@ -288,7 +284,7 @@ def test_get_v3_balances_no_premium(rotkehlchen_api_server):
             version='3',
         ),
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
 
     if LP_V3_HOLDER_ADDRESS not in result or len(result[LP_V3_HOLDER_ADDRESS]) == 0:
         test_warnings.warn(

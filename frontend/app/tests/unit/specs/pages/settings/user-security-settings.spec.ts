@@ -1,32 +1,31 @@
-import { type Wrapper, mount } from '@vue/test-utils';
-import Vuetify from 'vuetify';
+import { type VueWrapper, mount } from '@vue/test-utils';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import UserSecuritySettings from '@/pages/settings/data-security/index.vue';
+import { libraryDefaults } from '../../../utils/provide-defaults';
 
-vi.mock('@/services/backup', () => ({
-  useBackupApi: () => ({
-    info: vi.fn()
-  })
+vi.mock('vue-router', () => ({
+  useRoute: vi.fn(),
+  useRouter: vi.fn().mockReturnValue({
+    push: vi.fn(),
+  }),
+  createRouter: vi.fn().mockImplementation(() => ({
+    beforeEach: vi.fn(),
+  })),
+  createWebHashHistory: vi.fn(),
 }));
 
-describe('UserSecuritySettings.vue', () => {
-  let wrapper: Wrapper<any>;
+describe('userSecuritySettings.vue', () => {
+  let wrapper: VueWrapper<InstanceType<typeof UserSecuritySettings>>;
 
   function createWrapper() {
-    const vuetify = new Vuetify();
     const pinia = createPinia();
     setActivePinia(pinia);
     return mount(UserSecuritySettings, {
-      pinia,
-      vuetify,
-      stubs: [
-        'v-tooltip',
-        'card-title',
-        'asset-select',
-        'asset-update',
-        'confirm-dialog',
-        'data-table',
-        'card'
-      ]
+      global: {
+        plugins: [pinia],
+        stubs: ['card-title', 'asset-select', 'asset-update', 'confirm-dialog', 'data-table'],
+        provide: libraryDefaults,
+      },
     });
   }
 
@@ -34,14 +33,14 @@ describe('UserSecuritySettings.vue', () => {
     wrapper = createWrapper();
   });
 
-  test('displays no warning by default', async () => {
+  it('displays no warning by default', () => {
     expect(wrapper.find('[data-cy=premium-warning]').exists()).toBe(false);
   });
 
-  test('displays warning if premium sync enabled', async () => {
+  it('displays warning if premium sync enabled', async () => {
     const { premiumSync } = storeToRefs(usePremiumStore());
     set(premiumSync, true);
-    await wrapper.vm.$nextTick();
+    await nextTick();
     expect(wrapper.find('[data-cy=premium-warning]').exists()).toBe(true);
   });
 });

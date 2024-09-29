@@ -1,67 +1,66 @@
 <script setup lang="ts">
-import { type Currency, useCurrencies } from '@/types/currencies';
+import { type SupportedCurrency, useCurrencies } from '@/types/currencies';
 
 const { currencies } = useCurrencies();
-const selectedCurrency = ref<Currency>(get(currencies)[0]);
+const selectedCurrency = ref<SupportedCurrency>(get(currencies)[0].tickerSymbol);
 const { currency } = storeToRefs(useGeneralSettingsStore());
 const { t } = useI18n();
 
-const successMessage = (symbol: string) =>
-  t('general_settings.validation.currency.success', {
-    symbol
+function successMessage(symbol: string) {
+  return t('general_settings.validation.currency.success', {
+    symbol,
   });
+}
 
 onMounted(() => {
-  set(selectedCurrency, get(currency));
+  set(selectedCurrency, get(currency).tickerSymbol);
 });
 
-const calculateFontSize = (symbol: string) => {
+function calculateFontSize(symbol: string) {
   const length = symbol.length;
   return `${2.4 - length * 0.4}em`;
-};
+}
 </script>
 
 <template>
   <SettingsOption
-    #default="{ error, success, update }"
+    #default="{ error, success, updateImmediate }"
     setting="mainCurrency"
     :error-message="t('general_settings.validation.currency.error')"
     :success-message="successMessage"
   >
-    <VSelect
+    <RuiMenuSelect
       v-model="selectedCurrency"
-      outlined
       class="general-settings__fields__currency-selector"
       :label="t('general_settings.amount.labels.main_currency')"
-      item-text="tickerSymbol"
-      return-object
-      :items="currencies"
+      :options="currencies"
+      text-attr="tickerSymbol"
+      key-attr="tickerSymbol"
+      :item-height="68"
+      variant="outlined"
       :success-messages="success"
       :error-messages="error"
-      @change="update($event ? $event.tickerSymbol : $event)"
+      @update:model-value="updateImmediate($event)"
     >
-      <template #item="{ item, attrs, on }">
-        <VListItem
+      <template #item="{ item }">
+        <ListItem
           :id="`currency__${item.tickerSymbol.toLocaleLowerCase()}`"
-          v-bind="attrs"
-          v-on="on"
+          no-hover
+          no-padding
+          class="!py-0"
+          :title="item.name"
+          :subtitle="t('general_settings.amount.labels.main_currency_subtitle')"
         >
-          <VListItemAvatar
-            class="general-settings__currency-list primary--text font-bold"
-            :style="{ fontSize: calculateFontSize(item.unicodeSymbol) }"
-          >
-            {{ item.unicodeSymbol }}
-          </VListItemAvatar>
-          <VListItemContent>
-            <VListItemTitle>
-              {{ item.name }}
-            </VListItemTitle>
-            <VListItemSubtitle>
-              {{ t('general_settings.amount.labels.main_currency_subtitle') }}
-            </VListItemSubtitle>
-          </VListItemContent>
-        </VListItem>
+          <template #avatar>
+            <div
+              class="font-bold text-rui-primary"
+              :style="{ fontSize: calculateFontSize(item.unicodeSymbol) }"
+            >
+              {{ item.unicodeSymbol }}
+            </div>
+          </template>
+        </ListItem>
       </template>
-    </VSelect>
+    </RuiMenuSelect>
   </SettingsOption>
 </template>

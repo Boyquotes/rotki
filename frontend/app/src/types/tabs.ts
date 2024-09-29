@@ -1,9 +1,12 @@
+import type { RuiIcons } from '@rotki/ui-library';
+import type { RouteLocationRaw } from 'vue-router';
+
 export interface TabContent {
   readonly text: string;
-  readonly route: string;
-  readonly hidden?: boolean;
-  readonly hideHeader?: boolean;
+  readonly icon: RuiIcons;
+  readonly route: RouteLocationRaw;
 }
 
-export const getClass = (route: string): string =>
-  route.toLowerCase().replace('/', '').replace(/\//g, '__');
+export function getClass(route: string): string {
+  return route.toLowerCase().replace('/', '').replace(/\//g, '__');
+}

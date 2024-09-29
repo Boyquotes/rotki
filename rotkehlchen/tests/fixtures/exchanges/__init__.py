@@ -8,15 +8,15 @@ from .bitfinex import *  # noqa: F403
 from .bitmex import *  # noqa: F403
 from .bitpanda import *  # noqa: F403
 from .bitstamp import *  # noqa: F403
-from .bittrex import *  # noqa: F403
+from .bybit import *  # noqa: F403
 from .coinbase import *  # noqa: F403
-from .coinbasepro import *  # noqa: F403
 from .gemini import *  # noqa: F403
+from .htx import *  # noqa: F403
 from .iconomi import *  # noqa: F403
 from .independentreserve import *  # noqa: F403
 from .kraken import *  # noqa: F403
 from .kucoin import *  # noqa: F403
-from .okx import *     # noqa: F403
+from .okx import *  # noqa: F403
 from .poloniex import *  # noqa: F403
 from .woo import *  # noqa: F403
 

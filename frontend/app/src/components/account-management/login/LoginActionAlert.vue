@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import type { RuiIcons } from '@rotki/ui-library';
+
 defineProps<{
-  icon: string;
+  icon: RuiIcons;
 }>();
 const emit = defineEmits<{
   (e: 'confirm'): void;
@@ -8,23 +10,39 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const slots = useSlots();
 </script>
 
 <template>
-  <RuiAlert class="mt-8" type="warning" :icon="icon">
+  <RuiAlert
+    class="mt-8"
+    type="warning"
+    :icon="icon"
+  >
     <template #title>
       <slot name="title" />
     </template>
     <slot />
 
     <div class="mt-4 flex justify-end gap-3">
-      <RuiButton variant="text" color="primary" @click="emit('cancel')">
-        <slot v-if="slots.cancel" name="cancel" />
+      <RuiButton
+        variant="text"
+        color="primary"
+        @click="emit('cancel')"
+      >
+        <slot
+          v-if="$slots.cancel"
+          name="cancel"
+        />
         <span v-else> {{ t('common.actions.no') }} </span>
       </RuiButton>
-      <RuiButton color="primary" @click="emit('confirm')">
-        <slot v-if="slots.confirm" name="confirm" />
+      <RuiButton
+        color="primary"
+        @click="emit('confirm')"
+      >
+        <slot
+          v-if="$slots.confirm"
+          name="confirm"
+        />
         <span v-else> {{ t('common.actions.yes') }} </span>
       </RuiButton>
     </div>

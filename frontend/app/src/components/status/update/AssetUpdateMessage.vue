@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { type Ref } from 'vue';
-import { type AssetVersionUpdate } from '@/types/asset';
+import type { AssetVersionUpdate } from '@/types/asset';
 
 const props = defineProps<{
   headless: boolean;
@@ -15,41 +14,41 @@ const emit = defineEmits<{
 
 const { versions } = toRefs(props);
 
-const partial: Ref<boolean> = ref(false);
-const upToVersion: Ref<number> = ref(0);
-const skipUpdate: Ref<boolean> = ref(false);
+const partial = ref<boolean>(false);
+const upToVersion = ref<string>('0');
+const skipUpdate = ref<boolean>(false);
 
 const multiple = computed(() => {
   const { remote, local } = get(versions);
   return remote - local > 1;
 });
 
-const onChange = (value: string) => {
+function onChange(value: string) {
   const number = Number.parseInt(value);
   const update = get(versions);
   const { local, remote } = update;
   let updatedUpToVersion: number = number;
-  if (isNaN(number)) {
+  if (isNaN(number))
     updatedUpToVersion = local + 1;
-  } else if (number < local) {
+  else if (number < local)
     updatedUpToVersion = local + 1;
-  } else if (number > remote) {
+  else if (number > remote)
     updatedUpToVersion = remote;
-  }
-  setUpdateVersion(updatedUpToVersion);
-};
 
-const setUpdateVersion = (version: number) => {
-  set(upToVersion, version);
+  setUpdateVersion(updatedUpToVersion);
+}
+
+function setUpdateVersion(version: number) {
+  set(upToVersion, version.toString());
   const update = get(versions);
 
   emit('update:versions', {
     ...update,
-    upToVersion: version
+    upToVersion: version,
   });
-};
+}
 
-watch(partial, partial => {
+watch(partial, (partial) => {
   if (!partial) {
     const remoteVersion = get(versions).remote;
     setUpdateVersion(remoteVersion);
@@ -57,28 +56,40 @@ watch(partial, partial => {
 });
 
 onMounted(() => {
-  set(upToVersion, get(versions).upToVersion);
+  set(upToVersion, get(versions).upToVersion.toString());
 });
 
 const { t } = useI18n();
 </script>
 
 <template>
-  <RuiCard variant="flat" :class="{ 'bg-transparent': headless }">
-    <template #header> {{ t('asset_update.title') }} </template>
-    <i18n class="text-body-1" tag="div" path="asset_update.description">
+  <RuiCard
+    variant="flat"
+    :class="{ 'bg-transparent': headless }"
+  >
+    <template #header>
+      {{ t('asset_update.title') }}
+    </template>
+    <i18n-t
+      class="text-body-1"
+      tag="div"
+      keypath="asset_update.description"
+    >
       <template #remote>
         <span class="font-medium">{{ versions.remote }}</span>
       </template>
       <template #local>
         <span class="font-medium">{{ versions.local }}</span>
       </template>
-    </i18n>
+    </i18n-t>
     <div class="text-body-1 mt-4">
       {{ t('asset_update.total_changes', { changes: versions.changes }) }}
     </div>
 
-    <div v-if="multiple" class="font-medium text-body-1 mt-6">
+    <div
+      v-if="multiple"
+      class="font-medium text-body-1 mt-6"
+    >
       {{ t('asset_update.advanced') }}
     </div>
     <div v-if="multiple">
@@ -93,7 +104,7 @@ const { t } = useI18n();
       <div class="ml-8 md:w-1/2">
         <RuiTextField
           :disabled="!partial"
-          :value="upToVersion"
+          :model-value="upToVersion"
           variant="outlined"
           color="primary"
           type="number"
@@ -102,12 +113,16 @@ const { t } = useI18n();
           :min="versions.local"
           :max="versions.remote"
           :label="t('asset_update.up_to_version')"
-          @change="onChange($event)"
+          @update:model-value="onChange($event)"
         />
       </div>
     </div>
     <div v-if="headless">
-      <RuiCheckbox v-model="skipUpdate" dense color="primary">
+      <RuiCheckbox
+        v-model="skipUpdate"
+        dense
+        color="primary"
+      >
         {{ t('asset_update.skip_notification') }}
       </RuiCheckbox>
     </div>
@@ -120,7 +135,10 @@ const { t } = useI18n();
       >
         {{ t('common.actions.skip') }}
       </RuiButton>
-      <RuiButton color="primary" @click="emit('confirm')">
+      <RuiButton
+        color="primary"
+        @click="emit('confirm')"
+      >
         {{ t('common.actions.update') }}
       </RuiButton>
     </template>

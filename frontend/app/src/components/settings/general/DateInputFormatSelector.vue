@@ -1,54 +1,59 @@
 <script setup lang="ts">
-import { useListeners } from 'vue';
-import { displayDateFormatter } from '@/data/date_formatter';
+import { displayDateFormatter } from '@/data/date-formatter';
 import { DateFormat } from '@/types/date-format';
 
-const rootAttrs = useAttrs();
-const rootListeners = useListeners();
+defineProps<{
+  label: string;
+  errorMessages: string[];
+  successMessages: string[];
+}>();
+
+const modelValue = defineModel<string>({ required: true });
 
 const selections = [
   {
-    value: DateFormat.DateMonthYearHourMinuteSecond
+    value: DateFormat.DateMonthYearHourMinuteSecond,
   },
   {
-    value: DateFormat.MonthDateYearHourMinuteSecond
+    value: DateFormat.MonthDateYearHourMinuteSecond,
   },
   {
-    value: DateFormat.YearMonthDateHourMinuteSecond
-  }
+    value: DateFormat.YearMonthDateHourMinuteSecond,
+  },
 ];
 
-const dateInputFormatExample = (format: DateFormat): string =>
-  displayDateFormatter.format(new Date(), format);
+function dateInputFormatExample(format: DateFormat): string {
+  return displayDateFormatter.format(new Date(), format);
+}
 
 const { t } = useI18n();
 </script>
 
 <template>
-  <VSelect
-    v-bind="rootAttrs"
-    item-text="value"
-    item-value="value"
-    outlined
-    persistent-hint
-    :items="selections"
-    v-on="rootListeners"
+  <RuiMenuSelect
+    v-bind="$attrs"
+    v-model="modelValue"
+    :label="label"
+    :success-messages="successMessages"
+    :error-messages="errorMessages"
+    :options="selections"
+    :item-height="68"
+    key-attr="value"
+    text-attr="value"
+    variant="outlined"
   >
-    <template #item="{ item, attrs, on }">
-      <VListItem v-bind="attrs" v-on="on">
-        <VListItemContent>
-          <VListItemTitle>
-            {{ item.value }}
-          </VListItemTitle>
-          <VListItemSubtitle>
-            {{
-              t('general_settings.date_input_format_hint', {
-                format: dateInputFormatExample(item.value)
-              })
-            }}
-          </VListItemSubtitle>
-        </VListItemContent>
-      </VListItem>
+    <template #item="{ item }">
+      <ListItem
+        no-hover
+        no-padding
+        class="!py-0"
+        :title="item.value"
+        :subtitle="
+          t('general_settings.date_input_format_hint', {
+            format: dateInputFormatExample(item.value),
+          })
+        "
+      />
     </template>
-  </VSelect>
+  </RuiMenuSelect>
 </template>

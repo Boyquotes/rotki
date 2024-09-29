@@ -10,20 +10,22 @@ onMounted(() => {
 
 const { t } = useI18n();
 
-const getSuccessMessage = (method: string) =>
-  t('account_settings.messages.cost_basis_method.success', {
-    method: method.toUpperCase()
+function getSuccessMessage(method: string) {
+  return t('account_settings.messages.cost_basis_method.success', {
+    method: method.toUpperCase(),
   });
+}
 
-const getErrorMessage = (method: string) =>
-  t('account_settings.messages.cost_basis_method.error', {
-    method: method.toUpperCase()
+function getErrorMessage(method: string) {
+  return t('account_settings.messages.cost_basis_method.error', {
+    method: method.toUpperCase(),
   });
+}
 </script>
 
 <template>
   <SettingsOption
-    #default="{ error, success, update }"
+    #default="{ error, success, updateImmediate }"
     setting="costBasisMethod"
     :success-message="getSuccessMessage"
     :error-message="getErrorMessage"
@@ -31,11 +33,10 @@ const getErrorMessage = (method: string) =>
     <CostBasisMethodSettings
       v-model="costBasisMethod"
       class="accounting-settings__cost-basis-method pt-4"
-      :success-messages="success"
-      :error-messages="error"
+      :success-messages="success ? [success] : []"
+      :error-messages="error ? [error] : []"
       :label="t('accounting_settings.trade.labels.cost_basis_method')"
-      color="primary"
-      @change="update($event)"
+      @update:model-value="updateImmediate($event)"
     />
   </SettingsOption>
 </template>

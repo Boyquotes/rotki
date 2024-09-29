@@ -1,32 +1,29 @@
 <script setup lang="ts">
-import { type Account } from '@rotki/common/lib/account';
-import {
-  Blockchain,
-  type BlockchainSelection
-} from '@rotki/common/lib/blockchain';
+import { type Account, Blockchain } from '@rotki/common';
 import { truncateAddress } from '@/utils/truncate';
 
-const props = withDefaults(
-  defineProps<{
-    account: Account<BlockchainSelection>;
-    useAliasName?: boolean;
-    truncate?: boolean;
-    hideChainIcon?: boolean;
-  }>(),
-  {
-    useAliasName: true,
-    truncate: true,
-    hideChainIcon: false
-  }
-);
+const props = withDefaults(defineProps<{
+  account: Account;
+  useAliasName?: boolean;
+  truncate?: boolean;
+  hideChainIcon?: boolean;
+}>(), {
+  useAliasName: true,
+  truncate: true,
+  hideChainIcon: false,
+});
 
 const { account, useAliasName } = toRefs(props);
-const { scrambleData, shouldShowAmount, scrambleHex } = useScramble();
+
+const { t } = useI18n();
+
 const { addressNameSelector } = useAddressesNamesStore();
+
+const { scrambleData, shouldShowAmount, scrambleAddress } = useScramble();
 
 const address = computed<string>(() => {
   const address = get(account).address;
-  return scrambleHex(address);
+  return scrambleAddress(address);
 });
 
 const aliasName = computed<string | null>(() => {
@@ -34,45 +31,62 @@ const aliasName = computed<string | null>(() => {
     const { address, chain } = get(account);
     const chainId = chain === 'ALL' ? Blockchain.ETH : chain;
     const name = get(addressNameSelector(address, chainId));
-    if (name) {
+    if (name)
       return truncateAddress(name, 10);
-    }
   }
 
   return null;
 });
-
-const { t } = useI18n();
 </script>
 
 <template>
   <RuiTooltip
     :popper="{ placement: 'top' }"
-    open-delay="400"
+    :open-delay="400"
     :disabled="!truncate"
-    class="flex items-center flex-nowrap"
+    class="flex items-center flex-nowrap gap-2"
+    tooltip-class="[&_*]:font-mono"
   >
     <template #activator>
-      <div v-if="!hideChainIcon" class="pr-1">
-        <VAvatar left size="28px">
+      <div
+        v-if="!hideChainIcon"
+        class="pr-1"
+      >
+        <div class="rounded-full overflow-hidden w-6 h-6 dark:bg-rui-grey-600 flex items-center justify-center">
           <ChainIcon
             v-if="account.chain && account.chain !== 'ALL'"
-            size="24px"
+            size="22px"
             :chain="account.chain"
           />
-          <RuiTooltip v-else :popper="{ placement: 'top' }" open-delay="400">
+          <RuiTooltip
+            v-else
+            :popper="{ placement: 'top' }"
+            :open-delay="400"
+          >
             <template #activator>
-              <RuiIcon name="links-line" />
+              <RuiIcon
+                name="links-line"
+                class="text-rui-text-secondary"
+              />
             </template>
-            <span>{{ t('common.multi_chain') }}</span>
+            {{ t('common.multi_chain') }}
           </RuiTooltip>
-        </VAvatar>
+        </div>
       </div>
 
-      <EnsAvatar :address="address" avatar class="mr-2" />
+      <EnsAvatar
+        :address="address"
+        avatar
+        class="mr-2"
+      />
 
-      <div :class="{ blur: !shouldShowAmount }" class="text-no-wrap">
-        <div v-if="aliasName">{{ aliasName }}</div>
+      <div
+        :class="{ blur: !shouldShowAmount }"
+        class="text-no-wrap [&_*]:font-mono text-xs"
+      >
+        <div v-if="aliasName">
+          {{ aliasName }}
+        </div>
         <div v-else>
           {{ truncate ? truncateAddress(address, 6) : address }}
         </div>

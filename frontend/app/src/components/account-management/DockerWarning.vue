@@ -1,24 +1,30 @@
 <script setup lang="ts">
 const { dockerRiskAccepted } = storeToRefs(useMainStore());
 const { t } = useI18n();
-const { usageGuideUrl } = useInterop();
+const { usageGuideSection } = externalLinks;
 
-const proceed = () => {
+function proceed() {
   set(dockerRiskAccepted, true);
-};
+}
 </script>
 
 <template>
-  <div class="max-w-[41.25rem] mx-auto">
+  <div class="max-w-[27.5rem] mx-auto">
     <RuiAlert type="warning">
-      <i18n path="docker_warning.title" tag="div">
-        <BaseExternalLink
+      <i18n-t keypath="docker_warning.title">
+        <ExternalLink
           :text="t('docker_warning.documentation')"
-          :href="usageGuideUrl + '#docker'"
+          :url="usageGuideSection.dockerWarning"
+          color="warning"
         />
-      </i18n>
+      </i18n-t>
 
-      <RuiButton class="mt-4" depressed color="primary" @click="proceed()">
+      <RuiButton
+        class="mt-4"
+        size="sm"
+        color="secondary"
+        @click="proceed()"
+      >
         {{ t('docker_warning.action') }}
       </RuiButton>
     </RuiAlert>

@@ -2,6 +2,7 @@ import datetime
 import logging
 import os
 import re
+import shutil
 import sys
 import tempfile
 import warnings as test_warnings
@@ -10,7 +11,7 @@ from enum import auto
 from http import HTTPStatus
 from json import JSONDecodeError
 from pathlib import Path
-from subprocess import PIPE, Popen
+from subprocess import PIPE, Popen  # noqa: S404
 from typing import TYPE_CHECKING, Any
 
 import py
@@ -50,7 +51,7 @@ configure_logging(default_args())
 from rotkehlchen.tests.fixtures import *  # noqa: F403
 
 assert sys.version_info.major == 3, 'Need to use python 3 for rotki'
-assert sys.version_info.minor == 10, 'Need to use python 3.10 for rotki'
+assert sys.version_info.minor == 11, 'Need to use python 3.11 for rotki'
 
 
 def pytest_addoption(parser):
@@ -103,7 +104,7 @@ if sys.platform == 'darwin':
         with suppress(AttributeError):
             delattr(request.config._tmpdirhandler, '_basetemp')
 
-    @pytest.fixture()
+    @pytest.fixture
     def tmpdir(request, tmpdir_factory):
         """Return a temporary directory path object
         which is unique to each test function invocation,
@@ -135,7 +136,7 @@ def _fixture_profiler(request):
             TraceSampler,
         )
 
-        now = datetime.datetime.now(tz=datetime.timezone.utc)
+        now = datetime.datetime.now(tz=datetime.UTC)
         tmpdirname = tempfile.gettempdir()
         stack_path = Path(tmpdirname) / f'{now:%Y%m%d_%H%M}_stack.data'
         with open(stack_path, 'w', encoding='utf8') as stack_stream:
@@ -175,11 +176,15 @@ def get_cassette_dir(request: pytest.FixtureRequest) -> Path:
 def is_etherscan_rate_limited(response: dict[str, Any]) -> bool:
     """Checks if etherscan is rate limited.
     Suppression is for errors parsing when response does not match etherscan"""
-    result = False
+    rate_limited = False
     with suppress(JSONDecodeError, KeyError, UnicodeDecodeError, ValueError):
         body = jsonloads_dict(response['body']['string'])
-        result = int(body['status']) == 0 and 'rate limit reached' in body['result']
-    return result
+        rate_limited = (
+            int(body.get('status', 0)) == 0 and
+            (body_result := body.get('result', None)) is not None and
+            'rate limit reached' in body_result
+        )
+    return rate_limited
 
 
 @pytest.fixture(scope='module', name='vcr')
@@ -192,8 +197,7 @@ def vcr_fixture(vcr: 'VCR') -> 'VCR':
 
     def before_record_response(response: dict[str, Any]) -> dict[str, Any] | None:
         if (
-            'RECORD_CASSETTES' in os.environ and
-            response['status']['code'] != HTTPStatus.OK or
+            ('RECORD_CASSETTES' in os.environ and response['status']['code'] != HTTPStatus.OK) or
             is_etherscan_rate_limited(response)
         ):
             return None
@@ -201,6 +205,18 @@ def vcr_fixture(vcr: 'VCR') -> 'VCR':
         return response
 
     vcr.before_record_response = before_record_response
+
+    def beaconchain_matcher(r1, r2):
+        """
+        Special matcher to match the path of beaconcha.in validator query
+        no matter the order of path args
+        """
+        if r1.uri.startswith('https://beaconcha.in/api/v1/validator/') and r2.uri.startswith('https://beaconcha.in/api/v1/validator/') and r1.uri[38:42] != 'eth1':  # noqa: E501
+            return set(r1.uri[38:].split(',')) == set(r2.uri[38:].split(','))
+
+        return r1.uri == r2.uri and r1.method == r2.method  # normal check
+
+    vcr.register_matcher('beaconchain_matcher', beaconchain_matcher)
     return vcr
 
 
@@ -248,6 +264,9 @@ def fixture_vcr_base_dir() -> Path:
 
     # Clone repo if needed
     if (root_dir / '.git').exists() is False:
+        if root_dir.exists():  # test-caching dir exists but is not a git repo
+            shutil.rmtree(root_dir)  # that means accounting rules or other test-caching was pulled first. Delete and repull.  # noqa: E501
+
         cmd = f'git clone https://github.com/rotki/test-caching.git "{root_dir}"'
         log.debug(f'Cloning test caching repo to {root_dir}')
         os.popen(cmd).read()

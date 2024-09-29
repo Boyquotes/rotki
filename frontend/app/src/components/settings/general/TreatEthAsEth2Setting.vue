@@ -11,18 +11,18 @@ const { t } = useI18n();
 
 <template>
   <SettingsOption
-    #default="{ error, success, update }"
+    #default="{ error, success, updateImmediate }"
     setting="treatEth2AsEth"
     :error-message="t('general_settings.validation.treat_eth2_as_eth.error')"
   >
-    <VSwitch
+    <RuiSwitch
       v-model="treatEth2asEth"
-      class="general-settings__fields__treat-eth2-as-eth mb-2 mt-0"
+      class="general-settings__fields__treat-eth2-as-eth"
       color="primary"
       :label="t('general_settings.labels.treat_eth2_as_eth')"
       :success-messages="success"
       :error-messages="error"
-      @change="update($event)"
+      @update:model-value="updateImmediate($event)"
     />
   </SettingsOption>
 </template>

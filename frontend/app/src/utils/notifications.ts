@@ -2,10 +2,10 @@ import {
   NotificationCategory,
   type NotificationData,
   type NotificationPayload,
-  Severity
-} from '@rotki/common/lib/messages';
+  Severity,
+} from '@rotki/common';
 
-export const createNotification = (
+export function createNotification(
   id = 0,
   {
     display,
@@ -18,25 +18,27 @@ export const createNotification = (
     group,
     groupCount,
     i18nParam,
-    priority
+    priority,
   }: NotificationPayload = {
     title: '',
     message: '',
     severity: Severity.INFO,
-    category: NotificationCategory.DEFAULT
-  }
-): NotificationData => ({
-  title,
-  message,
-  severity,
-  display: display ?? false,
-  duration: duration ?? 5000,
-  id,
-  date: new Date(),
-  category,
-  action,
-  group,
-  groupCount,
-  i18nParam,
-  priority
-});
+    category: NotificationCategory.DEFAULT,
+  },
+): NotificationData {
+  return {
+    title,
+    message,
+    severity,
+    display: display ?? false,
+    duration: duration ?? 5000,
+    id,
+    date: new Date(),
+    category,
+    action,
+    group,
+    groupCount,
+    i18nParam,
+    priority,
+  };
+}

@@ -1,317 +1,347 @@
-import { Blockchain } from '@rotki/common/lib/blockchain';
-import { Severity } from '@rotki/common/lib/messages';
-import { type MaybeRef } from '@vueuse/core';
-import { isEmpty } from 'lodash-es';
+import { type Account, Blockchain, Severity } from '@rotki/common';
 import { TaskType } from '@/types/task-type';
 import { isBlockchain } from '@/types/blockchain/chains';
-import {
-  type AccountPayload,
-  type AddAccountsPayload,
-  type BaseAddAccountsPayload
-} from '@/types/blockchain/accounts';
-import { type TaskMeta } from '@/types/task';
 import { Section } from '@/types/status';
+import type { MaybeRef } from '@vueuse/core';
+import type { AccountPayload, AddAccountsPayload, XpubAccountPayload } from '@/types/blockchain/accounts';
+import type { TaskMeta } from '@/types/task';
+import type { AddressBookSimplePayload } from '@/types/eth-names';
+import type { Module } from '@/types/modules';
 
-export const useBlockchains = () => {
+interface EvmAccountAdditionSuccess {
+  type: 'success';
+  accounts: Account[];
+}
+
+interface EvmAccountAdditionFailure {
+  type: 'error';
+  error: Error;
+  account: AccountPayload;
+}
+
+interface AccountAdditionSuccess {
+  type: 'success';
+  address: string;
+}
+
+interface AccountAdditionFailure {
+  type: 'error';
+  error: Error;
+  account: AccountPayload | XpubAccountPayload;
+}
+
+interface UseBlockchainsReturn {
+  addAccounts: (chain: string, data: AddAccountsPayload | XpubAccountPayload) => Promise<void>;
+  addEvmAccounts: (payload: AddAccountsPayload) => Promise<void>;
+  detectEvmAccounts: () => Promise<void>;
+  fetchAccounts: (blockchain?: string, refreshEns?: boolean) => Promise<void>;
+  refreshAccounts: (blockchain?: MaybeRef<string>, periodic?: boolean) => Promise<void>;
+}
+
+function CHAIN_ORDER_COMPARATOR(chains: string[]): (a: Account, b: Account) => number {
+  return (
+    a: Account,
+    b: Account,
+  ): number => chains.indexOf(a.chain) - chains.indexOf(b.chain);
+}
+
+export function useBlockchains(): UseBlockchainsReturn {
   const { addAccount, fetch, addEvmAccount } = useBlockchainAccounts();
-  const { getAccountsByChain } = useAccountBalances();
-  const { fetchBlockchainBalances } = useBlockchainBalances();
-  const { fetchLoopringBalances } = useEthBalancesStore();
+  const { fetchBlockchainBalances, fetchLoopringBalances } = useBlockchainBalances();
   const { fetchDetected } = useBlockchainTokensStore();
+  const { fetchEnsNames } = useAddressesNamesStore();
   const { enableModule } = useSettingsStore();
   const { reset: resetDefi } = useDefiStore();
   const { resetDefiStatus } = useStatusStore();
-  const { detectEvmAccounts: detectEvmAccountsCaller } =
-    useBlockchainAccountsApi();
-  const { getChainName, supportsTransactions } = useSupportedChains();
+  const { detectEvmAccounts: detectEvmAccountsCaller } = useBlockchainAccountsApi();
+  const { getChainName, supportsTransactions, evmChains, isEvm, supportedChains } = useSupportedChains();
+  const { getAddresses } = useBlockchainStore();
 
-  const { isTaskRunning } = useTaskStore();
+  const { isTaskRunning, awaitTask } = useTaskStore();
   const { notify } = useNotificationsStore();
   const { t } = useI18n();
 
-  const { resetStatus: resetNftSectionStatus } = useStatusUpdater(
-    Section.NON_FUNGIBLE_BALANCES
-  );
+  const { resetStatus: resetNftSectionStatus } = useStatusUpdater(Section.NON_FUNGIBLE_BALANCES);
+  const {
+    notifyUser,
+    createFailureNotification,
+    notifyFailedToAddAddress,
+  } = useAccountAdditionNotifications();
 
-  const getNewAccountPayload = (
-    chain: Blockchain,
-    payload: AccountPayload[]
-  ): AccountPayload[] => {
-    const knownAddresses = getAccountsByChain(chain);
-    return payload.filter(({ xpub, address }) => {
-      const key = (xpub?.xpub || address!).toLocaleLowerCase();
-
+  const getNewAccountPayload = (chain: string, payload: AccountPayload[]): AccountPayload[] => {
+    const knownAddresses: string[] = getAddresses(chain);
+    return payload.filter(({ address }) => {
+      const key = address.toLocaleLowerCase();
       return !knownAddresses.includes(key);
     });
   };
 
-  const fetchAccounts = async (
-    blockchain?: Blockchain,
-    refreshEns: boolean = false
-  ): Promise<void> => {
-    const promises: Promise<any>[] = [];
+  const fetchAccounts = async (blockchain?: string, refreshEns: boolean = false): Promise<void> => {
+    const chains = blockchain ? [blockchain] : get(supportedChains).map(chain => chain.id);
+    await awaitParallelExecution(chains, chain => chain, fetch, 2);
 
-    const chains = Object.values(Blockchain);
-    if (!blockchain) {
-      promises.push(...chains.map(chain => fetch(chain, refreshEns)));
-    } else {
-      promises.push(fetch(blockchain, refreshEns));
-    }
+    const namesPayload: AddressBookSimplePayload[] = [];
 
-    await Promise.allSettled(promises);
+    chains.forEach((chain) => {
+      if (!get(isEvm(chain)))
+        return;
+
+      const addresses = getAddresses(chain);
+      namesPayload.push(...addresses.map(address => ({ address, blockchain: chain })));
+    });
+
+    if (namesPayload.length > 0)
+      startPromise(fetchEnsNames(namesPayload, refreshEns));
   };
 
-  const refreshAccounts = async (
-    blockchain?: MaybeRef<Blockchain>,
-    periodic = false
-  ) => {
+  const refreshAccounts = async (blockchain?: MaybeRef<string>, periodic = false): Promise<void> => {
     const chain = get(blockchain);
     await fetchAccounts(chain, true);
 
     const isEth = chain === Blockchain.ETH;
     const isEth2 = chain === Blockchain.ETH2;
 
-    const pending: Promise<any>[] = [
-      fetchBlockchainBalances(
-        {
-          blockchain: chain,
-          ignoreCache: isEth2
-        },
-        periodic
-      )
-    ];
+    const pending: Promise<any>[] = [fetchBlockchainBalances({ blockchain: chain, ignoreCache: isEth2 }, periodic)];
 
     if (isEth || !chain) {
       pending.push(fetchLoopringBalances(false));
 
-      if (isEth) {
+      if (isEth)
         startPromise(refreshAccounts(Blockchain.ETH2));
-      }
     }
 
     await Promise.allSettled(pending);
   };
 
-  const addEvmAccounts = async (
-    payload: BaseAddAccountsPayload
+  const resetStatuses = (): void => {
+    resetDefi();
+    resetDefiStatus();
+    resetNftSectionStatus();
+  };
+
+  const completeAccountAddition = async (
+    params: { addedAccounts: Account[]; modulesToEnable?: Module[]; chain?: string },
   ): Promise<void> => {
-    const finishAddition = async (chain: Blockchain, addresses: string[]) => {
-      const modules = payload.modules;
-      if (chain === Blockchain.ETH) {
-        if (modules) {
+    const {
+      addedAccounts,
+      modulesToEnable,
+      chain,
+    } = params;
+    resetStatuses();
+
+    await refreshAccounts(chain);
+    const chains = chain ? [chain] : get(supportedChains).map(chain => chain.id);
+    // Sort accounts by chain, so they are called in order
+    const sortedAccounts = addedAccounts.sort(CHAIN_ORDER_COMPARATOR(chains));
+
+    await awaitParallelExecution(
+      sortedAccounts,
+      item => item.address + item.chain,
+      async (account) => {
+        const { chain, address }: Account = account;
+        if (chain === Blockchain.ETH && modulesToEnable) {
           await enableModule({
-            enable: payload.modules,
-            addresses
+            enable: modulesToEnable,
+            addresses: [address],
           });
         }
-        resetDefi();
-        resetDefiStatus();
-        resetNftSectionStatus();
-      }
 
-      if (supportsTransactions(chain)) {
-        await fetchDetected(chain, addresses);
-      }
-      await refreshAccounts(chain);
-    };
+        if (supportsTransactions(chain))
+          await fetchDetected(chain, [address]);
+      },
+      2,
+    );
+  };
 
-    const promiseResult = await Promise.allSettled(
-      payload.payload.map(async account => {
-        const addresses = await addEvmAccount(account);
-        if (isEmpty(addresses)) {
-          return notify({
-            title: t('actions.balances.blockchain_accounts_add.error.title', {
-              blockchain: 'EVM'
-            }),
-            message: t(
-              'actions.balances.blockchain_accounts_add.error.empty_addresses_description',
-              { address: account.address }
-            ),
-            display: true
-          });
-        }
-        for (const chain in addresses) {
+  const addSingleEvmAddress = async (account: AccountPayload): Promise<EvmAccountAdditionSuccess | EvmAccountAdditionFailure> => {
+    const addedAccounts: Account[] = [];
+
+    try {
+      const { added, ...result } = await addEvmAccount(account);
+
+      if (added) {
+        const [address, chains] = Object.entries(added)[0];
+        const isAll = chains.length === 1 && chains[0] === 'all';
+        const usedChains = isAll ? get(evmChains) : chains;
+
+        usedChains.forEach((chain) => {
           if (!isBlockchain(chain)) {
             logger.error(`${chain} was not a valid blockchain`);
-            continue;
+            return;
           }
-          startPromise(finishAddition(chain, addresses[chain]));
-        }
-      })
-    );
 
-    const failedPayload: AccountPayload[] = [];
-    if (
-      payload.payload.length === 1 &&
-      promiseResult[0].status === 'rejected'
-    ) {
-      throw promiseResult[0].reason;
-    }
+          addedAccounts.push({
+            chain,
+            address,
+          });
+        });
 
-    promiseResult.forEach((res, index) => {
-      if (res.status === 'rejected') {
-        logger.error(res.reason.message);
-        failedPayload.push(payload.payload[index]);
+        notifyUser({ account, isAll, chains });
       }
-    });
 
-    if (failedPayload.length > 0) {
-      const titleError = t(
-        'actions.balances.blockchain_accounts_add.error.title',
-        { blockchain: 'EVM' }
-      );
-      const description = t(
-        'actions.balances.blockchain_accounts_add.error.failed_list_description',
-        {
-          list: failedPayload.map(({ address }) => `- ${address}`).join('\n'),
-          address: payload.payload.length,
-          blockchain: 'EVM'
-        }
-      );
+      createFailureNotification(result, account);
 
-      notify({
-        title: titleError,
-        message: description,
-        display: true
-      });
+      return {
+        type: 'success',
+        accounts: addedAccounts,
+      };
+    }
+    catch (error: any) {
+      logger.error(error.message);
+      return {
+        type: 'error',
+        error,
+        account,
+      };
     }
   };
 
-  const addAccounts = async ({
-    blockchain,
-    payload,
-    modules
-  }: AddAccountsPayload): Promise<void> => {
-    if (get(isTaskRunning(TaskType.ADD_ACCOUNT))) {
-      logger.debug(`${TaskType[TaskType.ADD_ACCOUNT]} is already running.`);
+  const addMultipleEvmAccounts = async (payload: AddAccountsPayload): Promise<void> => {
+    const addedAccounts: Account[] = [];
+    const failedToAddAccounts: AccountPayload[] = [];
+
+    await awaitParallelExecution(
+      payload.payload,
+      account => account.address,
+      async (account) => {
+        const result = await addSingleEvmAddress(account);
+        if (result.type === 'success')
+          addedAccounts.push(...result.accounts);
+
+        else
+          failedToAddAccounts.push(result.account);
+      }
+      , 2,
+    );
+
+    if (failedToAddAccounts.length > 0)
+      notifyFailedToAddAddress(failedToAddAccounts, payload.payload.length);
+
+    startPromise(completeAccountAddition({ addedAccounts, modulesToEnable: payload.modules }));
+  };
+
+  const addEvmAccounts = async (payload: AddAccountsPayload): Promise<void> => {
+    if (payload.payload.length === 1) {
+      const addResult = await addSingleEvmAddress(payload.payload[0]);
+      if (addResult.type === 'error')
+        throw addResult.error;
+
+      startPromise(completeAccountAddition({ addedAccounts: addResult.accounts, modulesToEnable: payload.modules }));
+    }
+    else {
+      startPromise(addMultipleEvmAccounts(payload));
+    }
+  };
+
+  const addSingleAccount = async (
+    account: AccountPayload | XpubAccountPayload,
+    chain: string,
+  ): Promise<AccountAdditionSuccess | AccountAdditionFailure> => {
+    const isXpub = 'xpub' in account;
+    try {
+      const address = await addAccount(chain, isXpub ? account : [account]);
+      return {
+        type: 'success',
+        address,
+      };
+    }
+    catch (error: any) {
+      logger.error(error.message);
+      return {
+        type: 'error',
+        account,
+        error,
+      };
+    }
+  };
+
+  const addMultipleAccounts = async (payload: AccountPayload[], chain: string, modules?: (Module)[]): Promise<void> => {
+    const addedAccounts: Account[] = [];
+    const failedToAddAccounts: AccountPayload[] = [];
+
+    await awaitParallelExecution(
+      payload,
+      account => account.address,
+      async (account) => {
+        const result = await addSingleAccount(account, chain);
+        if (result.type === 'success') {
+          addedAccounts.push({ address: result.address, chain });
+        }
+        else {
+          assert(!('xpub' in result.account));
+          failedToAddAccounts.push(result.account);
+        }
+      }
+      , 2,
+    );
+
+    if (failedToAddAccounts.length > 0)
+      notifyFailedToAddAddress(failedToAddAccounts, payload.length, chain);
+
+    startPromise(completeAccountAddition({ addedAccounts, modulesToEnable: modules, chain }));
+  };
+
+  const addAccounts = async (chain: string, payload: AddAccountsPayload | XpubAccountPayload): Promise<void> => {
+    const taskType = TaskType.ADD_ACCOUNT;
+    if (get(isTaskRunning(taskType))) {
+      logger.debug(`${TaskType[taskType]} is already running.`);
       return;
     }
-    const filteredPayload = getNewAccountPayload(blockchain, payload);
-    if (filteredPayload.length === 0) {
-      const title = t('actions.balances.blockchain_accounts_add.no_new.title', {
-        blockchain: get(getChainName(blockchain))
+    const isXpub = 'xpub' in payload;
+    const modules = isXpub ? [] : payload.modules;
+
+    const filteredPayload = isXpub ? [] : getNewAccountPayload(chain, payload.payload);
+    if (filteredPayload.length === 0 && !isXpub) {
+      const title = t('actions.balances.blockchain_accounts_add.task.title', {
+        blockchain: get(getChainName(chain)),
       });
-      const description = t(
-        'actions.balances.blockchain_accounts_add.no_new.description'
-      );
+      const message = t('actions.balances.blockchain_accounts_add.no_new.description');
       notify({
         title,
-        message: description,
+        message,
         severity: Severity.INFO,
-        display: true
+        display: true,
       });
       return;
     }
 
-    const registeredAddresses: string[] = [];
-    const promiseResult = await Promise.allSettled(
-      filteredPayload.map(data => addAccount(blockchain, data))
-    );
+    if (filteredPayload.length === 1 || isXpub) {
+      const addResult = await addSingleAccount(isXpub ? payload : filteredPayload[0], chain);
+      if (addResult.type === 'error')
+        throw addResult.error;
 
-    const failedPayload: AccountPayload[] = [];
-
-    if (
-      filteredPayload.length === 1 &&
-      promiseResult[0].status === 'rejected'
-    ) {
-      throw promiseResult[0].reason;
+      startPromise(completeAccountAddition({
+        addedAccounts: [{
+          address: addResult.address,
+          chain,
+        }],
+        modulesToEnable: modules,
+      }));
     }
-
-    const isXpub = payload.length === 1 && payload[0].xpub;
-
-    promiseResult.forEach((res, index) => {
-      if (res.status === 'fulfilled' && (res.value !== '' || isXpub)) {
-        registeredAddresses.push(res.value);
-      } else {
-        if (res.status === 'rejected') {
-          logger.error(res.reason.message);
-        }
-        failedPayload.push(payload[index]);
-      }
-    });
-
-    const titleError = t(
-      'actions.balances.blockchain_accounts_add.error.title',
-      { blockchain }
-    );
-
-    if (failedPayload.length > 0) {
-      const description = t(
-        'actions.balances.blockchain_accounts_add.error.failed_list_description',
-        {
-          list: failedPayload.map(({ address }) => `- ${address}`).join('\n'),
-          address: filteredPayload.length,
-          blockchain
-        }
-      );
-
-      notify({
-        title: titleError,
-        message: description,
-        display: true
-      });
-    }
-
-    if (registeredAddresses.length > 0) {
-      const refresh = async () => {
-        if (blockchain === Blockchain.ETH && modules) {
-          await enableModule({
-            enable: modules,
-            addresses: registeredAddresses
-          });
-        }
-        resetDefi();
-        resetDefiStatus();
-        const detectAndRefresh = async () => {
-          if (supportsTransactions(blockchain)) {
-            await fetchDetected(blockchain, registeredAddresses);
-          }
-          await refreshAccounts(blockchain);
-        };
-        await Promise.allSettled([detectAndRefresh()]);
-        resetNftSectionStatus();
-      };
-      try {
-        await fetchAccounts(blockchain);
-        startPromise(refresh());
-      } catch (e: any) {
-        logger.error(e);
-        const description = t(
-          'actions.balances.blockchain_accounts_add.error.description',
-          {
-            error: e.message,
-            address: filteredPayload.length,
-            blockchain
-          }
-        );
-        notify({
-          title: titleError,
-          message: description,
-          display: true
-        });
-      }
+    else {
+      startPromise(addMultipleAccounts(filteredPayload, chain, modules));
     }
   };
 
-  const { awaitTask } = useTaskStore();
-  const detectEvmAccounts = async () => {
+  const detectEvmAccounts = async (): Promise<void> => {
     try {
       const taskType = TaskType.DETECT_EVM_ACCOUNTS;
       const { taskId } = await detectEvmAccountsCaller();
-      const { result } = await awaitTask<any, TaskMeta>(taskId, taskType, {
-        title: t('actions.detect_evm_accounts.task.title').toString()
+      await awaitTask<unknown, TaskMeta>(taskId, taskType, {
+        title: t('actions.detect_evm_accounts.task.title'),
       });
-
-      return result;
-    } catch (e: any) {
-      logger.error(e);
-      notify({
-        title: t('actions.detect_evm_accounts.error.title').toString(),
-        message: t('actions.detect_evm_accounts.error.message', {
-          message: e.message
-        }).toString(),
-        display: true
-      });
+    }
+    catch (error: any) {
+      if (!isTaskCancelled(error)) {
+        logger.error(error);
+        notify({
+          title: t('actions.detect_evm_accounts.error.title'),
+          message: t('actions.detect_evm_accounts.error.message', {
+            message: error.message,
+          }),
+          display: true,
+        });
+      }
     }
   };
 
@@ -320,6 +350,6 @@ export const useBlockchains = () => {
     addEvmAccounts,
     detectEvmAccounts,
     fetchAccounts,
-    refreshAccounts
+    refreshAccounts,
   };
-};
+}

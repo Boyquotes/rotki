@@ -1,28 +1,24 @@
 import warnings as test_warnings
 from unittest.mock import patch
 
+import pytest
 import requests
 
 from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.assets.converters import asset_from_coinbase
 from rotkehlchen.constants import ZERO
-from rotkehlchen.constants.assets import A_1INCH, A_BTC, A_ETH, A_USD, A_USDC
+from rotkehlchen.constants.assets import A_1INCH, A_BTC, A_ETH, A_EUR, A_SOL, A_USDC
+from rotkehlchen.db.filtering import TradesFilterQuery
 from rotkehlchen.errors.asset import UnknownAsset
 from rotkehlchen.exchanges.coinbase import Coinbase, trade_from_conversion
 from rotkehlchen.exchanges.data_structures import AssetMovement, Trade
 from rotkehlchen.fval import FVal
 from rotkehlchen.history.events.structures.base import HistoryEvent
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
-from rotkehlchen.tests.utils.exchanges import (
-    BUYS_RESPONSE,
-    DEPOSITS_RESPONSE,
-    SELLS_RESPONSE,
-    WITHDRAWALS_RESPONSE,
-    mock_normal_coinbase_query,
-)
-from rotkehlchen.tests.utils.history import TEST_END_TS
+from rotkehlchen.tests.utils.exchanges import TRANSACTIONS_RESPONSE, mock_normal_coinbase_query
 from rotkehlchen.tests.utils.mock import MockResponse
 from rotkehlchen.types import AssetMovementCategory, Location, TimestampMS, TradeType
+from rotkehlchen.utils.misc import ts_now
 
 
 def test_name():
@@ -145,6 +141,7 @@ def test_coinbase_query_balances_unexpected_data(function_scope_coinbase):
             response_str,
             expected_warnings_num,
             expected_errors_num,
+            expected_balances_for_no_warnings=1,
             contains_expected_msg=None,
     ):
         def mock_coinbase_accounts(url, timeout):  # pylint: disable=unused-argument
@@ -162,9 +159,10 @@ def test_coinbase_query_balances_unexpected_data(function_scope_coinbase):
             assert len(warnings) == 0
             assert len(errors) == 0
             assert msg == ''
-            assert len(balances) == 1
-            assert balances[A_BTC].amount == FVal('4')
-            assert balances[A_BTC].usd_value == FVal('6')
+            assert len(balances) == expected_balances_for_no_warnings
+            if len(balances) != 0:
+                assert balances[A_BTC].amount == FVal('4')
+                assert balances[A_BTC].usd_value == FVal('6')
         else:
             assert len(warnings) == expected_warnings_num
             assert len(errors) == expected_errors_num
@@ -184,22 +182,22 @@ def test_coinbase_query_balances_unexpected_data(function_scope_coinbase):
     )
     # account entry without "balance" key
     input_data = data.replace('"balance"', '"foo"')
-    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=0, expected_errors_num=1)
+    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=0, expected_errors_num=0, expected_balances_for_no_warnings=0)  # noqa: E501
     # account entry without amount in "balance"
     input_data = data.replace('"amount"', '"foo"')
-    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=0, expected_errors_num=1)
+    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=0, expected_errors_num=0, expected_balances_for_no_warnings=0)  # noqa: E501
     # account entry without currency in "balance"
     input_data = data.replace('"currency"', '"foo"')
-    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=0, expected_errors_num=1)
+    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=0, expected_errors_num=0, expected_balances_for_no_warnings=0)  # noqa: E501
     # account entry with invalid balance amount
     input_data = data.replace('"4.00000000"', '"csadasdsd"')
-    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=0, expected_errors_num=1)
+    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=0, expected_errors_num=0, expected_balances_for_no_warnings=0)  # noqa: E501
     # account entry with unknown asset
     input_data = data.replace('"BTC"', '"DDSADSAD"')
-    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=1, expected_errors_num=0)
+    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=0, expected_errors_num=0, expected_balances_for_no_warnings=0)  # noqa: E501
     # account entry with invalid asset
     input_data = data.replace('"BTC"', 'null')
-    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=0, expected_errors_num=1)
+    query_coinbase_and_test_local_mock(input_data, expected_warnings_num=0, expected_errors_num=0, expected_balances_for_no_warnings=0)  # noqa: E501
 
 
 def test_coinbase_query_trade_history(function_scope_coinbase):
@@ -209,7 +207,7 @@ def test_coinbase_query_trade_history(function_scope_coinbase):
     with patch.object(coinbase.session, 'get', side_effect=mock_normal_coinbase_query):
         trades = coinbase.query_trade_history(
             start_ts=0,
-            end_ts=TEST_END_TS,
+            end_ts=ts_now(),
             only_cache=False,
         )
 
@@ -219,27 +217,27 @@ def test_coinbase_query_trade_history(function_scope_coinbase):
     assert len(errors) == 0
     assert len(trades) == 2
     expected_trades = [Trade(
-        timestamp=1459024920,
+        timestamp=1566687695,
         location=Location.COINBASE,
         base_asset=A_ETH,
-        quote_asset=A_USD,
-        trade_type=TradeType.SELL,
-        amount=FVal('100.45'),
-        rate=FVal('88.90014932802389248382279741'),
-        fee=FVal('10.1'),
-        fee_currency=A_USD,
-        link='1e14d574-30fa-5d85-b02c-6be0d851d61d',
-    ), Trade(
-        timestamp=1500705839,
-        location=Location.COINBASE,
-        base_asset=A_BTC,
-        quote_asset=A_USD,
+        quote_asset=A_EUR,
         trade_type=TradeType.BUY,
-        amount=FVal('486.34313725'),
-        rate=FVal('9.997920454875299055122012005'),
-        fee=FVal('1.01'),
-        fee_currency=A_USD,
-        link='9e14d574-30fa-5d85-b02c-6be0d851d61d',
+        amount=FVal('0.05772716'),
+        rate=FVal('190.378324518302996371205512275331057339387560378858062651964863679418838550173'),
+        fee=None,
+        fee_currency=None,
+        link='txid-1',
+    ), Trade(
+        timestamp=1569366095,
+        location=Location.COINBASE,
+        base_asset=A_ETH,
+        quote_asset=A_EUR,
+        trade_type=TradeType.SELL,
+        amount=FVal('0.05772715'),
+        rate=FVal('190.205128782557254255579913437611245315245945798467445560711034582514466763040'),
+        fee=None,
+        fee_currency=None,
+        link='txid-2',
     )]
     assert trades == expected_trades
 
@@ -247,7 +245,7 @@ def test_coinbase_query_trade_history(function_scope_coinbase):
     with patch.object(coinbase.session, 'get', side_effect=mock_normal_coinbase_query):
         trades = coinbase.query_trade_history(
             start_ts=0,
-            end_ts=1459024921,
+            end_ts=1566689695,
             only_cache=False,
         )
 
@@ -256,68 +254,63 @@ def test_coinbase_query_trade_history(function_scope_coinbase):
     assert len(warnings) == 0
     assert len(errors) == 0
     assert len(trades) == 1
-    assert trades[0].trade_type == TradeType.SELL
-    assert trades[0].timestamp == 1459024920
+    assert trades[0].trade_type == TradeType.BUY
+    assert trades[0].timestamp == 1566687695
+
+
+def _create_coinbase_mock(transactions_response):
+    """Creates a mock function used for mocking Coinbase API responses.
+
+    Mocks both the transactions and accounts endpoints with mock data.
+    """
+    def mock_coinbase_query(url, **kwargs):  # pylint: disable=unused-argument
+        if 'transaction' in url:
+            if 'next-page' in url:
+                return MockResponse(200, TRANSACTIONS_RESPONSE)
+            # else
+            return MockResponse(200, transactions_response)
+        if 'accounts' in url:
+            # keep it simple just return a single ID and ignore the rest of the fields
+            return MockResponse(200, '{"data": [{"id": "5fs23", "updated_at": "2020-06-08T02:32:16Z"}]}')  # noqa: E501
+        # else
+        raise AssertionError(f'Unexpected url {url} for test')
+
+    return mock_coinbase_query
 
 
 def query_coinbase_and_test(
         coinbase,
-        query_fn_name,
-        buys_response=BUYS_RESPONSE,
-        buys_paginated_end=BUYS_RESPONSE,
-        sells_response=SELLS_RESPONSE,
-        sells_paginated_end=SELLS_RESPONSE,
-        deposits_response=DEPOSITS_RESPONSE,
-        withdrawals_response=WITHDRAWALS_RESPONSE,
+        transactions_response=TRANSACTIONS_RESPONSE,
         expected_warnings_num=0,
         expected_errors_num=0,
         # Since this test only mocks as breaking only one of the two actions by default
         expected_actions_num=1,
+        expected_ws_messages_num=0,
 ):
-    def mock_coinbase_query(url, **kwargs):  # pylint: disable=unused-argument
-        if 'buys' in url:
-            if 'next-page' in url:
-                return MockResponse(200, buys_paginated_end)
-            # else
-            return MockResponse(200, buys_response)
-        if 'sells' in url:
-            if 'next-page' in url:
-                return MockResponse(200, sells_paginated_end)
-            # else
-            return MockResponse(200, sells_response)
-        if 'deposits' in url:
-            return MockResponse(200, deposits_response)
-        if 'withdrawals' in url:
-            return MockResponse(200, withdrawals_response)
-        if 'accounts' in url:
-            # keep it simple just return a single ID and ignore the rest of the fields
-            return MockResponse(200, '{"data": [{"id": "5fs23"}]}')
-        # else
-        raise AssertionError(f'Unexpected url {url} for test')
+    now = ts_now()
 
-    query_fn = getattr(coinbase, query_fn_name)
+    mock_coinbase_query = _create_coinbase_mock(transactions_response)
+
+    with coinbase.db.user_write() as write_cursor:  # clean saved ranges to try again
+        coinbase.db.purge_exchange_data(write_cursor=write_cursor, location=Location.COINBASE)
     with patch.object(coinbase.session, 'get', side_effect=mock_coinbase_query):
-        if query_fn_name == 'query_online_trade_history':
-            actions, _ = query_fn(
-                start_ts=0,
-                end_ts=TEST_END_TS,
-            )
-        else:
-            actions = query_fn(
-                start_ts=0,
-                end_ts=TEST_END_TS,
-            )
+        coinbase._query_transactions()
+
+    filter_query = TradesFilterQuery.make(from_ts=0, to_ts=now, location=Location.COINBASE)
+    with coinbase.db.conn.read_ctx() as cursor:
+        actions = coinbase.db.get_trades(
+            cursor=cursor,
+            filter_query=filter_query,
+            has_premium=True,
+        )
 
     errors = coinbase.msg_aggregator.consume_errors()
     warnings = coinbase.msg_aggregator.consume_warnings()
-    if expected_errors_num == 0 and expected_warnings_num == 0 and expected_actions_num == 1:
-        assert len(actions) == 2
-        assert len(errors) == 0
-        assert len(warnings) == 0
-    else:
-        assert len(actions) == expected_actions_num
-        assert len(errors) == expected_errors_num
-        assert len(warnings) == expected_warnings_num
+    assert len(actions) == expected_actions_num
+    assert len(errors) == expected_errors_num
+    assert len(warnings) == expected_warnings_num
+    if expected_ws_messages_num != 0:
+        assert len(coinbase.msg_aggregator.rotki_notifier.messages) == expected_ws_messages_num
 
 
 def test_coinbase_query_trade_history_unexpected_data(function_scope_coinbase):
@@ -328,119 +321,79 @@ def test_coinbase_query_trade_history_unexpected_data(function_scope_coinbase):
     # first query with proper data and expect no errors
     query_coinbase_and_test(
         coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
         expected_warnings_num=0,
         expected_errors_num=0,
-    )
-
-    # fallback to payout_at if created_date is missing
-    broken_response = BUYS_RESPONSE.replace('"created_at": "2017-07-21T23:43:59-07:00",', '')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
-        buys_response=broken_response,
-        expected_warnings_num=0,
-        expected_errors_num=0,
+        expected_actions_num=2,
     )
 
     # invalid created_at timestamp
-    broken_response = SELLS_RESPONSE.replace('"2016-03-26T13:42:00-07:00"', '"dadssd"')
+    broken_response = TRANSACTIONS_RESPONSE.replace('"2019-08-24T23:01:35Z"', '"dadssd"')
     query_coinbase_and_test(
         coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
-        sells_response=broken_response,
+        transactions_response=broken_response,
         expected_warnings_num=0,
         expected_errors_num=1,
-    )
-
-    # unknown asset
-    broken_response = BUYS_RESPONSE.replace('"BTC"', '"dsadsad"')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
-        buys_response=broken_response,
-        expected_warnings_num=1,
-        expected_errors_num=0,
     )
 
     # invalid asset format
-    broken_response = BUYS_RESPONSE.replace('"BTC"', '123')
+    broken_response = TRANSACTIONS_RESPONSE.replace('"ETH"', '123')
     query_coinbase_and_test(
         coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
-        buys_response=broken_response,
+        transactions_response=broken_response,
         expected_warnings_num=0,
-        expected_errors_num=1,
+        expected_errors_num=4,
+        expected_actions_num=0,
     )
 
-    # invalid trade type
-    broken_response = BUYS_RESPONSE.replace('"buy"', 'null')
+    # invalid transaction type
+    broken_response = TRANSACTIONS_RESPONSE.replace('"buy",', 'null,')
     query_coinbase_and_test(
         coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
-        buys_response=broken_response,
+        transactions_response=broken_response,
         expected_warnings_num=0,
-        expected_errors_num=1,
+        expected_errors_num=0,
+        expected_actions_num=1,
     )
 
     # invalid amount
-    broken_response = BUYS_RESPONSE.replace('"486.34313725"', '"gfgfg"')
+    broken_response = TRANSACTIONS_RESPONSE.replace('"0.05772716"', '"gfgfg"')
     query_coinbase_and_test(
         coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
-        buys_response=broken_response,
+        transactions_response=broken_response,
         expected_warnings_num=0,
         expected_errors_num=1,
     )
 
-    # invalid subtotal amount
-    broken_response = BUYS_RESPONSE.replace('"4862.42"', 'false')
+    # invalid native amount
+    broken_response = TRANSACTIONS_RESPONSE.replace('"10.99"', 'false')
     query_coinbase_and_test(
         coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
-        buys_response=broken_response,
-        expected_warnings_num=0,
-        expected_errors_num=1,
-    )
-
-    # invalid fee amount
-    broken_response = BUYS_RESPONSE.replace('"1.01"', '"aas"')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
-        buys_response=broken_response,
-        expected_warnings_num=0,
-        expected_errors_num=1,
-    )
-
-    # unknown fee asset
-    broken_response = BUYS_RESPONSE.replace('"USD"', '"DSADSA"')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
-        buys_response=broken_response,
-        expected_warnings_num=1,
-        expected_errors_num=0,
-    )
-
-    # invalid fee asset
-    broken_response = BUYS_RESPONSE.replace('"USD"', '[]')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
-        buys_response=broken_response,
+        transactions_response=broken_response,
         expected_warnings_num=0,
         expected_errors_num=1,
     )
 
     # missing key error
-    broken_response = SELLS_RESPONSE.replace('  "status": "completed",', '')
+    broken_response = TRANSACTIONS_RESPONSE.replace('"status": "completed",', '')
     query_coinbase_and_test(
         coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
-        buys_response=broken_response,
+        transactions_response=broken_response,
         expected_warnings_num=0,
-        expected_errors_num=1,
+        expected_errors_num=2,
+        expected_actions_num=0,
+    )
+
+
+@pytest.mark.parametrize('function_scope_initialize_mock_rotki_notifier', [True])
+def test_query_trade_history_unknown_asset(function_scope_coinbase):
+    """Test that coinbase trade history query handles unknown asset properly"""
+    query_coinbase_and_test(
+        coinbase=function_scope_coinbase,
+        transactions_response=TRANSACTIONS_RESPONSE.replace('"ETH"', '"dsadsad"'),
+        expected_warnings_num=0,
+        expected_errors_num=0,
+        expected_actions_num=0,
+        expected_ws_messages_num=4,
     )
 
 
@@ -449,24 +402,16 @@ def test_coinbase_query_trade_history_paginated(function_scope_coinbase):
     coinbase = function_scope_coinbase
     coinbase.cache_ttl_secs = 0
 
-    paginated_buys_response = BUYS_RESPONSE.replace(
+    paginated_transactions_response = TRANSACTIONS_RESPONSE.replace(
         '"next_uri": null',
-        '"next_uri": "/v2/buys/?next-page"',
+        '"next_uri": "/v2/transactions/?next-page"',
     )
-
-    paginated_sells_response = SELLS_RESPONSE.replace(
-        '"next_uri": null',
-        '"next_uri": "/v2/sells/?next-page"',
-    )
-
     query_coinbase_and_test(
         coinbase=coinbase,
-        query_fn_name='query_online_trade_history',
         expected_warnings_num=0,
         expected_errors_num=0,
-        expected_actions_num=4,
-        buys_response=paginated_buys_response,
-        sells_response=paginated_sells_response,
+        expected_actions_num=2,
+        transactions_response=paginated_transactions_response,
     )
 
 
@@ -475,38 +420,28 @@ def test_coinbase_query_deposit_withdrawals(function_scope_coinbase):
     coinbase = function_scope_coinbase
 
     with patch.object(coinbase.session, 'get', side_effect=mock_normal_coinbase_query):
-        movements = coinbase.query_online_deposits_withdrawals(
+        movements = coinbase.query_deposits_withdrawals(
             start_ts=0,
-            end_ts=1566726126,
+            end_ts=ts_now(),
+            only_cache=False,
         )
 
     warnings = coinbase.msg_aggregator.consume_warnings()
     errors = coinbase.msg_aggregator.consume_errors()
     assert len(warnings) == 0
     assert len(errors) == 0
-    assert len(movements) == 5
+    assert len(movements) == 3
     expected_movements = [AssetMovement(
         location=Location.COINBASE,
         category=AssetMovementCategory.DEPOSIT,
-        timestamp=1519001640,
         address=None,
-        transaction_id=None,
-        asset=A_USD,
-        amount=FVal('55.00'),
-        fee_asset=A_USD,
-        fee=FVal('0.05'),
-        link='1130eaec-07d7-54c4-a72c-2e92826897df',
-    ), AssetMovement(
-        location=Location.COINBASE,
-        category=AssetMovementCategory.WITHDRAWAL,
-        address=None,
-        transaction_id=None,
-        timestamp=1485895742,
-        asset=A_USD,
-        amount=FVal('10.00'),
-        fee_asset=A_USD,
-        fee=FVal('0.01'),
-        link='146eaec-07d7-54c4-a72c-2e92826897df',
+        transaction_id='ccc',
+        timestamp=1502554304,
+        asset=A_BTC,
+        amount=FVal('0.10181673'),
+        fee_asset=A_BTC,
+        fee=ZERO,
+        link='https://blockchain.info/tx/ccc',
     ), AssetMovement(
         location=Location.COINBASE,
         category=AssetMovementCategory.WITHDRAWAL,
@@ -529,38 +464,24 @@ def test_coinbase_query_deposit_withdrawals(function_scope_coinbase):
         fee_asset=A_ETH,
         fee=ZERO,
         link='id2',
-    ), AssetMovement(
-        location=Location.COINBASE,
-        category=AssetMovementCategory.DEPOSIT,
-        address=None,
-        transaction_id='ccc',
-        timestamp=1502554304,
-        asset=A_BTC,
-        amount=FVal('0.10181673'),
-        fee_asset=A_BTC,
-        fee=ZERO,
-        link='https://blockchain.info/tx/ccc',
     )]
     assert expected_movements == movements
 
     # and now try to query within a specific range
     with patch.object(coinbase.session, 'get', side_effect=mock_normal_coinbase_query):
-        movements = coinbase.query_online_deposits_withdrawals(
+        movements = coinbase.query_deposits_withdrawals(
             start_ts=0,
             end_ts=1519001640,
+            only_cache=False,
         )
 
     warnings = coinbase.msg_aggregator.consume_warnings()
     errors = coinbase.msg_aggregator.consume_errors()
     assert len(warnings) == 0
     assert len(errors) == 0
-    assert len(movements) == 3
+    assert len(movements) == 1
     assert movements[0].category == AssetMovementCategory.DEPOSIT
-    assert movements[0].timestamp == 1519001640
-    assert movements[1].category == AssetMovementCategory.WITHDRAWAL
-    assert movements[1].timestamp == 1485895742
-    assert movements[2].category == AssetMovementCategory.DEPOSIT
-    assert movements[2].timestamp == 1502554304
+    assert movements[0].timestamp == 1502554304
 
 
 def test_coinbase_query_income_loss_expense(
@@ -571,18 +492,20 @@ def test_coinbase_query_income_loss_expense(
     coinbase = function_scope_coinbase
 
     with patch.object(coinbase.session, 'get', side_effect=mock_normal_coinbase_query):
-        events = coinbase.query_online_income_loss_expense(
+        events = coinbase.query_income_loss_expense(
             start_ts=0,
-            end_ts=1611426233,
+            end_ts=1612439233,
+            only_cache=False,
         )
 
     warnings = coinbase.msg_aggregator.consume_warnings()
     errors = coinbase.msg_aggregator.consume_errors()
     assert len(warnings) == 0
     assert len(errors) == 0
-    assert len(events) == 2
+    assert len(events) == 3
     expected_events = [
         HistoryEvent(
+            identifier=1,
             event_identifier='CBE_id4',
             sequence_index=0,
             timestamp=TimestampMS(1609877514000),
@@ -590,9 +513,10 @@ def test_coinbase_query_income_loss_expense(
             event_type=HistoryEventType.RECEIVE,
             event_subtype=HistoryEventSubType.NONE,
             asset=asset_from_coinbase('NMR'),
-            balance=Balance(amount=FVal('0.02762431'), usd_value=FVal('1.01')),
-            notes='Received 0.02762431 NMR ($1.01)',
+            balance=Balance(amount=FVal('0.02762431'), usd_value=ZERO),
+            notes='Received 0.02762431 NMR ($1.01) from coinbase earn',
         ), HistoryEvent(
+            identifier=2,
             event_identifier='CBE_id5',
             sequence_index=0,
             timestamp=TimestampMS(1611426233000),
@@ -601,16 +525,28 @@ def test_coinbase_query_income_loss_expense(
             event_subtype=HistoryEventSubType.NONE,
             asset=asset_from_coinbase('ALGO'),
             balance=Balance(amount=FVal('0.000076'), usd_value=ZERO),
-            notes='Received 0.000076 ALGO ($0.00)',
+            notes='Received 0.000076 ALGO ($0.00) as inflation_reward',
+        ), HistoryEvent(
+            identifier=3,
+            event_identifier='CBE_id6',
+            sequence_index=0,
+            timestamp=TimestampMS(1611512633000),
+            location=Location.COINBASE,
+            event_type=HistoryEventType.RECEIVE,
+            event_subtype=HistoryEventSubType.NONE,
+            asset=asset_from_coinbase('SOL'),
+            balance=Balance(amount=FVal('0.025412'), usd_value=ZERO),
+            notes='',
         ),
     ]
     assert expected_events == events
 
     # and now try to query within a specific range
     with patch.object(coinbase.session, 'get', side_effect=mock_normal_coinbase_query):
-        events = coinbase.query_online_income_loss_expense(
+        events = coinbase.query_income_loss_expense(
             start_ts=0,
             end_ts=1609877514,
+            only_cache=False,
         )
 
     warnings = coinbase.msg_aggregator.consume_warnings()
@@ -618,99 +554,6 @@ def test_coinbase_query_income_loss_expense(
     assert len(warnings) == 0
     assert len(errors) == 0
     assert events == [expected_events[0]]
-
-
-def test_coinbase_query_deposit_withdrawals_unexpected_data(function_scope_coinbase):
-    """Test that coinbase deposit/withdrawals query handles unexpected data properly"""
-    coinbase = function_scope_coinbase
-
-    # first query with proper data and expect no errors
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_deposits_withdrawals',
-        expected_warnings_num=0,
-        expected_errors_num=0,
-    )
-
-    # invalid payout_at timestamp
-    broken_response = DEPOSITS_RESPONSE.replace('"2018-02-18T16:54:00-08:00"', '"dadas"')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_deposits_withdrawals',
-        deposits_response=broken_response,
-        expected_warnings_num=0,
-        expected_errors_num=1,
-    )
-
-    # invalid created_at timestamp
-    broken_response = WITHDRAWALS_RESPONSE.replace('"2017-01-31T20:49:02Z"', '"dadssd"')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_deposits_withdrawals',
-        withdrawals_response=broken_response,
-        expected_warnings_num=0,
-        expected_errors_num=1,
-    )
-
-    # invalid asset movement type
-    broken_response = WITHDRAWALS_RESPONSE.replace('"withdrawal"', 'null')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_deposits_withdrawals',
-        withdrawals_response=broken_response,
-        expected_warnings_num=0,
-        expected_errors_num=1,
-    )
-
-    # unknown asset
-    broken_response = WITHDRAWALS_RESPONSE.replace('"USD"', '"dasdad"')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_deposits_withdrawals',
-        withdrawals_response=broken_response,
-        expected_warnings_num=1,
-        expected_errors_num=0,
-    )
-
-    # invalid asset
-    broken_response = WITHDRAWALS_RESPONSE.replace('"USD"', '{}')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_deposits_withdrawals',
-        withdrawals_response=broken_response,
-        expected_warnings_num=0,
-        expected_errors_num=1,
-    )
-
-    # invalid amount
-    broken_response = WITHDRAWALS_RESPONSE.replace('"10.00"', 'true')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_deposits_withdrawals',
-        withdrawals_response=broken_response,
-        expected_warnings_num=0,
-        expected_errors_num=1,
-    )
-
-    # invalid fee
-    broken_response = WITHDRAWALS_RESPONSE.replace('"0.01"', '"dasd"')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_deposits_withdrawals',
-        withdrawals_response=broken_response,
-        expected_warnings_num=0,
-        expected_errors_num=1,
-    )
-
-    # missing key error
-    broken_response = DEPOSITS_RESPONSE.replace('      "resource": "deposit",', '')
-    query_coinbase_and_test(
-        coinbase=coinbase,
-        query_fn_name='query_online_deposits_withdrawals',
-        deposits_response=broken_response,
-        expected_warnings_num=0,
-        expected_errors_num=1,
-    )
 
 
 def test_asset_conversion():
@@ -868,7 +711,7 @@ def test_asset_conversion_not_stable_coin():
         quote_asset=A_BTC,
         trade_type=TradeType.SELL,
         amount=FVal('6000.0'),
-        rate=FVal('0.000002823608333333333333333333333'),
+        rate=FVal('0.00000282360833333333333333333333333333333333333333333333333333333333333333333333333'),
         fee=FVal('540'),
         fee_currency=A_1INCH,
         link='5dceef97-ef34-41e6-9171-3e60cd01639e',
@@ -950,7 +793,7 @@ def test_asset_conversion_zero_fee():
         quote_asset=A_BTC,
         trade_type=TradeType.SELL,
         amount=FVal('6000.0'),
-        rate=FVal('0.000002823608333333333333333333333'),
+        rate=FVal('0.00000282360833333333333333333333333333333333333333333333333333333333333333333333333'),
         fee=FVal(ZERO),
         fee_currency=A_1INCH,
         link='5dceef97-ef34-41e6-9171-3e60cd01639e',
@@ -1037,12 +880,247 @@ def test_asset_conversion_choosing_fee_asset():
         quote_asset=A_BTC,
         trade_type=TradeType.SELL,
         amount=FVal('37734.034561'),
-        rate=FVal('0.01463707478571204566189616471'),
-        fee=FVal('10.88821337581925051594581586'),
+        rate=FVal('0.0146370747857120456618961647110471039778724604004318678293903627614266338669133'),
+        fee=FVal('10.8882133758192505159458158599598036386418553542596656162298526724464247672494'),
         fee_currency=A_BTC,
         link='id_of_trade',
     )
     assert trade == expected_trade
+
+
+def test_coinbase_query_trade_history_advanced_fill(function_scope_coinbase):
+    """Test that coinbase trade history query works fine for advanced_trade_fill"""
+    coinbase = function_scope_coinbase
+
+    mock_transactions_response = """
+{ "data": [{
+            "id": "REDACTED",
+            "type": "advanced_trade_fill",
+            "status": "completed",
+            "amount": {
+                "amount": "-192.790000",
+                "currency": "USDC"
+            },
+            "native_amount": {
+                "amount": "-176.94",
+                "currency": "EUR"
+            },
+            "description": null,
+            "created_at": "2024-03-07T08:12:51Z",
+            "updated_at": "2024-03-07T08:12:51Z",
+            "resource": "transaction",
+            "resource_path": "/v2/accounts/REDACTED/transactions/REDACTED",
+            "instant_exchange": false,
+            "advanced_trade_fill": {
+                "fill_price": "0.9174",
+                "product_id": "USDC-EUR",
+                "order_id": "REDACTED",
+                "commission": "0",
+                "order_side": "sell"
+            },
+            "details": {
+                "title": "Filled USDC on sell",
+                "subtitle": null,
+                "header": null,
+                "health": "positive"
+            },
+            "hide_native_amount": false
+        },
+        {
+            "id": "REDACTED",
+            "type": "advanced_trade_fill",
+            "status": "completed",
+            "amount": {
+                "amount": "-485.330000",
+                "currency": "USDC"
+            },
+            "native_amount": {
+                "amount": "-445.44",
+                "currency": "EUR"
+            },
+            "description": null,
+            "created_at": "2024-03-07T09:12:51Z",
+            "updated_at": "2024-03-07T09:12:51Z",
+            "resource": "transaction",
+            "resource_path": "/v2/accounts/REDACTED/transactions/REDACTED",
+            "instant_exchange": false,
+            "advanced_trade_fill": {
+                "fill_price": "0.9174",
+                "product_id": "USDC-EUR",
+                "order_id": "REDACTED",
+                "commission": "0",
+                "order_side": "sell"
+            },
+            "details": {
+                "title": "Filled USDC on sell",
+                "subtitle": null,
+                "header": null,
+                "health": "positive"
+            },
+            "hide_native_amount": false
+        },
+        {
+            "id": "REDACTED",
+            "type": "advanced_trade_fill",
+            "status": "completed",
+            "amount": {
+                "amount": "-1.120000",
+                "currency": "ETH"
+            },
+            "native_amount": {
+                "amount": "-3400.98",
+                "currency": "EUR"
+            },
+            "description": null,
+            "created_at": "2024-03-07T09:12:51Z",
+            "updated_at": "2024-03-07T09:12:51Z",
+            "resource": "transaction",
+            "resource_path": "/v2/accounts/REDACTED/transactions/REDACTED",
+            "instant_exchange": false,
+            "advanced_trade_fill": {
+                "fill_price": "3334.341",
+                "product_id": "ETH-USDC",
+                "order_id": "REDACTED",
+                "commission": "0.0000005",
+                "order_side": "sell"
+            },
+            "details": {
+                "title": "Filled ETH on sell",
+                "subtitle": null,
+                "header": null,
+                "health": "positive"
+            },
+            "hide_native_amount": false
+        },
+        {
+            "id": "REDACTED",
+            "type": "advanced_trade_fill",
+            "status": "completed",
+            "amount": {
+                "amount": "0.589290",
+                "currency": "SOL"
+            },
+            "native_amount": {
+                "amount": "80.08",
+                "currency": "EUR"
+            },
+            "description": null,
+            "created_at": "2024-03-07T09:12:51Z",
+            "updated_at": "2024-03-07T09:12:51Z",
+            "resource": "transaction",
+            "resource_path": "/v2/accounts/REDACTED/transactions/REDACTED",
+            "instant_exchange": false,
+            "advanced_trade_fill": {
+                "fill_price": "170.12",
+                "product_id": "SOL-USDC",
+                "order_id": "REDACTED",
+                "commission": "0.5710371002622",
+                "order_side": "buy"
+            },
+            "details": {
+                "title": "Filled Solana on buy",
+                "subtitle": null,
+                "header": null,
+                "health": "positive"
+            },
+            "hide_native_amount": false
+        },
+        {
+            "id": "REDACTED",
+            "type": "advanced_trade_fill",
+            "status": "completed",
+            "amount": {
+                "amount": "1.120000",
+                "currency": "ETH"
+            },
+            "native_amount": {
+                "amount": "3400.98",
+                "currency": "EUR"
+            },
+            "description": null,
+            "created_at": "2024-03-07T09:12:51Z",
+            "updated_at": "2024-03-07T09:12:51Z",
+            "resource": "transaction",
+            "resource_path": "/v2/accounts/REDACTED/transactions/REDACTED",
+            "instant_exchange": false,
+            "advanced_trade_fill": {
+                "fill_price": "3334.341",
+                "product_id": "ETH-USDC",
+                "order_id": "REDACTED",
+                "commission": "0.0000005",
+                "order_side": "sell"
+            },
+            "details": {
+                "title": "Filled ETH on sell",
+                "subtitle": null,
+                "header": null,
+                "health": "positive"
+            },
+            "hide_native_amount": false
+        }]
+}
+"""
+    mock_coinbase_query = _create_coinbase_mock(mock_transactions_response)
+
+    with patch.object(coinbase.session, 'get', side_effect=mock_coinbase_query):
+        trades = coinbase.query_trade_history(
+            start_ts=0,
+            end_ts=ts_now(),
+            only_cache=False,
+        )
+
+    warnings = coinbase.msg_aggregator.consume_warnings()
+    errors = coinbase.msg_aggregator.consume_errors()
+    assert len(warnings) == 0
+    assert len(errors) == 0
+    # Notice that there are more trades included in the mock data
+    # but we expect some of them to not be included in the output
+    expected_trades = [Trade(
+        timestamp=1709799171,
+        location=Location.COINBASE,
+        base_asset=A_USDC,
+        quote_asset=A_EUR,
+        trade_type=TradeType.SELL,
+        amount=FVal('192.790000'),
+        rate=FVal('0.9174'),
+        fee=ZERO,
+        fee_currency=A_EUR,
+        link='REDACTED',
+    ), Trade(
+        timestamp=1709802771,
+        location=Location.COINBASE,
+        base_asset=A_USDC,
+        quote_asset=A_EUR,
+        trade_type=TradeType.SELL,
+        amount=FVal('485.330000'),
+        rate=FVal('0.9174'),
+        fee=ZERO,
+        fee_currency=A_EUR,
+        link='REDACTED',
+    ), Trade(
+        timestamp=1709802771,
+        location=Location.COINBASE,
+        base_asset=A_ETH,
+        quote_asset=A_USDC,
+        trade_type=TradeType.SELL,
+        amount=FVal('1.120000'),
+        rate=FVal('3334.341'),
+        fee=FVal('0.0000005'),
+        fee_currency=A_USDC,
+        link='REDACTED',
+    ), Trade(
+        timestamp=1709802771,
+        location=Location.COINBASE,
+        base_asset=A_SOL,
+        quote_asset=A_USDC,
+        trade_type=TradeType.BUY,
+        amount=FVal('0.589290'),
+        rate=FVal('170.12'),
+        fee=FVal('0.5710371002622'),
+        fee_currency=A_USDC,
+        link='REDACTED',
+    )]
+    assert trades == expected_trades
 
 
 def test_coverage_of_products():

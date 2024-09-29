@@ -1,145 +1,122 @@
 <script setup lang="ts">
-import { type DataTableHeader } from 'vuetify';
-import { type Collection } from '@/types/collection';
-import {
-  type Filters,
-  type Matcher
-} from '@/composables/filters/accounting-rule';
-import {
-  type AccountingRuleEntry,
-  type AccountingRuleRequestPayload
-} from '@/types/settings/accounting';
+import { TaskType } from '@/types/task-type';
+import type { DataTableColumn } from '@rotki/ui-library';
+import type { Collection } from '@/types/collection';
+import type { Filters, Matcher } from '@/composables/filters/accounting-rule';
+import type { AccountingRuleEntry, AccountingRuleRequestPayload } from '@/types/settings/accounting';
 
 const { t } = useI18n();
 const router = useRouter();
+const route = useRoute();
 
-const { getAccountingRule, getAccountingRules, getAccountingRulesConflicts } =
-  useAccountingSettings();
+const { getAccountingRule, getAccountingRules, getAccountingRulesConflicts, exportJSON } = useAccountingSettings();
 
-const {
-  state,
-  isLoading,
-  options,
-  fetchData,
-  setOptions,
-  setPage,
-  filters,
-  matchers,
-  updateFilter,
-  editableItem
-} = usePaginationFilters<
-  AccountingRuleEntry,
-  AccountingRuleRequestPayload,
-  AccountingRuleEntry,
-  Collection<AccountingRuleEntry>,
-  Filters,
-  Matcher
->(null, true, useAccountingRuleFilter, getAccountingRules);
+const { state, isLoading, fetchData, setPage, filters, pagination, matchers, updateFilter, editableItem }
+  = usePaginationFilters<
+    AccountingRuleEntry,
+    AccountingRuleRequestPayload,
+    AccountingRuleEntry,
+    Collection<AccountingRuleEntry>,
+    Filters,
+    Matcher
+  >(null, true, useAccountingRuleFilter, getAccountingRules);
 
-const conflictsNumber: Ref<number> = ref(0);
+const conflictsNumber = ref<number>(0);
 
-const checkConflicts = async () => {
+const conflictsDialogOpen = ref<boolean>(false);
+
+async function checkConflicts() {
   const { total } = await getAccountingRulesConflicts({ limit: 1, offset: 0 });
   set(conflictsNumber, total);
 
+  const { currentRoute } = router;
+
   const {
-    currentRoute: {
-      query: { resolveConflicts }
-    }
-  } = router;
+    query: { resolveConflicts },
+  } = get(currentRoute);
 
   if (resolveConflicts) {
-    if (total > 0) {
+    if (total > 0)
       set(conflictsDialogOpen, true);
-    }
+
     await router.replace({ query: {} });
   }
-};
+}
 
-const tableHeaders = computed<DataTableHeader[]>(() => [
+const cols = computed<DataTableColumn<AccountingRuleEntry>[]>(() => [
   {
-    text: `${t('accounting_settings.rule.labels.event_type')} - \n${t(
-      'accounting_settings.rule.labels.event_subtype'
+    label: `${t('accounting_settings.rule.labels.event_type')} - \n${t(
+      'accounting_settings.rule.labels.event_subtype',
     )}`,
-    value: 'eventTypeAndSubtype',
-    class: 'whitespace-break-spaces',
+    key: 'eventTypeAndSubtype',
+    class: 'whitespace-pre-line',
     cellClass: 'py-4',
-    sortable: false
   },
   {
-    text: t('transactions.events.form.resulting_combination.label'),
-    value: 'resultingCombination',
-    sortable: false
+    label: t('transactions.events.form.resulting_combination.label'),
+    key: 'resultingCombination',
   },
   {
-    text: t('accounting_settings.rule.labels.counterparty'),
-    value: 'counterparty',
+    label: t('common.counterparty'),
+    key: 'counterparty',
     class: 'border-r border-default',
     cellClass: 'border-r border-default',
-    sortable: false
   },
   {
-    text: t('accounting_settings.rule.labels.taxable'),
-    value: 'taxable',
-    sortable: false,
-    cellClass: 'px-2',
-    class: 'px-2',
-    align: 'center'
-  },
-  {
-    text: t('accounting_settings.rule.labels.count_entire_amount_spend'),
-    value: 'countEntireAmountSpend',
-    sortable: false,
-    width: '120px',
-    cellClass: 'px-2',
-    class: 'px-2',
-    align: 'center'
-  },
-  {
-    text: t('accounting_settings.rule.labels.count_cost_basis_pnl'),
-    value: 'countCostBasisPnl',
-    sortable: false,
-    width: '120px',
-    cellClass: 'px-2',
-    class: 'px-2',
-    align: 'center'
-  },
-  {
-    text: t('accounting_settings.rule.labels.accounting_treatment'),
-    value: 'accountingTreatment',
-    sortable: false
-  },
-  {
-    text: t('common.actions_text'),
-    value: 'actions',
+    label: t('accounting_settings.rule.labels.taxable'),
+    key: 'taxable',
+    class: 'max-w-[6rem] text-sm whitespace-normal font-medium align-center',
     align: 'center',
-    sortable: false,
-    width: '1px'
-  }
+  },
+  {
+    label: t('accounting_settings.rule.labels.count_entire_amount_spend'),
+    key: 'countEntireAmountSpend',
+    class: 'max-w-[6rem] text-sm whitespace-normal font-medium align-center',
+    align: 'center',
+  },
+  {
+    label: t('accounting_settings.rule.labels.count_cost_basis_pnl'),
+    key: 'countCostBasisPnl',
+    class: 'max-w-[6rem] text-sm whitespace-normal font-medium align-center',
+    align: 'center',
+  },
+  {
+    label: t('accounting_settings.rule.labels.accounting_treatment'),
+    key: 'accountingTreatment',
+    class: 'max-w-[6rem] text-sm whitespace-normal font-medium align-center',
+  },
+  {
+    label: t('common.actions_text'),
+    key: 'actions',
+    align: 'center',
+    width: '1px',
+  },
 ]);
 
-const { historyEventTypesData, historyEventSubTypesData, getEventTypeData } =
-  useHistoryEventMappings();
+const { historyEventTypesData, historyEventSubTypesData, getEventTypeData } = useHistoryEventMappings();
 
-const getHistoryEventTypeName = (eventType: string): string =>
-  get(historyEventTypesData).find(item => item.identifier === eventType)
-    ?.label ?? toSentenceCase(eventType);
+function getHistoryEventTypeName(eventType: string): string {
+  return get(historyEventTypesData).find(item => item.identifier === eventType)?.label ?? toSentenceCase(eventType);
+}
 
-const getHistoryEventSubTypeName = (eventSubtype: string): string =>
-  get(historyEventSubTypesData).find(item => item.identifier === eventSubtype)
-    ?.label ?? toSentenceCase(eventSubtype);
+function getHistoryEventSubTypeName(eventSubtype: string): string {
+  return (
+    get(historyEventSubTypesData).find(item => item.identifier === eventSubtype)?.label
+    ?? toSentenceCase(eventSubtype)
+  );
+}
 
 const { setOpenDialog, setPostSubmitFunc } = useAccountingRuleForm();
 
-const add = () => {
+function add() {
   set(editableItem, null);
   setOpenDialog(true);
-};
+}
 
-const edit = (rule: AccountingRuleEntry) => {
+function edit(rule: AccountingRuleEntry) {
   set(editableItem, rule);
   setOpenDialog(true);
-};
+}
 
 setPostSubmitFunc(fetchData);
 
@@ -148,86 +125,91 @@ const { setMessage } = useMessageStore();
 
 const { deleteAccountingRule: deleteAccountingRuleCaller } = useAccountingApi();
 
-const deleteAccountingRule = async (item: AccountingRuleEntry) => {
+async function deleteAccountingRule(item: AccountingRuleEntry) {
   try {
     const success = await deleteAccountingRuleCaller(item.identifier);
-    if (success) {
+    if (success)
       await fetchData();
-    }
-  } catch {
+  }
+  catch {
     setMessage({
-      description: t('accounting_settings.rule.delete_error')
+      description: t('accounting_settings.rule.delete_error'),
     });
   }
-};
+}
 
-const refresh = async () => {
+async function refresh() {
   await fetchData();
   await checkConflicts();
-};
+}
 
-const showDeleteConfirmation = (item: AccountingRuleEntry) => {
+function showDeleteConfirmation(item: AccountingRuleEntry) {
   show(
     {
       title: t('accounting_settings.rule.delete'),
-      message: t('accounting_settings.rule.confirm_delete')
+      message: t('accounting_settings.rule.confirm_delete'),
     },
-    async () => await deleteAccountingRule(item)
+    async () => await deleteAccountingRule(item),
   );
-};
+}
 
-const getType = (eventType: string, eventSubtype: string) =>
-  getEventTypeData({
-    eventType,
-    eventSubtype
-  });
+function getType(eventType: string, eventSubtype: string) {
+  return get(
+    getEventTypeData({
+      eventType,
+      eventSubtype,
+    }),
+  );
+}
 
 onMounted(async () => {
-  const {
-    currentRoute: {
-      query: {
-        'add-rule': addRule,
-        'edit-rule': editRule,
-        eventSubtype,
-        eventType,
-        counterparty
-      }
-    }
-  } = router;
+  const { query } = get(route);
+  const { 'add-rule': addRule, 'edit-rule': editRule, eventSubtype, eventType, counterparty } = query;
 
   const ruleData = {
     eventSubtype: eventSubtype?.toString() ?? '',
     eventType: eventType?.toString() ?? '',
-    counterparty: counterparty?.toString() ?? null
+    counterparty: counterparty?.toString() ?? null,
   };
 
-  if (addRule) {
-    set(editableItem, {
-      ...getPlaceholderRule(),
-      ...ruleData
-    });
-    setOpenDialog(true);
+  async function openDialog(rule?: AccountingRuleEntry) {
+    set(editableItem, rule);
+    startPromise(nextTick(() => {
+      setOpenDialog(!!rule);
+    }));
     await router.replace({ query: {} });
-  } else if (editRule) {
-    const rule = await getAccountingRule({
+  }
+
+  if (addRule) {
+    await openDialog({
+      ...getPlaceholderRule(),
+      ...ruleData,
+    });
+  }
+  else if (editRule) {
+    await openDialog(await getAccountingRule({
       eventTypes: [ruleData.eventType],
       eventSubtypes: [ruleData.eventSubtype],
-      counterparties: counterparty ? [ruleData.counterparty] : undefined,
-      limit: 1,
-      offset: 0
-    });
-    set(editableItem, rule);
-    setOpenDialog(!!rule);
-    await router.replace({ query: {} });
+      limit: 2,
+      offset: 0,
+    }, ruleData.counterparty));
   }
   await refresh();
 });
 
-const conflictsDialogOpen: Ref<boolean> = ref(false);
+const { isTaskRunning } = useTaskStore();
+
+const exportFileLoading = isTaskRunning(TaskType.EXPORT_ACCOUNTING_RULES);
+const importFileLoading = isTaskRunning(TaskType.IMPORT_ACCOUNTING_RULES);
+
+const importFileDialog = ref<boolean>(false);
 </script>
 
 <template>
-  <TablePageLayout child :title="[t('accounting_settings.rule.title')]">
+  <TablePageLayout
+    child
+    :title="[t('accounting_settings.rule.title')]"
+  >
     <template #buttons>
       <div class="flex flex-row items-center justify-end gap-2">
         <RuiTooltip :open-delay="400">
@@ -246,12 +228,56 @@ const conflictsDialogOpen: Ref<boolean> = ref(false);
           </template>
           {{ t('accounting_settings.rule.refresh_tooltip') }}
         </RuiTooltip>
-        <RuiButton color="primary" @click="add()">
+        <RuiButton
+          color="primary"
+          @click="add()"
+        >
           <template #prepend>
             <RuiIcon name="add-line" />
           </template>
           {{ t('accounting_settings.rule.add') }}
         </RuiButton>
+        <RuiMenu
+          :popper="{ placement: 'bottom-end' }"
+          close-on-content-click
+        >
+          <template #activator="{ attrs }">
+            <RuiButton
+              variant="text"
+              icon
+              size="sm"
+              class="!p-2"
+              v-bind="attrs"
+            >
+              <RuiIcon
+                name="more-2-fill"
+                size="20"
+              />
+            </RuiButton>
+          </template>
+          <div class="py-2">
+            <RuiButton
+              variant="list"
+              :loading="exportFileLoading"
+              @click="exportJSON()"
+            >
+              <template #prepend>
+                <RuiIcon name="file-download-line" />
+              </template>
+              {{ t('accounting_settings.rule.export') }}
+            </RuiButton>
+            <RuiButton
+              variant="list"
+              :loading="importFileLoading"
+              @click="importFileDialog = true"
+            >
+              <template #prepend>
+                <RuiIcon name="file-upload-line" />
+              </template>
+              {{ t('accounting_settings.rule.import') }}
+            </RuiButton>
+          </div>
+        </RuiMenu>
       </div>
     </template>
 
@@ -259,7 +285,10 @@ const conflictsDialogOpen: Ref<boolean> = ref(false);
       <template #custom-header>
         <div class="flex items-center justify-between p-4 pb-0 gap-4">
           <template v-if="conflictsNumber > 0">
-            <RuiButton color="warning" @click="conflictsDialogOpen = true">
+            <RuiButton
+              color="warning"
+              @click="conflictsDialogOpen = true"
+            >
               <template #prepend>
                 <RuiIcon name="error-warning-line" />
               </template>
@@ -276,7 +305,7 @@ const conflictsDialogOpen: Ref<boolean> = ref(false);
             </RuiButton>
             <AccountingRuleConflictsDialog
               v-if="conflictsDialogOpen"
-              :table-headers="tableHeaders"
+              :table-headers="cols"
               @close="conflictsDialogOpen = false"
               @refresh="refresh()"
             />
@@ -292,21 +321,24 @@ const conflictsDialogOpen: Ref<boolean> = ref(false);
         </div>
       </template>
 
-      <CollectionHandler :collection="state" @set-page="setPage($event)">
-        <template #default="{ data, itemLength }">
-          <DataTable
-            :items="data"
-            :headers="tableHeaders"
+      <CollectionHandler
+        :collection="state"
+        @set-page="setPage($event)"
+      >
+        <template #default="{ data }">
+          <RuiDataTable
+            v-model:pagination.external="pagination"
+            outlined
+            :rows="data"
+            :cols="cols"
             :loading="isLoading"
-            :options="options"
-            :server-items-length="itemLength"
-            @update:options="setOptions($event)"
+            row-attr="identifier"
           >
             <template #header.taxable>
               <RuiTooltip
                 :popper="{ placement: 'top' }"
-                open-delay="400"
-                class="flex items-center"
+                :open-delay="400"
+                class="flex items-center h-full"
                 tooltip-class="max-w-[10rem]"
               >
                 <template #activator>
@@ -325,7 +357,7 @@ const conflictsDialogOpen: Ref<boolean> = ref(false);
             <template #header.countEntireAmountSpend>
               <RuiTooltip
                 :popper="{ placement: 'top' }"
-                open-delay="400"
+                :open-delay="400"
                 class="flex items-center"
                 tooltip-class="max-w-[10rem]"
               >
@@ -336,24 +368,16 @@ const conflictsDialogOpen: Ref<boolean> = ref(false);
                       size="18"
                       name="information-line"
                     />
-                    {{
-                      t(
-                        'accounting_settings.rule.labels.count_entire_amount_spend'
-                      )
-                    }}
+                    {{ t('accounting_settings.rule.labels.count_entire_amount_spend') }}
                   </div>
                 </template>
-                {{
-                  t(
-                    'accounting_settings.rule.labels.count_entire_amount_spend_subtitle'
-                  )
-                }}
+                {{ t('accounting_settings.rule.labels.count_entire_amount_spend_subtitle') }}
               </RuiTooltip>
             </template>
             <template #header.countCostBasisPnl>
               <RuiTooltip
                 :popper="{ placement: 'top' }"
-                open-delay="400"
+                :open-delay="400"
                 class="flex items-center"
                 tooltip-class="max-w-[10rem]"
               >
@@ -364,75 +388,80 @@ const conflictsDialogOpen: Ref<boolean> = ref(false);
                       size="18"
                       name="information-line"
                     />
-                    {{
-                      t('accounting_settings.rule.labels.count_cost_basis_pnl')
-                    }}
+                    {{ t('accounting_settings.rule.labels.count_cost_basis_pnl') }}
                   </div>
                 </template>
-                {{
-                  t(
-                    'accounting_settings.rule.labels.count_cost_basis_pnl_subtitle'
-                  )
-                }}
+                {{ t('accounting_settings.rule.labels.count_cost_basis_pnl_subtitle') }}
               </RuiTooltip>
             </template>
-            <template #item.eventTypeAndSubtype="{ item }">
-              <div>{{ getHistoryEventTypeName(item.eventType) }} -</div>
-              <div>{{ getHistoryEventSubTypeName(item.eventSubtype) }}</div>
+            <template #header.accountingTreatment>
+              <div class="max-w-[5rem] text-sm whitespace-normal font-medium">
+                {{ t('accounting_settings.rule.labels.accounting_treatment') }}
+              </div>
             </template>
-            <template #item.resultingCombination="{ item }">
+            <template #item.eventTypeAndSubtype="{ row }">
+              <div>{{ getHistoryEventTypeName(row.eventType) }} -</div>
+              <div>{{ getHistoryEventSubTypeName(row.eventSubtype) }}</div>
+            </template>
+            <template #item.resultingCombination="{ row }">
               <HistoryEventTypeCombination
-                :type="getType(item.eventType, item.eventSubtype)"
+                :type="getType(row.eventType, row.eventSubtype)"
                 show-label
               />
             </template>
-            <template #item.counterparty="{ item }">
-              <HistoryEventTypeCounterparty
-                v-if="item.counterparty"
-                text
-                :event="{ counterparty: item.counterparty }"
+            <template #item.counterparty="{ row }">
+              <CounterpartyDisplay
+                v-if="row.counterparty"
+                :counterparty="row.counterparty"
               />
               <span v-else>-</span>
             </template>
-            <template #item.taxable="{ item }">
+            <template #item.taxable="{ row }">
               <AccountingRuleWithLinkedSettingDisplay
                 identifier="taxable"
-                :item="item.taxable"
+                :item="row.taxable"
               />
             </template>
-            <template #item.countEntireAmountSpend="{ item }">
+            <template #item.countEntireAmountSpend="{ row }">
               <AccountingRuleWithLinkedSettingDisplay
                 identifier="countEntireAmountSpend"
-                :item="item.countEntireAmountSpend"
+                :item="row.countEntireAmountSpend"
               />
             </template>
-            <template #item.countCostBasisPnl="{ item }">
+            <template #item.countCostBasisPnl="{ row }">
               <AccountingRuleWithLinkedSettingDisplay
                 identifier="countCostBasisPnl"
-                :item="item.countCostBasisPnl"
+                :item="row.countCostBasisPnl"
               />
             </template>
-            <template #item.accountingTreatment="{ item }">
-              <BadgeDisplay v-if="item.accountingTreatment">
-                {{ item.accountingTreatment }}
+            <template #item.accountingTreatment="{ row }">
+              <BadgeDisplay v-if="row.accountingTreatment">
+                {{ row.accountingTreatment }}
               </BadgeDisplay>
               <span v-else>-</span>
             </template>
-            <template #item.actions="{ item }">
+            <template #item.actions="{ row }">
               <RowActions
                 :delete-tooltip="t('accounting_settings.rule.delete')"
                 :edit-tooltip="t('accounting_settings.rule.edit')"
-                @delete-click="showDeleteConfirmation(item)"
-                @edit-click="edit(item)"
+                @delete-click="showDeleteConfirmation(row)"
+                @edit-click="edit(row)"
               />
             </template>
-          </DataTable>
+          </RuiDataTable>
         </template>
       </CollectionHandler>
+
+      <AccountingRuleFormDialog
+        :loading="isLoading"
+        :editable-item="editableItem"
+      />
+
+      <AccountingRuleImportDialog
+        v-model="importFileDialog"
+        :loading="importFileLoading"
+        @refresh="refresh()"
+      />
     </RuiCard>
-    <AccountingRuleFormDialog
-      :loading="isLoading"
-      :editable-item="editableItem"
-    />
   </TablePageLayout>
 </template>

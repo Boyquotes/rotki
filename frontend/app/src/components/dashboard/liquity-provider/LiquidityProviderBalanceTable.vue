@@ -1,88 +1,68 @@
 <script setup lang="ts">
-import { type BigNumber } from '@rotki/common';
-import {
-  type XswapAsset,
-  type XswapBalance
-} from '@rotki/common/lib/defi/xswap';
 import { isEqual } from 'lodash-es';
-import { type Ref } from 'vue';
-import { type DataTableHeader } from '@/types/vuetify';
+import { type BigNumber, Blockchain, type XSwapLiquidityBalance, type XswapAsset } from '@rotki/common';
 import { Routes } from '@/router/routes';
-import {
-  DashboardTableType,
-  type DashboardTablesVisibleColumns
-} from '@/types/settings/frontend-settings';
+import { DashboardTableType, type DashboardTablesVisibleColumns } from '@/types/settings/frontend-settings';
 import { Section } from '@/types/status';
 import { TableColumn } from '@/types/table-column';
+import type { DataTableColumn, DataTableSortData } from '@rotki/ui-library';
 
 const { t } = useI18n();
 const LIQUIDITY_POSITION = DashboardTableType.LIQUIDITY_POSITION;
 
-const createTableHeaders = (
-  currency: Ref<string>,
-  dashboardTablesVisibleColumns: Ref<DashboardTablesVisibleColumns>
-) =>
-  computed<DataTableHeader[]>(() => {
-    const visibleColumns = get(dashboardTablesVisibleColumns)[
-      LIQUIDITY_POSITION
-    ];
+const sort = ref<DataTableSortData<XSwapLiquidityBalance>>({
+  column: 'usdValue',
+  direction: 'desc' as const,
+});
 
-    const headers: DataTableHeader[] = [
+function createTableHeaders(currency: Ref<string>, dashboardTablesVisibleColumns: Ref<DashboardTablesVisibleColumns>) {
+  return computed<DataTableColumn<XSwapLiquidityBalance>[]>(() => {
+    const visibleColumns = get(dashboardTablesVisibleColumns)[LIQUIDITY_POSITION];
+
+    const headers: DataTableColumn<XSwapLiquidityBalance>[] = [
       {
-        text: t('common.name'),
-        value: 'name',
+        label: t('common.name'),
+        key: 'name',
         cellClass: 'text-no-wrap',
-        sortable: false
       },
       {
-        text: t('common.value_in_symbol', {
-          symbol: get(currency)
+        label: t('common.value_in_symbol', {
+          symbol: get(currency),
         }),
-        value: 'usdValue',
+        key: 'usdValue',
         align: 'end',
-        class: 'text-no-wrap'
-      }
+        class: 'text-no-wrap',
+      },
     ];
 
     if (visibleColumns.includes(TableColumn.PERCENTAGE_OF_TOTAL_NET_VALUE)) {
       headers.push({
-        text: t('dashboard_asset_table.headers.percentage_of_total_net_value'),
-        value: 'percentageOfTotalNetValue',
+        label: t('dashboard_asset_table.headers.percentage_of_total_net_value'),
+        key: 'percentageOfTotalNetValue',
         align: 'end',
         class: 'text-no-wrap',
-        sortable: false
       });
     }
 
-    if (
-      visibleColumns.includes(TableColumn.PERCENTAGE_OF_TOTAL_CURRENT_GROUP)
-    ) {
+    if (visibleColumns.includes(TableColumn.PERCENTAGE_OF_TOTAL_CURRENT_GROUP)) {
       headers.push({
-        text: t(
-          'dashboard_asset_table.headers.percentage_of_total_current_group',
-          {
-            group: t('dashboard.liquidity_position.title')
-          }
-        ),
-        value: 'percentageOfTotalCurrentGroup',
+        label: t('dashboard_asset_table.headers.percentage_of_total_current_group', {
+          group: t('dashboard.liquidity_position.title'),
+        }),
+        key: 'percentageOfTotalCurrentGroup',
         align: 'end',
         class: 'text-no-wrap',
-        sortable: false
       });
     }
-
-    headers.push({ text: '', value: 'data-table-expand', sortable: false });
 
     return headers;
   });
+}
 
 const route = Routes.DEFI_DEPOSITS_LIQUIDITY;
-const expanded = ref<XswapBalance[]>([]);
+const expanded = ref<XSwapLiquidityBalance[]>([]);
 
-const {
-  fetchV2Balances: fetchUniswapV2Balances,
-  fetchV3Balances: fetchUniswapV3Balances
-} = useUniswapStore();
+const { fetchV2Balances: fetchUniswapV2Balances, fetchV3Balances: fetchUniswapV3Balances } = useUniswapStore();
 
 const { fetchBalances: fetchSushiswapBalances } = useSushiswapStore();
 const { fetchBalances: fetchBalancerBalances } = useBalancerStore();
@@ -92,14 +72,9 @@ const balances = lpAggregatedBalances(true);
 const totalInUsd = lpTotal(true);
 
 const { currencySymbol } = storeToRefs(useGeneralSettingsStore());
-const { dashboardTablesVisibleColumns } = storeToRefs(
-  useFrontendSettingsStore()
-);
+const { dashboardTablesVisibleColumns } = storeToRefs(useFrontendSettingsStore());
 
-const tableHeaders = createTableHeaders(
-  currencySymbol,
-  dashboardTablesVisibleColumns
-);
+const tableHeaders = createTableHeaders(currencySymbol, dashboardTablesVisibleColumns);
 
 const { isLoading } = useStatusStore();
 
@@ -107,26 +82,28 @@ const loading = logicOr(
   isLoading(Section.DEFI_UNISWAP_V3_BALANCES),
   isLoading(Section.DEFI_UNISWAP_V2_BALANCES),
   isLoading(Section.DEFI_BALANCER_BALANCES),
-  isLoading(Section.DEFI_SUSHISWAP_BALANCES)
+  isLoading(Section.DEFI_SUSHISWAP_BALANCES),
 );
 
 const statistics = useStatisticsStore();
 const { totalNetWorthUsd } = storeToRefs(statistics);
 
-const percentageOfTotalNetValue = (value: BigNumber) => {
+function percentageOfTotalNetValue(value: BigNumber) {
   const netWorth = get(totalNetWorthUsd) as BigNumber;
   const total = netWorth.lt(0) ? get(totalInUsd) : netWorth;
   return calculatePercentage(value, total);
-};
+}
 
-const percentageOfCurrentGroup = (value: BigNumber) =>
-  calculatePercentage(value, get(totalInUsd));
+function percentageOfCurrentGroup(value: BigNumber) {
+  return calculatePercentage(value, get(totalInUsd));
+}
 
 const premium = usePremium();
 
-const { ethAddresses } = storeToRefs(useEthAccountsStore());
+const chainStore = useBlockchainStore();
+const ethAddresses = computed<string[]>(() => chainStore.getAddresses(Blockchain.ETH));
 
-const fetch = async (refresh = false) => {
+async function fetch(refresh = false) {
   if (get(ethAddresses).length > 0) {
     await fetchUniswapV3Balances(refresh);
     await fetchUniswapV2Balances(refresh);
@@ -136,29 +113,27 @@ const fetch = async (refresh = false) => {
       await fetchBalancerBalances(refresh);
     }
   }
-};
+}
 
 onBeforeMount(async () => {
   await fetch();
 });
 
 watch(ethAddresses, async (curr, prev) => {
-  if (!isEqual(curr, prev)) {
+  if (!isEqual(curr, prev))
     await fetch(true);
-  }
 });
 
 watch(premium, async (curr, prev) => {
-  if (prev !== curr) {
+  if (prev !== curr)
     await fetch(true);
-  }
 });
 
 const getAssets = (assets: XswapAsset[]) => assets.map(({ asset }) => asset);
 </script>
 
 <template>
-  <DashboardExpandableTable v-if="balances.length > 0 || loading">
+  <DashboardExpandableTable v-if="balances.length > 0">
     <template #title>
       <RefreshButton
         :loading="loading"
@@ -167,25 +142,27 @@ const getAssets = (assets: XswapAsset[]) => assets.map(({ asset }) => asset);
       />
       {{ t('dashboard.liquidity_position.title') }}
       <RouterLink :to="route">
-        <RuiButton variant="text" icon class="ml-2">
+        <RuiButton
+          variant="text"
+          icon
+          class="ml-2"
+        >
           <RuiIcon name="arrow-right-s-line" />
         </RuiButton>
       </RouterLink>
     </template>
     <template #details>
-      <VMenu
-        id="nft_balance_table__column-filter"
-        transition="slide-y-transition"
-        max-width="250px"
-        nudge-bottom="20"
-        offset-y
-        left
+      <RuiMenu
+        id="liquidity-provider-balance-table__column-filter"
+        menu-class="max-w-[15rem]"
+        :popper="{ placement: 'bottom-end' }"
       >
-        <template #activator="{ on }">
+        <template #activator="{ attrs }">
           <MenuTooltipButton
             :tooltip="t('dashboard_asset_table.select_visible_columns')"
-            class-name="nft_balance_table__column-filter__button"
-            :on-menu="on"
+            class-name="liquidity-provider-balance-table__column-filter__button"
+            custom-color
+            v-bind="attrs"
           >
             <RuiIcon name="more-2-fill" />
           </MenuTooltipButton>
@@ -194,61 +171,72 @@ const getAssets = (assets: XswapAsset[]) => assets.map(({ asset }) => asset);
           :group="LIQUIDITY_POSITION"
           :group-label="t('dashboard.liquidity_position.title')"
         />
-      </VMenu>
+      </RuiMenu>
     </template>
     <template #shortDetails>
       <AmountDisplay
         :value="totalInUsd"
         show-currency="symbol"
         fiat-currency="USD"
+        class="text-h6 font-bold"
       />
     </template>
-    <DataTable
-      :headers="tableHeaders"
-      :items="balances"
-      sort-by="userBalance.usdValue"
+    <RuiDataTable
+      v-model:expanded="expanded"
+      outlined
+      dense
+      :cols="tableHeaders"
+      :rows="balances"
+      :sort="sort"
       :loading="loading"
-      item-key="id"
-      show-expand
-      :expanded="expanded"
+      row-attr="id"
+      single-expand
     >
-      <template #item.name="{ item }">
-        <div v-if="item.type === 'nft'">
+      <template #item.name="{ row }">
+        <div v-if="row.type === 'nft'">
           <NftDetails
-            :identifier="item.asset"
+            :identifier="row.asset"
             :styled="{ margin: '1px 4px' }"
           />
         </div>
 
-        <div v-else class="flex items-center py-4">
-          <LpPoolIcon :type="item.lpType" :assets="getAssets(item.assets)" />
+        <div
+          v-else
+          class="flex items-center py-2"
+        >
+          <LpPoolIcon
+            :type="row.lpType"
+            :assets="getAssets(row.assets)"
+          />
           <div class="pl-4 font-medium">
-            {{ getPoolName(item.lpType, getAssets(item.assets)) }}
+            {{ getPoolName(row.lpType, getAssets(row.assets)) }}
           </div>
         </div>
       </template>
-      <template #item.usdValue="{ item }">
-        <AmountDisplay :value="item.usdValue" fiat-currency="USD" />
-      </template>
-      <template #item.percentageOfTotalNetValue="{ item }">
-        <PercentageDisplay :value="percentageOfTotalNetValue(item.usdValue)" />
-      </template>
-      <template #item.percentageOfTotalCurrentGroup="{ item }">
-        <PercentageDisplay :value="percentageOfCurrentGroup(item.usdValue)" />
-      </template>
-      <template #expanded-item="{ headers, item }">
-        <LiquidityProviderBalanceDetails
-          :span="headers.length"
-          :assets="item.assets"
-          :premium-only="item.premiumOnly"
+      <template #item.usdValue="{ row }">
+        <AmountDisplay
+          :value="row.usdValue"
+          fiat-currency="USD"
         />
       </template>
-      <template #body.append="{ isMobile }">
+      <template #item.percentageOfTotalNetValue="{ row }">
+        <PercentageDisplay :value="percentageOfTotalNetValue(row.usdValue)" />
+      </template>
+      <template #item.percentageOfTotalCurrentGroup="{ row }">
+        <PercentageDisplay :value="percentageOfCurrentGroup(row.usdValue)" />
+      </template>
+      <template #expanded-item="{ row }">
+        <LiquidityProviderBalanceDetails
+          :assets="row.assets"
+          :premium-only="row.premiumOnly"
+        />
+      </template>
+      <template #body.append>
         <RowAppend
           label-colspan="1"
           :label="t('common.total')"
           :right-patch-colspan="tableHeaders.length - 2"
-          :is-mobile="isMobile"
+          class-name="[&>td]:p-4"
         >
           <AmountDisplay
             :value="totalInUsd"
@@ -257,6 +245,6 @@ const getAssets = (assets: XswapAsset[]) => assets.map(({ asset }) => asset);
           />
         </RowAppend>
       </template>
-    </DataTable>
+    </RuiDataTable>
   </DashboardExpandableTable>
 </template>

@@ -14,7 +14,7 @@ from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_error_response,
     assert_ok_async_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     wait_for_async_task,
 )
 from rotkehlchen.tests.utils.ethereum import INFURA_ETH_NODE, get_decoded_events_of_transaction
@@ -53,10 +53,8 @@ def test_get_balances(
     """
     tx_hex = deserialize_evm_tx_hash('0xbc99e10c1e48969f4a580229abebc97f7a358b7ba8365dca1f829f9c387bec51')  # noqa: E501
     ethereum_inquirer = rotkehlchen_api_server.rest_api.rotkehlchen.chains_aggregator.ethereum.node_inquirer  # noqa: E501
-    database = rotkehlchen_api_server.rest_api.rotkehlchen.data.db
     get_decoded_events_of_transaction(
         evm_inquirer=ethereum_inquirer,
-        database=database,
         tx_hash=tx_hex,
     )
     async_query = random.choice([False, True])
@@ -74,7 +72,7 @@ def test_get_balances(
         assert outcome['message'] == ''
         result = outcome['result']
     else:
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
 
     address_balances = result[ethereum_accounts[0]]
     for lp in address_balances:
@@ -128,10 +126,8 @@ def test_get_events_history_filtering_by_timestamp(rotkehlchen_api_server: 'APIS
     """
     tx_hex = deserialize_evm_tx_hash('0xb226ddb8cbb286a7a998a35263ad258110eed5f923488f03a8d890572cd4608e')  # noqa: E501
     ethereum_inquirer = rotkehlchen_api_server.rest_api.rotkehlchen.chains_aggregator.ethereum.node_inquirer  # noqa: E501
-    database = rotkehlchen_api_server.rest_api.rotkehlchen.data.db
     get_decoded_events_of_transaction(
         evm_inquirer=ethereum_inquirer,
-        database=database,
         tx_hash=tx_hex,
     )
     # Call time range
@@ -160,7 +156,7 @@ def test_get_events_history_filtering_by_timestamp(rotkehlchen_api_server: 'APIS
         assert outcome['message'] == ''
         result = outcome['result']
     else:
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
 
     events_balances = result[TEST_EVENTS_ADDRESS_1]
 

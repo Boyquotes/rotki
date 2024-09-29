@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING
 
 from rotkehlchen.db.constants import UpdateType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
-from rotkehlchen.types import SUPPORTED_EVM_CHAINS, ExternalServiceApiCredentials
+from rotkehlchen.types import SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE, ExternalServiceApiCredentials
 
 if TYPE_CHECKING:
     from rotkehlchen.data_migrations.progress import MigrationProgressHandler
@@ -14,7 +14,7 @@ log = RotkehlchenLogsAdapter(logger)
 
 
 def update_data_and_detect_accounts(
-        chains: list[SUPPORTED_EVM_CHAINS],
+        chains: list[SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE],
         external_service_credentials: list[ExternalServiceApiCredentials],
         rotki: 'Rotkehlchen',
         progress_handler: 'MigrationProgressHandler',
@@ -39,7 +39,7 @@ def update_data_and_detect_accounts(
 
     rotki.chains_aggregator.detect_evm_accounts(progress_handler, chains=chains)
     external_services = []
-    for external_service, _ in external_service_credentials:
+    for external_service, _, _ in external_service_credentials:
         external_services.append(external_service)
 
     rotki.data.db.delete_external_service_credentials(external_services)

@@ -1,19 +1,21 @@
 import json
 import logging
-from abc import ABCMeta
+import operator
+from abc import ABC
 from collections.abc import Iterator
 from enum import Enum, auto
 from http import HTTPStatus
 from json.decoder import JSONDecodeError
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Final, Literal, overload
 
 import gevent
 import requests
 
 from rotkehlchen.api.websockets.typedefs import WSMessageType
 from rotkehlchen.chain.evm.constants import GENESIS_HASH, ZERO_ADDRESS
+from rotkehlchen.chain.scroll.constants import SCROLL_GENESIS
 from rotkehlchen.chain.structures import TimestampOrBlockRange
-from rotkehlchen.db.constants import HISTORY_MAPPING_STATE_DECODED
+from rotkehlchen.db.constants import EVMTX_DECODED
 from rotkehlchen.db.evmtx import DBEvmTx
 from rotkehlchen.db.history_events import DBHistoryEvents
 from rotkehlchen.db.settings import CachedSettings
@@ -27,16 +29,19 @@ from rotkehlchen.serialization.deserialize import (
     deserialize_timestamp,
 )
 from rotkehlchen.types import (
-    SUPPORTED_EVM_CHAINS,
+    SUPPORTED_EVM_CHAINS_TYPE,
+    ApiKey,
     ChecksumEvmAddress,
     EvmInternalTransaction,
     EvmTransaction,
     EVMTxHash,
     ExternalService,
+    Location,
     SupportedBlockchain,
     Timestamp,
     deserialize_evm_tx_hash,
 )
+from rotkehlchen.utils.data_structures import LRUCacheWithRemove
 from rotkehlchen.utils.misc import hex_or_bytes_to_int, set_user_agent
 from rotkehlchen.utils.serialization import jsonloads_dict
 
@@ -51,14 +56,16 @@ logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
 
-class EtherscanHasChainActivity(Enum):
+class HasChainActivity(Enum):
     """
-    Classify the type of transaction first found in etherscan. TRANSACTIONS means that the endpoint
-    for transactions/internal transactions had entries, TOKENS means that the tokens endpoint had
-    entries and NONE means that no entry has been found in the different endpoints.
-    """
+    Classify the type of transaction first found in blockscout/etherscan.
+    TRANSACTIONS means that the endpoint for transactions/internal transactions
+    had entries, TOKENS means that the tokens endpoint had entries, BALANCE means
+    that the address has a non-zero native asset balance and NONE means that no
+    activity was found."""
     TRANSACTIONS = auto()
     TOKENS = auto()
+    BALANCE = auto()
     NONE = auto()
 
 
@@ -67,16 +74,27 @@ def _hashes_tuple_to_list(hashes: set[tuple[EVMTxHash, Timestamp]]) -> list[EVMT
 
     This function needs to exist since Set has no guranteed order of iteration.
     """
-    return [x[0] for x in sorted(hashes, key=lambda x: x[1])]
+    return [x[0] for x in sorted(hashes, key=operator.itemgetter(1))]
 
 
-class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
+ROTKI_INCLUDED_KEYS: Final = {
+    SupportedBlockchain.ETHEREUM: 'W9CEV6QB9NIPUEHD6KNEYM4PDX6KBPRVVR',
+    SupportedBlockchain.OPTIMISM: 'KQ54A7R984F1SU3HP1K7CE4JW5WVGCPCSM',
+    SupportedBlockchain.ARBITRUM_ONE: 'CED6CY1RYKISNURT4KGYBS867KC8642TXJ',
+    SupportedBlockchain.BASE: '2VR29FVKEJ1YUIT3AAJB8TQ73HDHQYWYZK',
+    SupportedBlockchain.POLYGON_POS: 'BGT3NM5T4UWNETFWITQWZQWFGZMF8MFAZF',
+    SupportedBlockchain.SCROLL: '5EBTU13S94SNPR77TUXMD8944ADFD5ZY15',
+    SupportedBlockchain.GNOSIS: 'SPF6XYXSKY7Y2IK9KHVAA25DQW35ZRQC39',
+}
+
+
+class Etherscan(ExternalServiceWithApiKey, ABC):
     """Base class for all Etherscan implementations"""
     def __init__(
             self,
             database: 'DBHandler',
             msg_aggregator: 'MessagesAggregator',
-            chain: SUPPORTED_EVM_CHAINS,
+            chain: SUPPORTED_EVM_CHAINS_TYPE,
             base_url: str,
             service: Literal[
                 ExternalService.ETHERSCAN,
@@ -85,6 +103,7 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
                 ExternalService.ARBITRUM_ONE_ETHERSCAN,
                 ExternalService.BASE_ETHERSCAN,
                 ExternalService.GNOSIS_ETHERSCAN,
+                ExternalService.SCROLL_ETHERSCAN,
             ],
     ) -> None:
         super().__init__(database=database, service_name=service)
@@ -97,11 +116,13 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
             SupportedBlockchain.ARBITRUM_ONE,
             SupportedBlockchain.BASE,
             SupportedBlockchain.GNOSIS,
+            SupportedBlockchain.SCROLL,
         ) else 'api-'
         self.base_url = base_url
         self.session = requests.session()
         self.warning_given = False
         set_user_agent(self.session)
+        self.timestamp_to_block_cache: LRUCacheWithRemove[Timestamp, int] = LRUCacheWithRemove(maxsize=32)  # noqa: E501
         # set per-chain earliest timestamps that can be turned to blocks. Never returns block 0
         if service == ExternalService.ETHERSCAN:
             self.earliest_ts = 1438269989
@@ -113,6 +134,8 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
             self.earliest_ts = 1686789347
         elif service == ExternalService.GNOSIS_ETHERSCAN:
             self.earliest_ts = 1539024185
+        elif service == ExternalService.SCROLL_ETHERSCAN:
+            self.earliest_ts = SCROLL_GENESIS
         else:  # Polygon POS
             self.earliest_ts = 1590856200
 
@@ -159,7 +182,7 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
         ...
 
     @overload
-    def _query(  # pylint: disable=no-self-use
+    def _query(
             self,
             module: str,
             action: Literal[
@@ -171,7 +194,7 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
         ...
 
     @overload
-    def _query(  # pylint: disable=no-self-use
+    def _query(
             self,
             module: str,
             action: Literal[
@@ -212,6 +235,7 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
         - RemoteError if there are any problems with reaching Etherscan or if
         an unexpected response is returned
         """
+        result = None
         query_str = f'https://{self.prefix_url}{self.base_url}/api?module={module}&action={action}'
         if options:
             for name, value in options.items():
@@ -228,37 +252,36 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
                     },
                 )
                 self.warning_given = True
-        else:
-            query_str += f'&apikey={api_key}'
 
+            api_key = ApiKey(ROTKI_INCLUDED_KEYS[self.chain])
+            log.debug(f'Using default etherscan key for {self.chain}')
+
+        query_str += f'&apikey={api_key}'
         backoff = 1
-        backoff_limit = 33
-        timeout = timeout if timeout else CachedSettings().get_timeout_tuple()
+        cached_settings = CachedSettings()
+        timeout = timeout or cached_settings.get_timeout_tuple()
+        backoff_limit = cached_settings.get_query_retry_limit()  # max time spent trying to get a response from etherscan in case of rate limits  # noqa: E501
         while backoff < backoff_limit:
             response = None
             log.debug(f'Querying {self.chain} etherscan: {query_str}')
             try:
                 response = self.session.get(query_str, timeout=timeout)
             except requests.exceptions.RequestException as e:
-                if 'Max retries exceeded with url' not in str(e):
-                    raise RemoteError(f'{self.chain} Etherscan API request failed due to {e!s}') from e  # noqa: E501
+                raise RemoteError(f'{self.chain} Etherscan API request failed due to {e!s}') from e
 
-            if (
-                    response is None or  # max retries exceeded with url
-                    response.status_code == HTTPStatus.TOO_MANY_REQUESTS
-            ):
+            if response.status_code == HTTPStatus.TOO_MANY_REQUESTS:
                 if backoff >= backoff_limit:
                     raise RemoteError(
-                        f'Getting {self.chain} Etherscan max retries/too many requests '
-                        f'error even after we incrementally backed off',
+                        f'Getting {self.chain} Etherscan too many requests error '
+                        f'even after we incrementally backed off',
                     )
 
                 log.debug(
-                    f'Got 429 or max retries exceeded from {self.chain} etherscan. Will '
+                    f'Got too many requests error from {self.chain} etherscan. Will '
                     f'backoff for {backoff} seconds.',
                 )
                 gevent.sleep(backoff)
-                backoff = backoff * 2
+                backoff *= 2
                 continue
 
             if response.status_code != 200:
@@ -277,8 +300,7 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
                 ) from e
 
             try:
-                result = json_ret.get('result', None)
-                if result is None:
+                if (result := json_ret.get('result')) is None:
                     if action in {'eth_getTransactionByHash', 'eth_getTransactionReceipt', 'getcontractcreation'}:  # noqa: E501
                         return None
 
@@ -287,25 +309,25 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
                         f'Missing a result in response. Response was: {response.text}',
                     )
 
-                # sucessful proxy calls do not include a status
+                # successful proxy calls do not include a status
                 status = int(json_ret.get('status', 1))
 
                 if status != 1:
                     if status == 0:
                         if result == 'Contract source code not verified':
                             return None
-                        if 'rate limit reached' in result:
-                            log.debug(
-                                f'Got response: {response.text} from {self.chain} etherscan.'
-                                f' Will backoff for {backoff} seconds.',
-                            )
-                            gevent.sleep(backoff)
-                            # Continue increasing backoff until limit is reached.
-                            # If limit is reached then keep sleeping with the limit.
-                            # Etherscan will let the query go through eventually
-                            if backoff * 2 < backoff_limit:
-                                backoff = backoff * 2
-                            continue
+                        if json_ret.get('message', '') == 'NOTOK':
+                            if result.startswith(('Max calls per sec rate', 'Max rate limit reached')):  # different variants of the same message found in the different versions. Sent when there is a short 5 secs rate limit.  # noqa: E501
+                                log.debug(
+                                    f'Got response: {response.text} from {self.chain} etherscan.'
+                                    f' Will backoff for {backoff} seconds.',
+                                )
+                                gevent.sleep(backoff)
+                                backoff *= 2
+                                continue
+
+                            elif result.startswith('Max daily'):
+                                raise RemoteError('Etherscan max daily rate limit reached.')
 
                     transaction_endpoint_and_none_found = (
                         status == 0 and
@@ -460,12 +482,12 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
                             dbevents.delete_events_by_tx_hash(
                                 write_cursor=write_cursor,
                                 tx_hashes=[GENESIS_HASH],
-                                chain_id=self.chain.to_chain_id(),  # type: ignore[arg-type]
+                                location=Location.from_chain(self.chain),
                             )
                             write_cursor.execute(
                                 'DELETE from evm_tx_mappings WHERE tx_id=(SELECT identifier FROM '
                                 'evm_transactions WHERE tx_hash=? AND chain_id=?) AND value=?',
-                                (GENESIS_HASH, self.chain.to_chain_id().serialize_for_db(), HISTORY_MAPPING_STATE_DECODED),  # noqa: E501
+                                (GENESIS_HASH, self.chain.to_chain_id().serialize_for_db(), EVMTX_DECODED),  # noqa: E501
                             )
                 except DeserializationError as e:
                     self.msg_aggregator.add_warning(f'{e!s}. Skipping transaction')
@@ -507,8 +529,8 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
                     timestamp = deserialize_timestamp(entry['timeStamp'])
                 except DeserializationError as e:
                     log.error(
-                        f"Failed to read transaction timestamp {entry['hash']} from etherscan for "
-                        f'{account} in the range {from_ts} to {to_ts}. {e!s}',
+                        f"Failed to read transaction timestamp {entry['hash']} from {self.chain} "
+                        f'etherscan for {account} in the range {from_ts} to {to_ts}. {e!s}',
                     )
                     continue
 
@@ -520,8 +542,8 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
                     hashes.add((deserialize_evm_tx_hash(entry['hash']), timestamp))
                 except DeserializationError as e:
                     log.error(
-                        f"Failed to read transaction hash {entry['hash']} from etherscan for "
-                        f'{account} in the range {from_ts} to {to_ts}. {e!s}',
+                        f"Failed to read transaction hash {entry['hash']} from {self.chain} "
+                        f'etherscan for {account} in the range {from_ts} to {to_ts}. {e!s}',
                     )
                     continue
 
@@ -531,9 +553,9 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
 
         yield _hashes_tuple_to_list(hashes)
 
-    def has_activity(self, account: ChecksumEvmAddress) -> EtherscanHasChainActivity:
-        """Queries transactions, internal_txs and tokentx for an address with limit=1
-        just to quickly determine if the account has had any activity in the chain.
+    def has_activity(self, account: ChecksumEvmAddress) -> HasChainActivity:
+        """Queries native asset balance, transactions, internal_txs and tokentx for an address
+        with limit=1 just to quickly determine if the account has had any activity in the chain.
         We make a distinction between transactions and ERC20 transfers since ERC20
         are often spammed. If there was no activity at all we return the enum value
         NONE.
@@ -541,14 +563,18 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
         options = {'address': str(account), 'page': 1, 'offset': 1}
         result = self._query(module='account', action='txlist', options=options)
         if len(result) != 0:
-            return EtherscanHasChainActivity.TRANSACTIONS
+            return HasChainActivity.TRANSACTIONS
         result = self._query(module='account', action='txlistinternal', options=options)
         if len(result) != 0:
-            return EtherscanHasChainActivity.TRANSACTIONS
+            return HasChainActivity.TRANSACTIONS
         result = self._query(module='account', action='tokentx', options=options)
         if len(result) != 0:
-            return EtherscanHasChainActivity.TOKENS
-        return EtherscanHasChainActivity.NONE
+            return HasChainActivity.TOKENS
+        if self.chain in {SupportedBlockchain.ETHEREUM, SupportedBlockchain.GNOSIS}:
+            balance = self._query(module='account', action='balance', options={'address': account})
+            if int(balance) != 0:
+                return HasChainActivity.BALANCE
+        return HasChainActivity.NONE
 
     def get_latest_block_number(self) -> int:
         """Gets the latest block number
@@ -670,6 +696,10 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
         if ts < self.earliest_ts:
             return 0  # etherscan does not handle timestamps close to genesis well
 
+        # check if value exists in the cache
+        if (block_number := self.timestamp_to_block_cache.get(ts)) is not None:
+            return block_number
+
         options = {'timestamp': ts, 'closest': closest}
         result = self._query(
             module='block',
@@ -680,10 +710,11 @@ class Etherscan(ExternalServiceWithApiKey, metaclass=ABCMeta):
             number = deserialize_int_from_str(result, 'etherscan getblocknobytime')
         except DeserializationError as e:
             raise RemoteError(
-                f'Could not read blocknumber from etherscan getblocknobytime '
-                f'result {result}',
+                f'Could not read blocknumber from {self.chain} etherscan '
+                f'getblocknobytime result {result}',
             ) from e
 
+        self.timestamp_to_block_cache.add(key=ts, value=number)
         return number
 
     def get_contract_creation_hash(self, address: ChecksumEvmAddress) -> EVMTxHash | None:

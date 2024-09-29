@@ -1,4 +1,5 @@
-import { type Section, type Status } from '@/types/status';
+import type { ContextColorsType, RuiIcons } from '@rotki/ui-library';
+import type { Section, Status } from '@/types/status';
 
 interface ActionFailure<T = string> {
   readonly message: T;
@@ -13,6 +14,7 @@ export type ActionStatus<T = string> = ActionFailure<T> | ActionSuccess;
 
 export interface StatusPayload {
   readonly status: Status;
+  readonly subsection?: string;
   readonly section: Section;
 }
 
@@ -25,9 +27,9 @@ export interface Version {
 export interface ActionDataEntry<T = string> {
   readonly identifier: T;
   readonly label: string;
-  readonly icon?: string | null;
-  readonly image?: string | null;
-  readonly color?: string | null;
+  readonly icon?: RuiIcons;
+  readonly image?: string;
+  readonly color?: ContextColorsType;
   readonly matcher?: (identifier: string) => boolean | null;
-  readonly detailPath?: string | null;
+  readonly detailPath?: string;
 }

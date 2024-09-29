@@ -2,7 +2,7 @@
 import useVuelidate from '@vuelidate/core';
 import { helpers, requiredIf } from '@vuelidate/validators';
 import { toMessages } from '@/utils/validation';
-import { type PremiumSetup } from '@/types/login';
+import type { PremiumSetup } from '@/types/login';
 
 const props = defineProps<{
   loading: boolean;
@@ -23,18 +23,18 @@ const apiKey = computed({
   get() {
     return get(form).apiKey;
   },
-  set(value: string | null) {
+  set(value?: string) {
     input({ apiKey: value || '' });
-  }
+  },
 });
 
 const apiSecret = computed({
   get() {
     return get(form).apiSecret;
   },
-  set(value: string | null) {
+  set(value?: string) {
     input({ apiSecret: value || '' });
-  }
+  },
 });
 
 const syncDatabase = computed({
@@ -43,45 +43,38 @@ const syncDatabase = computed({
   },
   set(value: boolean) {
     input({ syncDatabase: value });
-  }
+  },
 });
 
-watch(enabled, enabled => {
-  if (!enabled) {
+watch(enabled, (enabled) => {
+  if (!enabled)
     set(syncDatabase, false);
-  }
 });
 
 const rules = {
   apiKey: {
-    required: helpers.withMessage(
-      t('premium_credentials.validation.non_empty_key').toString(),
-      requiredIf(enabled)
-    )
+    required: helpers.withMessage(t('premium_credentials.validation.non_empty_key'), requiredIf(enabled)),
   },
   apiSecret: {
-    required: helpers.withMessage(
-      t('premium_credentials.validation.non_empty_secret').toString(),
-      requiredIf(enabled)
-    )
-  }
+    required: helpers.withMessage(t('premium_credentials.validation.non_empty_secret'), requiredIf(enabled)),
+  },
 };
 
 const v$ = useVuelidate(rules, form, {
   $autoDirty: true,
-  $stopPropagation: true
+  $stopPropagation: true,
 });
 
 watchImmediate(v$, ({ $invalid }) => {
   emit('update:valid', !$invalid);
 });
 
-const input = (newInput: Partial<PremiumSetup>) => {
+function input(newInput: Partial<PremiumSetup>) {
   emit('update:form', {
     ...get(form),
-    ...newInput
+    ...newInput,
   });
-};
+}
 </script>
 
 <template>

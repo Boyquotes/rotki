@@ -1,16 +1,17 @@
 import logging
+from collections.abc import Callable
 from json.decoder import JSONDecodeError
 from typing import Any
 
 import requests
 from eth_utils.address import to_checksum_address
 
-from rotkehlchen.assets.asset import Asset
+from rotkehlchen.assets.asset import Asset, AssetWithOracles
 from rotkehlchen.assets.converters import asset_from_binance
 from rotkehlchen.constants.assets import A_ETH
 from rotkehlchen.constants.timing import DAY_IN_SECONDS
 from rotkehlchen.db.settings import CachedSettings
-from rotkehlchen.errors.asset import UnknownAsset, UnsupportedAsset
+from rotkehlchen.errors.asset import UnknownAsset, UnprocessableTradePair, UnsupportedAsset
 from rotkehlchen.exchanges.data_structures import BinancePair
 from rotkehlchen.fval import FVal
 from rotkehlchen.globaldb.binance import GlobalDBBinance
@@ -29,7 +30,7 @@ def get_key_if_has_val(mapping: dict[str, Any], key: str) -> str | None:
     The assumption here is that the value of the key is str. If it's not str
     then this function will attempt to turn it into one.
     """
-    val = mapping.get(key, None)
+    val = mapping.get(key)
     # empty string has falsy value
     return str(val) if val else None
 
@@ -42,7 +43,7 @@ def deserialize_asset_movement_address(
     """Gets the address from an asset movement mapping making sure that if it's
     an ethereum deposit/withdrawal the address is returned checksummed"""
     value = get_key_if_has_val(mapping, key)
-    if value and asset == A_ETH:
+    if value and (asset == A_ETH or asset.is_evm_token()):
         try:
             value = to_checksum_address(value)
         except ValueError:
@@ -118,3 +119,57 @@ def query_binance_exchange_pairs(location: Location) -> dict[str, BinancePair]:
         database_pairs = gdb_binance.get_all_binance_pairs(location)
         pairs = {pair.symbol: pair for pair in database_pairs}
     return pairs
+
+
+def pair_symbol_to_base_quote(
+        symbol: str,
+        asset_deserialize_fn: Callable[[str], AssetWithOracles],
+        five_letter_assets: set[str],
+        six_letter_assets: set[str] | None = None,
+) -> tuple[AssetWithOracles, AssetWithOracles]:
+    """Turns a symbol product into a base/quote asset tuple. Currently used for gemini and bybit.
+
+    - Can raise UnprocessableTradePair if symbol is in unexpected format
+    - Case raise UnknownAsset if any of the pair assets are not known to rotki
+    """
+    if len(symbol) == 5:
+        base_asset = asset_deserialize_fn(symbol[:2].upper())
+        quote_asset = asset_deserialize_fn(symbol[2:].upper())
+    elif len(symbol) == 6:
+        try:
+            base_asset = asset_deserialize_fn(symbol[:3].upper())
+            quote_asset = asset_deserialize_fn(symbol[3:].upper())
+        except UnknownAsset:
+            base_asset = asset_deserialize_fn(symbol[:2].upper())
+            quote_asset = asset_deserialize_fn(symbol[2:].upper())
+    elif len(symbol) == 7:
+        try:
+            base_asset = asset_deserialize_fn(symbol[:4].upper())
+            quote_asset = asset_deserialize_fn(symbol[4:].upper())
+        except UnknownAsset:
+            base_asset = asset_deserialize_fn(symbol[:3].upper())
+            quote_asset = asset_deserialize_fn(symbol[3:].upper())
+    elif len(symbol) == 8:
+        if any(asset in symbol for asset in five_letter_assets):
+            base_asset = asset_deserialize_fn(symbol[:5].upper())
+            quote_asset = asset_deserialize_fn(symbol[5:].upper())
+        else:
+            base_asset = asset_deserialize_fn(symbol[:4].upper())
+            quote_asset = asset_deserialize_fn(symbol[4:].upper())
+    elif len(symbol) == 9:
+        if any(asset in symbol for asset in five_letter_assets):
+            base_asset = asset_deserialize_fn(symbol[:5].upper())
+            quote_asset = asset_deserialize_fn(symbol[5:].upper())
+        else:
+            base_asset = asset_deserialize_fn(symbol[:6].upper())
+            quote_asset = asset_deserialize_fn(symbol[6:].upper())
+    elif len(symbol) == 10 and six_letter_assets is not None:
+        if any(asset in symbol for asset in six_letter_assets):
+            base_asset = asset_deserialize_fn(symbol[:6].upper())
+            quote_asset = asset_deserialize_fn(symbol[6:].upper())
+        else:
+            raise UnprocessableTradePair(symbol)
+    else:
+        raise UnprocessableTradePair(symbol)
+
+    return base_asset, quote_asset

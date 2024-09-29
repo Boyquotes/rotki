@@ -1,31 +1,27 @@
-import {
-  type ThisTypedMountOptions,
-  type Wrapper,
-  mount
-} from '@vue/test-utils';
-import Vuetify from 'vuetify';
+import { type ComponentMountingOptions, type VueWrapper, mount } from '@vue/test-utils';
+import { afterEach, describe, expect, it } from 'vitest';
 import { setActivePinia } from 'pinia';
-import { type StringSuggestionMatcher } from '@/types/filtering';
 import FilterDropdown from '@/components/table-filter/FilterDropdown.vue';
-import createCustomPinia from '../../../utils/create-pinia';
-
-vi.mocked(useCssModule).mockReturnValue({
-  suggestions: 'suggestions'
-});
+import { createCustomPinia } from '../../../utils/create-pinia';
+import type { StringSuggestionMatcher } from '@/types/filtering';
 
 describe('table-filter/FilterDropdown.vue', () => {
-  let wrapper: Wrapper<any>;
-  const createWrapper = (options: ThisTypedMountOptions<any> = {}) => {
-    const vuetify = new Vuetify();
+  let wrapper: VueWrapper<InstanceType<typeof FilterDropdown>>;
+  const createWrapper = (options: ComponentMountingOptions<typeof FilterDropdown> = {}) => {
     const pinia = createCustomPinia();
     setActivePinia(pinia);
     return mount(FilterDropdown, {
-      pinia,
-      vuetify,
-      stubs: ['filter-entry', 'suggested-item', 'I18n'],
-      ...options
+      global: {
+        stubs: ['I18nT'],
+        plugins: [pinia],
+      },
+      ...options,
     });
   };
+
+  afterEach(() => {
+    wrapper.unmount();
+  });
 
   const matchers: StringSuggestionMatcher<any>[] = [
     {
@@ -33,7 +29,7 @@ describe('table-filter/FilterDropdown.vue', () => {
       description: 'filter by start date',
       string: true,
       suggestions: () => [],
-      validate: () => true
+      validate: () => true,
     },
     {
       key: 'type',
@@ -41,118 +37,100 @@ describe('table-filter/FilterDropdown.vue', () => {
       string: true,
       allowExclusion: true,
       suggestions: () => ['type 1', 'type 2'],
-      validate: () => true
-    }
+      validate: () => true,
+    },
   ];
 
-  it('Show all matchers options', () => {
-    const propsData = {
+  it('show all matchers options', () => {
+    const props = {
+      matches: {},
       matchers,
-      selectedSuggestion: 1
+      selectedSuggestion: 1,
+      keyword: '',
     };
 
-    wrapper = createWrapper({ propsData });
+    wrapper = createWrapper({ props });
 
-    expect(wrapper.findAll('.suggestions > button')).toHaveLength(
-      matchers.length
-    );
+    expect(wrapper.findAll('[data-cy=suggestions] > button')).toHaveLength(matchers.length);
     expect(
-      wrapper
-        .find('.suggestions > button:nth-child(2)')
-        .classes()
-        .includes('highlightedMatcher')
+      wrapper.find('[data-cy=suggestions] > button:nth-child(2)').classes().includes('highlightedMatcher'),
     ).toBeTruthy();
   });
 
-  it('Show unsupported filter message', () => {
-    const propsData = {
+  it('show unsupported filter message', () => {
+    const props = {
+      matches: {},
       matchers: [],
       keyword: 'wrong_filter',
-      selectedSuggestion: 0
+      selectedSuggestion: 0,
     };
 
-    wrapper = createWrapper({ propsData });
+    wrapper = createWrapper({ props });
 
-    expect(
-      wrapper.find('div > div:first-child > span:first-child').text()
-    ).toBe('table_filter.unsupported_filter');
+    expect(wrapper.find('div > div:first-child > span:first-child').text()).toBe('table_filter.unsupported_filter');
 
-    expect(wrapper.find('div > div:first-child > span:last-child').text()).toBe(
-      propsData.keyword
-    );
+    expect(wrapper.find('div > div:first-child > span:last-child').text()).toBe(props.keyword);
   });
 
-  it('Show suggestions', async () => {
-    const propsData = {
+  it('show suggestions', async () => {
+    const props = {
+      matches: {},
       matchers,
-      selectedSuggestion: 0
+      selectedSuggestion: 0,
+      keyword: '',
     };
 
-    const wrapper = createWrapper({ propsData });
+    const wrapper = createWrapper({ props });
 
     await wrapper.setProps({
       selectedMatcher: matchers[1],
-      keyword: 'type='
+      keyword: 'type=',
     });
 
-    await wrapper.vm.$nextTick();
+    await nextTick();
 
     const suggestions = matchers[1].suggestions();
-    expect(wrapper.findAll('.suggestions > button')).toHaveLength(
-      suggestions.length
-    );
+    expect(wrapper.findAll('[data-cy=suggestions] > button')).toHaveLength(suggestions.length);
 
-    expect(wrapper.find('.suggestions > button:nth-child(1)').text()).toBe(
-      'type = type 1'
-    );
-    expect(wrapper.find('.suggestions > button:nth-child(2)').text()).toBe(
-      'type = type 2'
-    );
+    expect(wrapper.find('[data-cy=suggestions] > button:nth-child(1)').text()).toBe('type=type 1');
+    expect(wrapper.find('[data-cy=suggestions] > button:nth-child(2)').text()).toBe('type=type 2');
 
     await wrapper.setProps({
-      keyword: 'type !='
+      keyword: 'type!=',
     });
 
-    await wrapper.vm.$nextTick();
+    await nextTick();
 
-    expect(wrapper.find('.suggestions > button:nth-child(1)').text()).toBe(
-      'type != type 1'
-    );
-    expect(wrapper.find('.suggestions > button:nth-child(2)').text()).toBe(
-      'type != type 2'
-    );
+    expect(wrapper.find('[data-cy=suggestions] > button:nth-child(1)').text()).toBe('type!=type 1');
+    expect(wrapper.find('[data-cy=suggestions] > button:nth-child(2)').text()).toBe('type!=type 2');
 
     await wrapper.setProps({
-      keyword: 'type=type 2'
+      keyword: 'type=type 2',
     });
 
-    await wrapper.vm.$nextTick();
+    await nextTick();
 
-    expect(wrapper.find('.suggestions > button:nth-child(1)').text()).toBe(
-      'type = type 2'
-    );
-    expect(wrapper.find('.suggestions > button:nth-child(2)').text()).toBe(
-      'type = type 1'
-    );
+    expect(wrapper.find('[data-cy=suggestions] > button:nth-child(1)').text()).toBe('type=type 2');
+    expect(wrapper.find('[data-cy=suggestions] > button:nth-child(2)').text()).toBe('type=type 1');
   });
 
-  it('Show no suggestion message', async () => {
-    const propsData = {
+  it('show no suggestion message', async () => {
+    const props = {
+      matches: {},
       matchers,
-      selectedSuggestion: 0
+      selectedSuggestion: 0,
+      keyword: '',
     };
 
-    const wrapper = createWrapper({ propsData });
+    const wrapper = createWrapper({ props });
 
     await wrapper.setProps({
       selectedMatcher: matchers[0],
-      keyword: 'start='
+      keyword: 'start=',
     });
 
-    await wrapper.vm.$nextTick();
+    await nextTick();
 
-    expect(wrapper.find('I18n-stub').attributes().path).toBe(
-      'table_filter.no_suggestions'
-    );
+    expect(wrapper.find('i18n-t-stub').attributes('keypath')).toBe('table_filter.start_typing');
   });
 });

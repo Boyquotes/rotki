@@ -1,11 +1,14 @@
 """Functions dealing with the general_cache table of the Global DB"""
+import operator
 from collections.abc import Iterable
 
 from rotkehlchen.chain.evm.constants import ZERO_ADDRESS
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.db.drivers.gevent import DBCursor
 from rotkehlchen.types import (
+    UNIQUE_CACHE_KEYS,
     CacheType,
+    ChainID,
     ChecksumEvmAddress,
     GeneralCacheType,
     Timestamp,
@@ -27,8 +30,10 @@ def compute_cache_key(key_parts: Iterable[str | CacheType]) -> str:
     return cache_key
 
 
-# Using any random address here, since length of all addresses is the same
-BASE_POOL_TOKENS_KEY_LENGTH = len(compute_cache_key([CacheType.CURVE_POOL_TOKENS, ZERO_ADDRESS]))
+def base_pool_tokens_key_length(chain_id: ChainID) -> int:
+    """Returns the length of the base pool tokens cache key for the given chain id.
+    Using any random address here, since length of all addresses is the same."""
+    return len(compute_cache_key([CacheType.CURVE_POOL_TOKENS, str(chain_id.serialize_for_db()), ZERO_ADDRESS]))  # noqa: E501
 
 
 def globaldb_set_general_cache_values_at_ts(
@@ -55,13 +60,31 @@ def globaldb_set_general_cache_values(
 ) -> None:
     """Function to update general cache in globaldb. Inserts the value paired with the cache key.
     If any entry exists, overwrites it. The timestamp is always the current time."""
-    timestamp = ts_now()
     globaldb_set_general_cache_values_at_ts(
         write_cursor=write_cursor,
         key_parts=key_parts,
         values=values,
-        timestamp=timestamp,
+        timestamp=ts_now(),
     )
+
+
+def globaldb_delete_general_cache_values(
+        write_cursor: DBCursor,
+        key_parts: Iterable[str | GeneralCacheType],
+        values: tuple[str, ...] | None = None,
+) -> None:
+    """
+    Delete an entry from the general_cache. If a list of values is provided it deletes
+    the rows that contain any of the provided values and have the provided key.
+    """
+    query = 'DELETE FROM general_cache WHERE key=?'
+    bindings = [compute_cache_key(key_parts)]
+
+    if values is not None:
+        query += f' AND value IN ({",".join("?" * len(values))})'
+        bindings.extend(values)
+
+    write_cursor.execute(query, bindings)
 
 
 def globaldb_get_general_cache_values(
@@ -70,9 +93,20 @@ def globaldb_get_general_cache_values(
 ) -> list[str]:
     """Function that reads from the general cache table.
     It returns all the values that are paired with the given key."""
-    cache_key = compute_cache_key(key_parts)
-    cursor.execute('SELECT value FROM general_cache WHERE key=?', (cache_key,))
+    cursor.execute('SELECT value FROM general_cache WHERE key=?', (compute_cache_key(key_parts),))
     return [entry[0] for entry in cursor]
+
+
+def globaldb_general_cache_exists(
+        cursor: DBCursor,
+        key_parts: Iterable[str | GeneralCacheType],
+        value: str,
+) -> bool:
+    """Check if a combination key/value exists in the general cache"""
+    return cursor.execute(
+        'SELECT COUNT(*) FROM general_cache WHERE key=? AND value=?',
+        (compute_cache_key(key_parts), value),
+    ).fetchone()[0] == 1
 
 
 def globaldb_set_unique_cache_value_at_ts(
@@ -163,15 +197,15 @@ def globaldb_get_general_cache_last_queried_ts_by_key(
     Get the last_queried_ts of the oldest stored element by key_parts. If there is no such
     element returns Timestamp(0)
     """
-    cache_key = compute_cache_key(key_parts)
     cursor.execute(
         'SELECT last_queried_ts FROM general_cache WHERE key=? '
-        'ORDER BY last_queried_ts ASC',
-        (cache_key,),
+        'ORDER BY last_queried_ts DESC',
+        (compute_cache_key(key_parts),),
     )
-    result = cursor.fetchone()
-    if result is None:
+
+    if (result := cursor.fetchone()) is None:
         return Timestamp(0)
+
     return Timestamp(result[0])
 
 
@@ -183,21 +217,35 @@ def globaldb_get_unique_cache_last_queried_ts_by_key(
     Get the last_queried_ts of the oldest stored element by key_parts. If there is no such
     element returns Timestamp(0)
     """
-    cache_key = compute_cache_key(key_parts)
     cursor.execute(
         'SELECT last_queried_ts FROM unique_cache WHERE key=? '
-        'ORDER BY last_queried_ts ASC',
-        (cache_key,),
+        'ORDER BY last_queried_ts DESC',
+        (compute_cache_key(key_parts),),
     )
-    result = cursor.fetchone()
-    if result is None:
+
+    if (result := cursor.fetchone()) is None:
         return Timestamp(0)
+
     return Timestamp(result[0])
+
+
+def globaldb_update_cache_last_ts(
+        write_cursor: DBCursor,
+        cache_type: UniqueCacheType | GeneralCacheType,
+        key_parts: Iterable[str] | None,
+) -> None:
+    args = key_parts if key_parts is not None else []
+    table = 'unique_cache' if cache_type in UNIQUE_CACHE_KEYS else 'general_cache'
+    write_cursor.execute(
+        f'UPDATE {table} SET last_queried_ts=? WHERE key LIKE ?',
+        (ts_now(), compute_cache_key((cache_type, *args))),
+    )
 
 
 def read_curve_pool_tokens(
         cursor: 'DBCursor',
         pool_address: ChecksumEvmAddress,
+        chain_id: 'ChainID',
 ) -> list[ChecksumEvmAddress]:
     """
     Reads tokens for a particular curve pool. Tokens are stored with their indices to make sure
@@ -206,12 +254,12 @@ def read_curve_pool_tokens(
     """
     tokens_data = globaldb_get_general_cache_keys_and_values_like(
         cursor=cursor,
-        key_parts=(CacheType.CURVE_POOL_TOKENS, pool_address),
+        key_parts=(CacheType.CURVE_POOL_TOKENS, str(chain_id.serialize_for_db()), pool_address),
     )
     found_tokens: list[tuple[int, ChecksumEvmAddress]] = []
     for key, address in tokens_data:
-        index = int(key[BASE_POOL_TOKENS_KEY_LENGTH:])  # len(key) > BASE_POOL_TOKENS_KEY_LENGTH
+        index = int(key[base_pool_tokens_key_length(chain_id):])  # len(key) > base_pool_tokens_key_length(chain_id)  # noqa: E501
         found_tokens.append((index, string_to_evm_address(address)))
 
-    found_tokens.sort(key=lambda x: x[0])
+    found_tokens.sort(key=operator.itemgetter(0))
     return [address for _, address in found_tokens]

@@ -16,7 +16,7 @@ from rotkehlchen.accounting.accountant import Accountant
 from rotkehlchen.accounting.structures.balance import Balance, BalanceType
 from rotkehlchen.api.websockets.notifier import RotkiNotifier
 from rotkehlchen.api.websockets.typedefs import WSMessageType
-from rotkehlchen.assets.asset import Asset, AssetWithOracles, CryptoAsset
+from rotkehlchen.assets.asset import Asset, AssetWithOracles, Nft
 from rotkehlchen.balances.manual import (
     account_for_manually_tracked_asset_balances,
     get_manually_tracked_balances,
@@ -32,6 +32,7 @@ from rotkehlchen.chain.ethereum.manager import EthereumManager
 from rotkehlchen.chain.ethereum.node_inquirer import EthereumInquirer
 from rotkehlchen.chain.ethereum.oracles.uniswap import UniswapV2Oracle, UniswapV3Oracle
 from rotkehlchen.chain.evm.contracts import EvmContracts
+from rotkehlchen.chain.evm.names import NamePrioritizer
 from rotkehlchen.chain.evm.nodes import populate_rpc_nodes_in_database
 from rotkehlchen.chain.gnosis.manager import GnosisManager
 from rotkehlchen.chain.gnosis.node_inquirer import GnosisInquirer
@@ -39,19 +40,25 @@ from rotkehlchen.chain.optimism.manager import OptimismManager
 from rotkehlchen.chain.optimism.node_inquirer import OptimismInquirer
 from rotkehlchen.chain.polygon_pos.manager import PolygonPOSManager
 from rotkehlchen.chain.polygon_pos.node_inquirer import PolygonPOSInquirer
+from rotkehlchen.chain.scroll.manager import ScrollManager
+from rotkehlchen.chain.scroll.node_inquirer import ScrollInquirer
 from rotkehlchen.chain.substrate.manager import SubstrateManager
 from rotkehlchen.chain.substrate.utils import (
     KUSAMA_NODES_TO_CONNECT_AT_START,
     POLKADOT_NODES_TO_CONNECT_AT_START,
 )
+from rotkehlchen.chain.zksync_lite.manager import ZksyncLiteManager
 from rotkehlchen.config import default_data_directory
 from rotkehlchen.constants import ONE, ZERO
 from rotkehlchen.data_handler import DataHandler
 from rotkehlchen.data_import.manager import CSVDataImporter
 from rotkehlchen.data_migrations.manager import DataMigrationManager
+from rotkehlchen.db.addressbook import DBAddressbook
+from rotkehlchen.db.cache import DBCacheStatic
 from rotkehlchen.db.filtering import NFTFilterQuery
 from rotkehlchen.db.settings import CachedSettings, DBSettings, ModifiableDBSettings
 from rotkehlchen.db.updates import RotkiDataUpdater
+from rotkehlchen.db.utils import replace_tag_mappings
 from rotkehlchen.errors.api import PremiumAuthenticationError
 from rotkehlchen.errors.asset import UnknownAsset
 from rotkehlchen.errors.misc import (
@@ -64,7 +71,6 @@ from rotkehlchen.errors.misc import (
 from rotkehlchen.exchanges.manager import ExchangeManager
 from rotkehlchen.externalapis.beaconchain.service import BeaconChain
 from rotkehlchen.externalapis.coingecko import Coingecko
-from rotkehlchen.externalapis.covalent import Covalent, chains_id
 from rotkehlchen.externalapis.cryptocompare import Cryptocompare
 from rotkehlchen.externalapis.defillama import Defillama
 from rotkehlchen.fval import FVal
@@ -78,19 +84,27 @@ from rotkehlchen.history.types import HistoricalPriceOracle
 from rotkehlchen.icons import IconManager
 from rotkehlchen.inquirer import Inquirer
 from rotkehlchen.logging import RotkehlchenLogsAdapter
-from rotkehlchen.premium.premium import Premium, PremiumCredentials, premium_create_and_verify
+from rotkehlchen.premium.premium import (
+    Premium,
+    PremiumCredentials,
+    has_premium_check,
+    premium_create_and_verify,
+)
 from rotkehlchen.premium.sync import PremiumSyncManager
 from rotkehlchen.tasks.manager import DEFAULT_MAX_TASKS_NUM, TaskManager
 from rotkehlchen.types import (
     EVM_CHAINS_WITH_TRANSACTIONS,
     EVM_CHAINS_WITH_TRANSACTIONS_TYPE,
     SUPPORTED_BITCOIN_CHAINS,
-    SUPPORTED_EVM_CHAINS,
+    SUPPORTED_EVM_CHAINS_TYPE,
+    SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE,
     SUPPORTED_SUBSTRATE_CHAINS,
+    AddressbookEntry,
+    AddressbookType,
     ApiKey,
     ApiSecret,
     BTCAddress,
-    ChainID,
+    ChainType,
     ChecksumEvmAddress,
     ListOfBlockchainAddresses,
     Location,
@@ -112,10 +126,6 @@ logger = logging.getLogger(__name__)
 log = RotkehlchenLogsAdapter(logger)
 
 MAIN_LOOP_SECS_DELAY = 10
-
-
-ICONS_BATCH_SIZE = 3
-ICONS_QUERY_SLEEP = 60
 
 
 class Rotkehlchen:
@@ -169,7 +179,7 @@ class Rotkehlchen:
             self.msg_aggregator,
             sql_vm_instructions_cb=args.sqlite_instructions,
         )
-        self.cryptocompare = Cryptocompare(data_directory=self.data_dir, database=None)
+        self.cryptocompare = Cryptocompare(database=None)
         self.coingecko = Coingecko()
         self.defillama = Defillama()
         self.icon_manager = IconManager(
@@ -209,11 +219,11 @@ class Rotkehlchen:
                     greenlet.dead is False and
                     len(greenlet.args) >= 1 and
                     isinstance(greenlet.args[0], FunctionType) and
-                    greenlet.args[0].__qualname__ == 'RestAPI.get_evm_transactions'
+                    greenlet.args[0].__qualname__ == 'RestAPI.refresh_evm_transactions'
                 )
                 if (
                         is_evm_tx_greenlet and
-                        greenlet.kwargs['only_cache'] is False and
+                        greenlet.kwargs.get('only_cache', False) is False and
                         account_tuple in greenlet.kwargs['filter_query'].accounts
                 ):
                     greenlet.kill(exception=GreenletKilledError('Killed due to request for evm address removal'))  # noqa: E501
@@ -308,9 +318,6 @@ class Rotkehlchen:
         self.cryptocompare.set_database(self.data.db)
         Inquirer()._manualcurrent.set_database(database=self.data.db)
 
-        # Initialize the cached settings singleton
-        CachedSettings()
-
         # Anything that was set above here has to be cleaned in case of failure in the next step
         # by reset_after_failed_account_creation_or_login()
         try:
@@ -335,6 +342,7 @@ class Rotkehlchen:
 
         with self.data.db.conn.read_ctx() as cursor:
             settings = self.get_settings(cursor)
+            CachedSettings().initialize(settings)  # initialize with saved DB settings
             self.greenlet_manager.spawn_and_track(
                 after_seconds=None,
                 task_name='submit_usage_analytics',
@@ -344,14 +352,6 @@ class Rotkehlchen:
                 should_submit=settings.submit_usage_analytics,
             )
             self.beaconchain = BeaconChain(database=self.data.db, msg_aggregator=self.msg_aggregator)  # noqa: E501
-            # Initialize the price historian singleton
-            PriceHistorian(
-                data_directory=self.data_dir,
-                cryptocompare=self.cryptocompare,
-                coingecko=self.coingecko,
-                defillama=self.defillama,
-            )
-            PriceHistorian().set_oracles_order(settings.historical_price_oracles)
 
             exchange_credentials = self.data.db.get_exchange_credentials(cursor)
             self.exchange_manager.initialize_exchanges(
@@ -391,6 +391,11 @@ class Rotkehlchen:
             database=self.data.db,
         )
         gnosis_manager = GnosisManager(gnosis_inquirer)
+        scroll_inquirer = ScrollInquirer(
+            greenlet_manager=self.greenlet_manager,
+            database=self.data.db,
+        )
+        scroll_manager = ScrollManager(scroll_inquirer)
         kusama_manager = SubstrateManager(
             chain=SupportedBlockchain.KUSAMA,
             msg_aggregator=self.msg_aggregator,
@@ -407,23 +412,28 @@ class Rotkehlchen:
             connect_on_startup=len(blockchain_accounts.dot) != 0,
             own_rpc_endpoint=settings.dot_rpc_endpoint,
         )
-        self.covalent_avalanche = Covalent(
-            database=self.data.db,
-            msg_aggregator=self.msg_aggregator,
-            chain_id=chains_id['avalanche'],
-        )
         avalanche_manager = AvalancheManager(
             avaxrpc_endpoint='https://api.avax.network/ext/bc/C/rpc',
-            covalent=self.covalent_avalanche,
             msg_aggregator=self.msg_aggregator,
         )
+        zksync_lite_manager = ZksyncLiteManager(
+            ethereum_inquirer=ethereum_inquirer,
+            database=self.data.db,
+        )
 
-        Inquirer().inject_evm_managers([
-            (ChainID.ETHEREUM, ethereum_manager),
-            (ChainID.OPTIMISM, optimism_manager),
-        ])
         uniswap_v2_oracle = UniswapV2Oracle(ethereum_inquirer)
         uniswap_v3_oracle = UniswapV3Oracle(ethereum_inquirer)
+
+        price_historian = PriceHistorian(  # Initialize the price historian singleton
+            data_directory=self.data_dir,
+            cryptocompare=self.cryptocompare,
+            coingecko=self.coingecko,
+            defillama=self.defillama,
+            uniswapv2=uniswap_v2_oracle,
+            uniswapv3=uniswap_v3_oracle,
+        )
+        price_historian.set_oracles_order(settings.historical_price_oracles)
+
         Inquirer().add_defi_oracles(
             uniswap_v2=uniswap_v2_oracle,
             uniswap_v3=uniswap_v3_oracle,
@@ -438,9 +448,11 @@ class Rotkehlchen:
             arbitrum_one_manager=arbitrum_one_manager,
             base_manager=base_manager,
             gnosis_manager=gnosis_manager,
+            scroll_manager=scroll_manager,
             kusama_manager=kusama_manager,
             polkadot_manager=polkadot_manager,
             avalanche_manager=avalanche_manager,
+            zksync_lite_manager=zksync_lite_manager,
             msg_aggregator=self.msg_aggregator,
             database=self.data.db,
             greenlet_manager=self.greenlet_manager,
@@ -450,6 +462,10 @@ class Rotkehlchen:
             beaconchain=self.beaconchain,
             btc_derivation_gap_limit=settings.btc_derivation_gap_limit,
         )
+        Inquirer().inject_evm_managers([
+            (chain.to_chain_id(), self.chains_aggregator.get_chain_manager(chain))
+            for chain in EVM_CHAINS_WITH_TRANSACTIONS
+        ])
 
         self.accountant = Accountant(
             db=self.data.db,
@@ -486,15 +502,6 @@ class Rotkehlchen:
         )
 
         self.migration_manager.maybe_migrate_data()
-        self.greenlet_manager.spawn_and_track(
-            after_seconds=5,
-            task_name='periodically_query_icons_until_all_cached',
-            exception_is_error=False,
-            method=self.icon_manager.periodically_query_icons_until_all_cached,
-            batch_size=ICONS_BATCH_SIZE,
-            sleep_time_secs=ICONS_QUERY_SLEEP,
-        )
-
         self.assets_updater = AssetsUpdater(self.msg_aggregator)
         self.greenlet_manager.spawn_and_track(
             after_seconds=None,
@@ -503,6 +510,7 @@ class Rotkehlchen:
             method=self.data_updater.check_for_updates,
         )
 
+        self.addressbook_prioritizer = NamePrioritizer(self.data.db)  # Initialize here since it's reused by the api for addressbook endpoints.  # noqa: E501
         self.user_is_logged_in = True
         log.debug('User unlocking complete')
 
@@ -510,19 +518,19 @@ class Rotkehlchen:
         if not self.user_is_logged_in:
             return
         user = self.data.username
-        log.info(
-            'Logging out user',
-            user=user,
-        )
+        log.info('Logging out user', user=user)
 
         self.deactivate_premium_status()
-        self.greenlet_manager.clear()
         del self.chains_aggregator
         self.exchange_manager.delete_all_exchanges()
 
         del self.accountant
         del self.history_querying_manager
         del self.data_importer
+
+        self.task_manager.clear()  # type: ignore  # task_manager is not None here
+        self.task_manager = None
+        self.greenlet_manager.clear()
 
         self.data.logout()
         self.cryptocompare.unset_database()
@@ -531,13 +539,15 @@ class Rotkehlchen:
         # Make sure no messages leak to other user sessions
         self.msg_aggregator.consume_errors()
         self.msg_aggregator.consume_warnings()
-        self.task_manager = None
+        PriceHistorian._PriceHistorian__instance = None  # type: ignore  #  has no attribute "_PriceHistorian__instance" but is the name used by python
+        Inquirer.clear()
 
+        # We have locks in the chain aggregator that gets removed in this
+        # function and in the db connections. The user db gets replaced but the globaldb
+        # needs to be released.
+        GlobalDBHandler().clear_locks()
         self.user_is_logged_in = False
-        log.info(
-            'User successfully logged out',
-            user=user,
-        )
+        log.info('User successfully logged out', user=user)
 
     def logout(self) -> None:
         if self.task_manager is None:  # no user logged in?
@@ -636,7 +646,7 @@ class Rotkehlchen:
         # Add xpub data
         for xpub_entry in xpub_data:
             data_entry = xpub_entry.serialize()
-            addresses = xpub_mappings.get(xpub_entry, None)
+            addresses = xpub_mappings.get(xpub_entry)
             data_entry['addresses'] = addresses if addresses and len(addresses) != 0 else None
             data['xpubs'].append(data_entry)
         # Add standalone addresses
@@ -646,7 +656,13 @@ class Rotkehlchen:
     def add_evm_accounts(
             self,
             account_data: list[SingleBlockchainAccountData[ChecksumEvmAddress]],
-    ) -> list[tuple[SUPPORTED_EVM_CHAINS, ChecksumEvmAddress]]:
+    ) -> tuple[
+        list[tuple[SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE, ChecksumEvmAddress]],
+        list[tuple[SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE, ChecksumEvmAddress]],
+        list[tuple[SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE, ChecksumEvmAddress]],
+        list[tuple[SUPPORTED_EVM_EVMLIKE_CHAINS_TYPE, ChecksumEvmAddress]],
+        list[ChecksumEvmAddress],
+    ]:
         """Adds each account for all evm addresses
 
         Counting ethereum mainnet as the main chain we check if the account is a contract
@@ -654,7 +670,13 @@ class Rotkehlchen:
         the address and if yes we add it too.
         If it's already added in a chain we just ignore that chain.
 
-        Returns a list of tuples of the address and the chain it was added in
+        Returns four lists:
+        - list address, chain tuples for all newly added addresses.
+        - list address, chain tuples for all addresses already tracked.
+        - list address, chain tuples for all addresses that failed to be added.
+        - list address, chain tuples for all addresses that have no activity in their chain.
+        - a list of addresses that are contracts in ethereum. We only do this check in ethereum
+            and this is why we return a list.
 
         May raise:
         - TagConstraintError if any of the given account data contain unknown tags.
@@ -670,9 +692,13 @@ class Rotkehlchen:
                 data_type='blockchain accounts',
             )
 
-        added_accounts = self.chains_aggregator.add_accounts_to_all_evm(
-            accounts=[entry.address for entry in account_data],
-        )
+        (
+            added_accounts,
+            existed_accounts,
+            failed_accounts,
+            no_activity_accounts,
+            eth_contract_addresses,
+        ) = self.chains_aggregator.add_accounts_to_all_evm(accounts=[entry.address for entry in account_data])  # noqa: E501
         with self.data.db.user_write() as write_cursor:
             for chain, address in added_accounts:
                 account_data_entry = account_data_map[address]
@@ -681,12 +707,18 @@ class Rotkehlchen:
                     account_data=[account_data_entry.to_blockchain_account_data(chain)],
                 )
 
-        return added_accounts
+        return (
+            added_accounts,
+            existed_accounts,
+            failed_accounts,
+            no_activity_accounts,
+            eth_contract_addresses,
+        )
 
     @overload
     def add_single_blockchain_accounts(
             self,
-            chain: SUPPORTED_EVM_CHAINS,
+            chain: SUPPORTED_EVM_CHAINS_TYPE,
             account_data: list[SingleBlockchainAccountData[ChecksumEvmAddress]],
     ) -> None:
         ...
@@ -787,6 +819,72 @@ class Rotkehlchen:
             account_data=[x.to_blockchain_account_data(blockchain) for x in account_data],
         )
 
+    def edit_chain_type_accounts_labels(
+            self,
+            cursor: 'DBCursor',
+            account_data: list[SingleBlockchainAccountData],
+    ) -> None:
+        """Edit the tags and labels for the accounts in all the chains
+        where they are tracked.
+        May raise:
+        - TagConstraintError: if the new tags don't exist
+        - InputError: If not all the selected addresses get updated
+        """
+        self.data.db.ensure_tags_exist(
+            cursor=cursor,
+            given_data=account_data,
+            action='editing',
+            data_type='blockchain accounts',
+        )
+
+        address_book_db = DBAddressbook(db_handler=self.data.db)
+        for account in account_data:
+            if account.label is None:
+                continue
+
+            address_book_db.update_addressbook_entries(
+                book_type=AddressbookType.PRIVATE,
+                entries=[AddressbookEntry(
+                    address=account.address,
+                    name=account.label,
+                    blockchain=None,
+                )],
+            )
+
+        with self.data.db.user_write() as write_cursor:
+            replace_tag_mappings(
+                write_cursor=write_cursor,
+                data=account_data,
+                object_reference_keys=['address'],
+            )
+
+    def remove_chain_type_accounts(
+            self,
+            chain_type: ChainType,
+            accounts: ListOfBlockchainAddresses,
+    ) -> None:
+        """Remove the provided accounts from the specified chains
+        May raise:
+        - InputError: If we are trying to remove a non tracked account, the
+        removal fails or an invalid chain_type is provided.
+        """
+        blockchain_to_addresses, blockchains, accounts_seen = defaultdict(list), chain_type.type_to_blockchains(), set()  # noqa: E501
+        for blockchain in blockchains:
+            blockchain_accounts = self.chains_aggregator.accounts.get(blockchain)
+            for account in accounts:
+                if account in blockchain_accounts:
+                    accounts_seen.add(account)
+                    blockchain_to_addresses[blockchain].append(account)
+
+        if len(missing_accounts := set(accounts).difference(accounts_seen)) != 0:
+            raise InputError(f'Tried to delete non tracked addresses {missing_accounts}')
+
+        for blockchain, tracked_accounts in blockchain_to_addresses.items():
+            self.remove_single_blockchain_accounts(
+                blockchain=blockchain,
+                accounts=tracked_accounts,  # type: ignore  # mypy doesn't detect this as a list of blockchain addresses
+            )
+
     def remove_single_blockchain_accounts(
             self,
             blockchain: SupportedBlockchain,
@@ -845,7 +943,7 @@ class Rotkehlchen:
         error_or_empty, events = self.history_querying_manager.get_history(
             start_ts=start_ts,
             end_ts=end_ts,
-            has_premium=self.premium is not None,
+            has_premium=has_premium_check(self.premium),
         )
         report_id = self.accountant.process_history(
             start_ts=start_ts,
@@ -955,17 +1053,31 @@ class Rotkehlchen:
                 )
             else:
                 if len(nft_balances) != 0:
-                    if str(Location.BLOCKCHAIN) not in balances:
+                    if (blockchain_location := str(Location.BLOCKCHAIN)) not in balances:
                         balances[str(Location.BLOCKCHAIN)] = {}
 
                     for balance_entry in nft_balances:
                         if balance_entry['usd_price'] == ZERO:
                             continue
-                        balances[str(Location.BLOCKCHAIN)][CryptoAsset(
-                            balance_entry['id'])] = Balance(
-                            amount=ONE,
-                            usd_value=balance_entry['usd_price'],
-                        )
+
+                        # It can happen that the asset was manually added
+                        # as a token and we don't want to ignore NFTs from the token query since
+                        # they might not be tracked by Opensea. In case of them being already
+                        # in the chain balances we update the price and continue
+                        blockchain_balances = balances[blockchain_location]
+                        nft = Nft(balance_entry['id'])
+                        nft_as_token = GlobalDBHandler.get_evm_token(
+                            address=nft.evm_address,
+                            chain_id=nft.chain_id,
+                        )  # we need the eip155 identifier instead of the _nft_ one.
+
+                        if nft_as_token in blockchain_balances:
+                            blockchain_balances[nft_as_token].usd_value = balance_entry['usd_price']  # noqa: E501
+                        else:
+                            blockchain_balances[nft] = Balance(
+                                amount=ONE,
+                                usd_value=balance_entry['usd_price'],
+                            )
 
         balances = account_for_manually_tracked_asset_balances(db=self.data.db, balances=balances)
 
@@ -1045,6 +1157,8 @@ class Rotkehlchen:
 
     def set_settings(self, settings: ModifiableDBSettings) -> tuple[bool, str]:
         """Tries to set new settings. Returns True in success or False with message if error"""
+        # TODO: https://github.com/orgs/rotki/projects/11?pane=issue&itemId=52425560
+        # For those rpc endpoints improve the logic and make it similar to EVM rpc endpoints
         if settings.ksm_rpc_endpoint is not None:
             result, msg = self.chains_aggregator.set_ksm_rpc_endpoint(settings.ksm_rpc_endpoint)
             if not result:
@@ -1053,6 +1167,14 @@ class Rotkehlchen:
         if settings.dot_rpc_endpoint is not None:
             result, msg = self.chains_aggregator.set_dot_rpc_endpoint(settings.dot_rpc_endpoint)
             if not result:
+                return False, msg
+
+        if settings.beacon_rpc_endpoint is not None and (eth2 := self.chains_aggregator.get_module('eth2')) is not None:  # noqa: E501
+            try:
+                eth2.beacon_inquirer.set_rpc_endpoint(settings.beacon_rpc_endpoint)
+            except RemoteError as e:
+                msg = str(e)
+                log.error(f'Failed to connect to given beacon node {settings.beacon_rpc_endpoint} due to {msg}')  # noqa: E501
                 return False, msg
 
         if settings.btc_derivation_gap_limit is not None:
@@ -1097,7 +1219,6 @@ class Rotkehlchen:
             passphrase=passphrase,
             binance_selected_trade_pairs=binance_selected_trade_pairs,
         )
-
         if is_success:
             # Success, save the result in the DB
             self.data.db.add_exchange(
@@ -1117,12 +1238,12 @@ class Rotkehlchen:
 
         if self.user_is_logged_in:
             with self.data.db.conn.read_ctx() as cursor:
-                result['last_balance_save'] = self.data.db.get_last_balance_save_time(cursor)
+                result[DBCacheStatic.LAST_BALANCE_SAVE.value] = self.data.db.get_last_balance_save_time(cursor)  # noqa: E501
                 connected_nodes = {}
                 for evm_manager in self.chains_aggregator.iterate_evm_chain_managers():
                     connected_nodes[evm_manager.node_inquirer.chain_name] = [node.name for node in evm_manager.node_inquirer.get_connected_nodes()]  # noqa: E501
                 result['connected_nodes'] = connected_nodes
-                result['last_data_upload_ts'] = Timestamp(self.premium_sync_manager.last_remote_data_upload_ts)  # noqa: E501
+                result[DBCacheStatic.LAST_DATA_UPLOAD_TS.value] = Timestamp(self.premium_sync_manager.last_remote_data_upload_ts)  # noqa: E501
         return result
 
     def shutdown(self) -> None:

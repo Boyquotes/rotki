@@ -1,5 +1,7 @@
+import datetime
 from contextlib import ExitStack
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 
@@ -7,14 +9,25 @@ from rotkehlchen.assets.asset import Asset
 from rotkehlchen.assets.utils import get_or_create_evm_token
 from rotkehlchen.chain.accounts import BlockchainAccountData
 from rotkehlchen.chain.aggregator import ChainsAggregator, _module_name_to_class
+from rotkehlchen.chain.evm.constants import LAST_SPAM_TXS_CACHE
 from rotkehlchen.chain.evm.types import NodeName, WeightedNode, string_to_evm_address
+from rotkehlchen.chain.gnosis.constants import GNOSIS_ETHERSCAN_NODE
 from rotkehlchen.constants import ONE
+from rotkehlchen.db.cache import DBCacheDynamic
 from rotkehlchen.tests.utils.blockchain import setup_evm_addresses_activity_mock
 from rotkehlchen.tests.utils.factories import make_evm_address
 from rotkehlchen.tests.utils.polygon_pos import ALCHEMY_RPC_ENDPOINT
-from rotkehlchen.types import AVAILABLE_MODULES_MAP, SPAM_PROTOCOL, ChainID, SupportedBlockchain
+from rotkehlchen.types import (
+    AVAILABLE_MODULES_MAP,
+    SPAM_PROTOCOL,
+    ChainID,
+    ChecksumEvmAddress,
+    SupportedBlockchain,
+)
 
 if TYPE_CHECKING:
+    from rotkehlchen.chain.base.manager import BaseManager
+    from rotkehlchen.chain.gnosis.manager import GnosisManager
     from rotkehlchen.chain.polygon_pos.manager import PolygonPOSManager
 
 
@@ -84,6 +97,7 @@ def test_detect_evm_accounts(blockchain: 'ChainsAggregator') -> None:
         (SupportedBlockchain.ARBITRUM_ONE, everywhere_addy),
         (SupportedBlockchain.BASE, everywhere_addy),
         (SupportedBlockchain.GNOSIS, everywhere_addy),
+        (SupportedBlockchain.SCROLL, everywhere_addy),
     ]
 
     for chain, addy in addies_to_start_with:
@@ -115,6 +129,7 @@ def test_detect_evm_accounts(blockchain: 'ChainsAggregator') -> None:
             arbitrum_one_addresses=[everywhere_addy, addy_eoa_3],
             base_addresses=[everywhere_addy, addy_eoa_3],
             gnosis_addresses=[everywhere_addy, addy_eoa_3],
+            scroll_addresses=[everywhere_addy, addy_eoa_3],
         )
 
         blockchain.detect_evm_accounts()
@@ -126,6 +141,7 @@ def test_detect_evm_accounts(blockchain: 'ChainsAggregator') -> None:
     assert set(blockchain.accounts.arbitrum_one) == {addy_eoa_3, everywhere_addy}
     assert set(blockchain.accounts.base) == {addy_eoa_3, everywhere_addy}
     assert set(blockchain.accounts.gnosis) == {addy_eoa_3, everywhere_addy}
+    assert set(blockchain.accounts.scroll) == {addy_eoa_3, everywhere_addy}
 
     # Also check the db
     expected_accounts_data = initial_accounts_data + [
@@ -155,6 +171,10 @@ def test_detect_evm_accounts(blockchain: 'ChainsAggregator') -> None:
         ),
         BlockchainAccountData(
             chain=SupportedBlockchain.GNOSIS,
+            address=addy_eoa_3,
+        ),
+        BlockchainAccountData(
+            chain=SupportedBlockchain.SCROLL,
             address=addy_eoa_3,
         ),
     ]
@@ -189,6 +209,10 @@ def test_detect_evm_accounts(blockchain: 'ChainsAggregator') -> None:
             chain=SupportedBlockchain.GNOSIS,
             address=account,
         ) for account in raw_accounts.gnosis])
+        accounts_in_db.extend([BlockchainAccountData(
+            chain=SupportedBlockchain.SCROLL,
+            address=account,
+        ) for account in raw_accounts.scroll])
 
     assert set(accounts_in_db) == set(expected_accounts_data)
     assert len(accounts_in_db) == len(expected_accounts_data)
@@ -215,10 +239,9 @@ def test_detect_evm_accounts_spam_tx(polygon_pos_manager: 'PolygonPOSManager') -
     eip155:137/erc20:0xE2Ee00F49464d6B60771dc118A1bb4eb362bd154
     eip155:137/erc20:0x37CC5F5610d91325c8A8C0eD74d26A01F19e7B51
 
-    first we check that it is marked as NOT spammed by:
+    first we check that it is marked as spammed by:
     - ignoring the first asset
     - adding the second as spam asset
-    - third is unknown so the address is marked as not spammed
 
     to verify that the address has been spammed all the remaining assets are ignored
     """
@@ -235,7 +258,7 @@ def test_detect_evm_accounts_spam_tx(polygon_pos_manager: 'PolygonPOSManager') -
         chain_id=ChainID.POLYGON_POS,
         protocol=SPAM_PROTOCOL,
     )
-    assert polygon_pos_manager.transactions.address_has_been_spammed(evm_address) is False
+    assert polygon_pos_manager.transactions.address_has_been_spammed(evm_address) is True
 
     spam_assets = [
         Asset('eip155:137/erc20:0xb76c90B51338016011Eaf27C348E3D84A623C5BF'),
@@ -252,3 +275,84 @@ def test_detect_evm_accounts_spam_tx(polygon_pos_manager: 'PolygonPOSManager') -
             db.add_to_ignored_assets(write_cursor=write_cursor, asset=asset)
 
     assert polygon_pos_manager.transactions.address_has_been_spammed(evm_address) is True
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.freeze_time('2024-05-03 10:45:00 GMT')
+@pytest.mark.parametrize('gnosis_manager_connect_at_start', [(GNOSIS_ETHERSCAN_NODE,)])
+@pytest.mark.parametrize('gnosis_accounts', [[make_evm_address()]])  # to connect to nodes
+def test_detect_evm_accounts_spam_tx_gnosis(gnosis_manager: 'GnosisManager') -> None:
+    """
+    Test that an account with only erc20 transfers of spam tokens gets marked as spam
+    and does not get detected as a tracked account in the EVM chain.
+
+    The tested address has received the following spam tokens:
+    eip155:100/erc20:0x8786B9c1a0C676B191284A4Bc7e448321197BB05
+    eip155:100/erc20:0xC1BeC4618B212441E367ED363540D5D665e8e4F0
+    """
+    # This evm address has only received spam transactions
+    evm_address = string_to_evm_address('0xF5d90Ac6747CB3352F05BF61f48b991ACeaE28eB')
+    database = gnosis_manager.node_inquirer.database
+
+    # check that the cache is not set
+    with database.conn.read_ctx() as cursor:
+        result = database.get_dynamic_cache(
+            cursor=cursor,
+            name=DBCacheDynamic.LAST_QUERY_TS,
+            location=gnosis_manager.node_inquirer.chain_name,
+            location_name=LAST_SPAM_TXS_CACHE,
+            account_id=evm_address,
+        )
+    assert result is None
+
+    for spam_asset in (
+        '0x8786B9c1a0C676B191284A4Bc7e448321197BB05',
+        '0xC1BeC4618B212441E367ED363540D5D665e8e4F0',
+    ):  # spam tokens received by the address
+        get_or_create_evm_token(
+            userdb=gnosis_manager.node_inquirer.database,
+            evm_address=string_to_evm_address(spam_asset),
+            chain_id=ChainID.GNOSIS,
+            protocol=SPAM_PROTOCOL,
+        )
+
+    assert gnosis_manager.transactions.address_has_been_spammed(evm_address) is True
+
+    # check that the cache is updated
+    with database.conn.read_ctx() as cursor:
+        result = database.get_dynamic_cache(
+            cursor=cursor,
+            name=DBCacheDynamic.LAST_QUERY_TS,
+            location=gnosis_manager.node_inquirer.chain_name,
+            location_name=LAST_SPAM_TXS_CACHE,
+            account_id=evm_address,
+        )
+    assert result is not None
+
+    block_number = gnosis_manager.node_inquirer.get_blocknumber_by_time(ts=result, closest='before')  # noqa: E501
+    with patch('requests.get') as mocked_get:
+        assert gnosis_manager.transactions.address_has_been_spammed(evm_address) is True
+        # verify that the gnosiscan API get's queried with the last recorded blocknumber
+        assert all(f'startBlock={block_number}' in call.args[0] for call in mocked_get.mock_calls), "URL must contain 'startBlock=' and correct block number"  # noqa: E501
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.freeze_time(datetime.datetime.fromtimestamp(1717416305, tz=datetime.UTC))
+@pytest.mark.parametrize('base_accounts', [['0xeA2B3D309bC480Fe385BBF8aEF6D45D81825A784']])
+def test_detect_spammed_transaction_new_token(
+        base_manager: 'BaseManager',
+        base_accounts: list[ChecksumEvmAddress],
+) -> None:
+    """Check that the functionality to detect accounts that have been sent only spam tokens
+    works correctly when the received token hasn't been previously tracked.
+    The address used in this test has only one transaction in the time range of
+    [1717116105, 1717116305] where it received a spam token that is not in the database.
+    """
+    with patch.object(
+        base_manager.node_inquirer.database,
+        'get_dynamic_cache',
+        side_effect=lambda *args, **kwargs: 1717116105,
+    ):
+        assert base_manager.transactions.address_has_been_spammed(
+            address=base_accounts[0],
+        ) is True

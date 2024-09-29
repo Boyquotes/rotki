@@ -1,9 +1,10 @@
 <script setup lang="ts">
 const props = defineProps<{
   source: string;
+  iconUrl?: string;
 }>();
 
-const { getAirdropName, getAirdropImageUrl } = useAirdropsMetadata();
+const { getAirdropName, getAirdropImageUrl, loading } = useAirdropsMetadata();
 
 const { source } = toRefs(props);
 
@@ -14,14 +15,14 @@ const image = getAirdropImageUrl(source);
 <template>
   <div class="flex items-center gap-4">
     <AdaptiveWrapper>
-      <VImg
-        width="24px"
-        height="24px"
+      <AppImage
+        :src="iconUrl || image"
+        width="1.5rem"
+        height="1.5rem"
         contain
-        position="left"
-        max-height="32px"
-        max-width="32px"
-        :src="image"
+        :loading="loading"
+        max-height="2rem"
+        max-width="2rem"
       />
     </AdaptiveWrapper>
     <div>{{ name }}</div>

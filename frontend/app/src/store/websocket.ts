@@ -1,9 +1,9 @@
 import { api } from '@/services/rotkehlchen-api';
-import { type Nullable } from '@/types';
+import type { Nullable } from '@rotki/common';
 
 export const useWebsocketStore = defineStore('websocket', () => {
-  const connection: Ref<Nullable<WebSocket>> = ref(null);
-  const connected: Ref<boolean> = ref(false);
+  const connection = ref<Nullable<WebSocket>>(null);
+  const connected = ref<boolean>(false);
 
   const { handleMessage } = useMessageHandling();
 
@@ -12,13 +12,14 @@ export const useWebsocketStore = defineStore('websocket', () => {
     try {
       await connect();
       logger.debug('websocket reconnection complete');
-    } catch (e: any) {
-      logger.debug(e, 'Reconnect failed');
+    }
+    catch (error: any) {
+      logger.debug(error, 'Reconnect failed');
     }
   };
 
-  async function connect(): Promise<boolean> {
-    return new Promise<boolean>(resolve => {
+  function connect(): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
       if (get(connected)) {
         resolve(true);
         return;
@@ -26,26 +27,20 @@ export const useWebsocketStore = defineStore('websocket', () => {
       const serverUrl = api.serverUrl;
       let protocol = 'ws';
       const location = window.location;
-      if (
-        serverUrl?.startsWith('https') ||
-        location.protocol.startsWith('https')
-      ) {
+      if (serverUrl?.startsWith('https') || location.protocol.startsWith('https'))
         protocol = 'wss';
-      }
+
       const urlSegments = serverUrl.split('://');
       let baseUrl: string;
-      if (urlSegments.length > 1) {
+      if (urlSegments.length > 1)
         baseUrl = urlSegments[1];
-      } else {
-        baseUrl = `${location.host}${location.pathname}`;
-      }
+      else baseUrl = `${location.host}${location.pathname}`;
 
       const url = `${protocol}://${baseUrl}/ws/`;
       logger.debug(`preparing to connect to ${url}`);
       const ws = new WebSocket(url);
       set(connection, ws);
-      ws.onmessage = async (event): Promise<void> =>
-        await handleMessage(event.data);
+      ws.onmessage = async (event): Promise<void> => await handleMessage(event.data);
       ws.addEventListener('open', (): void => {
         logger.debug('websocket connected');
         set(connected, true);
@@ -59,9 +54,8 @@ export const useWebsocketStore = defineStore('websocket', () => {
       ws.addEventListener('close', (event): void => {
         logger.debug('websocket connection closed');
         set(connected, false);
-        if (!event.wasClean) {
+        if (!event.wasClean)
           startPromise(reconnect());
-        }
       });
     });
   }
@@ -79,10 +73,9 @@ export const useWebsocketStore = defineStore('websocket', () => {
   return {
     connected,
     connect,
-    disconnect
+    disconnect,
   };
 });
 
-if (import.meta.hot) {
+if (import.meta.hot)
   import.meta.hot.accept(acceptHMRUpdate(useWebsocketStore, import.meta.hot));
-}

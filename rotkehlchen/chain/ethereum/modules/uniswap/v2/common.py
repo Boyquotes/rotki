@@ -2,6 +2,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
 
+from eth_utils import to_hex
 from web3 import Web3
 
 from rotkehlchen.assets.asset import CryptoAsset, EvmToken, UnderlyingToken
@@ -9,10 +10,8 @@ from rotkehlchen.assets.utils import (
     TokenEncounterInfo,
     edit_token_and_clean_cache,
     get_or_create_evm_token,
-    set_token_protocol_if_missing,
 )
 from rotkehlchen.chain.ethereum.modules.constants import AMM_ASSETS_SYMBOLS
-from rotkehlchen.chain.ethereum.modules.uniswap.constants import CPT_UNISWAP_V2
 from rotkehlchen.chain.ethereum.utils import asset_normalized_value, generate_address_via_create2
 from rotkehlchen.chain.evm.constants import ZERO_ADDRESS
 from rotkehlchen.chain.evm.decoding.constants import ERC20_OR_ERC721_TRANSFER
@@ -21,6 +20,7 @@ from rotkehlchen.chain.evm.decoding.structures import (
     ActionItem,
     DecodingOutput,
 )
+from rotkehlchen.chain.evm.decoding.uniswap.constants import CPT_UNISWAP_V2
 from rotkehlchen.chain.evm.decoding.utils import maybe_reshuffle_events
 from rotkehlchen.chain.evm.structures import EvmTxReceiptLog
 from rotkehlchen.chain.evm.types import string_to_evm_address
@@ -31,6 +31,7 @@ from rotkehlchen.errors.asset import UnknownAsset, WrongAssetType
 from rotkehlchen.errors.misc import NotERC20Conformant
 from rotkehlchen.errors.serialization import DeserializationError
 from rotkehlchen.fval import FVal
+from rotkehlchen.globaldb.handler import GlobalDBHandler
 from rotkehlchen.history.events.structures.types import HistoryEventSubType, HistoryEventType
 from rotkehlchen.logging import RotkehlchenLogsAdapter
 from rotkehlchen.types import (
@@ -130,7 +131,7 @@ def decode_uniswap_v2_like_swap(
                     amount=amount_in,
                     asset=crypto_asset,
                 )) or
-                event.asset == A_ETH and spend_eth + received_eth == event.balance.amount
+                (event.asset == A_ETH and spend_eth + received_eth == event.balance.amount)
             )
         ):
             event.event_type = HistoryEventType.TRADE
@@ -329,7 +330,10 @@ def decode_uniswap_like_deposit_and_withdrawals(
             event.counterparty = counterparty
             event.event_subtype = HistoryEventSubType.RECEIVE_WRAPPED
             event.notes = f'Receive {event.balance.amount} {resolved_asset.symbol} from {counterparty} pool'  # noqa: E501
-            set_token_protocol_if_missing(event.asset.resolve_to_evm_token(), UNISWAP_PROTOCOL if resolved_asset.symbol.startswith('UNI-V2') else SUSHISWAP_PROTOCOL)  # noqa: E501
+            GlobalDBHandler.set_token_protocol_if_missing(
+                token=event.asset.resolve_to_evm_token(),
+                new_protocol=UNISWAP_PROTOCOL if resolved_asset.symbol.startswith('UNI-V2') else SUSHISWAP_PROTOCOL,  # noqa: E501
+            )
         elif (
             resolved_asset == pool_token and
             event.event_type == HistoryEventType.SPEND and
@@ -397,7 +401,7 @@ def _compute_uniswap_v2_like_pool_address(
     try:
         return generate_address_via_create2(
             address=factory_address,
-            salt=Web3.toHex(Web3.solidityKeccak(  # pylint: disable=no-value-for-parameter
+            salt=to_hex(Web3.solidity_keccak(  # pylint: disable=no-value-for-parameter
                 abi_types=['address', 'address'],
                 values=[token0.evm_address, token1.evm_address],
             )),

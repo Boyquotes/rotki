@@ -179,15 +179,17 @@ def update_ilk_registry(
         write_tuples = []
         for ilk, (ilk_class, token_address, join_address) in ilk_mappings.items():
 
-            if token_address == ZERO_ADDRESS:
-                continue  # this can happen for at least one (TELEPORT-FW-A) which we will ignore
+            if ZERO_ADDRESS in (
+                token_address,  # happens for at least TELEPORT-FW-A
+                join_address,  # happens for at least LITE-PSM-USDC-A
+            ):
+                continue  # ignore those cases
 
             cursor.execute(
                 'SELECT COUNT(*) from unique_cache WHERE key=?',
                 (f'{CacheType.MAKERDAO_VAULT_ILK.serialize()}{ilk}',),
             )
-            result = cursor.fetchone()[0]
-            if result != 0:
+            if cursor.fetchone()[0] != 0:
                 continue  # already exists
 
             try:
@@ -202,7 +204,7 @@ def update_ilk_registry(
                 continue
 
             abi_name = f'MAKERDAO_{ilk}_JOIN'
-            abi_id = GlobalDBHandler().get_or_write_abi(
+            abi_id = GlobalDBHandler.get_or_write_abi(
                 serialized_abi=json.dumps(abi, separators=(',', ':')),
                 abi_name=abi_name,
             )
@@ -237,15 +239,14 @@ def update_ilk_registry(
                 now,
             ))
 
-    if len(write_tuples) == 0:
-        return
-
     with GlobalDBHandler().conn.write_ctx() as write_cursor:
         # since the unique cache is unique for every key, the value will be overwritten.
-        write_cursor.executemany(
-            'INSERT OR REPLACE INTO unique_cache(key, value, last_queried_ts) VALUES(?, ?, ?)',
-            write_tuples,
-        )
+        if len(write_tuples) != 0:
+            write_cursor.executemany(
+                'INSERT OR REPLACE INTO unique_cache(key, value, last_queried_ts) VALUES(?, ?, ?)',
+                write_tuples,
+            )
+
         write_cursor.execute(
             'UPDATE unique_cache SET last_queried_ts=? WHERE key=?',
             (now, GENERAL_ILK_CACHE_KEY),

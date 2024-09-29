@@ -1,43 +1,37 @@
-import { type AssetBalance } from '@rotki/common';
-import { type AssetInfo } from '@rotki/common/lib/data';
+import type { AssetBalance, AssetInfo } from '@rotki/common';
 
-const levenshtein = (a: string, b: string): number => {
+function levenshtein(a: string, b: string): number {
   let tmp;
-  if (a.length === 0) {
+  if (a.length === 0)
     return b.length;
-  }
-  if (b.length === 0) {
+
+  if (b.length === 0)
     return a.length;
-  }
+
   if (a.length > b.length) {
     tmp = a;
     a = b;
     b = tmp;
   }
 
-  let i: number,
-    j: number,
-    res = 0;
-  const alen = a.length,
-    blen = b.length,
-    row = new Array(alen);
-  for (i = 0; i <= alen; i++) {
-    row[i] = i;
-  }
+  let i: number;
+  let j: number;
+  let res = 0;
+  const alen = a.length;
+  const blen = b.length;
+  const row = new Array(alen);
+  for (i = 0; i <= alen; i++) row[i] = i;
 
   for (i = 1; i <= blen; i++) {
     res = i;
     for (j = 1; j <= alen; j++) {
       tmp = row[j - 1];
       row[j - 1] = res;
-      res =
-        b[i - 1] === a[j - 1]
-          ? tmp
-          : Math.min(tmp + 1, Math.min(res + 1, row[j] + 1));
+      res = b[i - 1] === a[j - 1] ? tmp : Math.min(tmp + 1, Math.min(res + 1, row[j] + 1));
     }
   }
   return res;
-};
+}
 
 /**
  *
@@ -53,21 +47,16 @@ const levenshtein = (a: string, b: string): number => {
  * 1. It will prioritize string that match from beginning (i.e. for keyword `hop`, it prioritizes string `hop-protocol` higher than string `hoo`)
  * 2. It will prioritize string that contain the keyword (i.e. for keyword `urv`, it prioritizes string `curvy`, higher than string `urw`)
  */
-export const compareTextByKeyword = (
-  a: string,
-  b: string,
-  keyword: string
-): number => {
+export function compareTextByKeyword(a: string, b: string, keyword: string): number {
   const search = keyword.toLocaleLowerCase().trim();
   const keywordA = a.toLocaleLowerCase().trim();
   const keywordB = b.toLocaleLowerCase().trim();
 
-  if (keywordA === search) {
+  if (keywordA === search)
     return -1;
-  }
-  if (keywordB === search) {
+
+  if (keywordB === search)
     return 1;
-  }
 
   let rankA = levenshtein(search, keywordA);
   let rankB = levenshtein(search, keywordB);
@@ -79,28 +68,21 @@ export const compareTextByKeyword = (
 
   const length = search.length;
 
-  if (keywordAHaystackIndex === 0 || keywordANeedleIndex === 0) {
+  if (keywordAHaystackIndex === 0 || keywordANeedleIndex === 0)
     rankA -= length + 1;
-  } else if (keywordAHaystackIndex > 0 || keywordANeedleIndex > 0) {
+  else if (keywordAHaystackIndex > 0 || keywordANeedleIndex > 0)
     rankA -= length;
-  }
 
-  if (keywordBHaystackIndex === 0 || keywordBNeedleIndex === 0) {
+  if (keywordBHaystackIndex === 0 || keywordBNeedleIndex === 0)
     rankB -= length + 1;
-  } else if (keywordBHaystackIndex > 0 || keywordBNeedleIndex > 0) {
+  else if (keywordBHaystackIndex > 0 || keywordBNeedleIndex > 0)
     rankB -= length;
-  }
 
   return rankA - rankB;
-};
+}
 
-export const getSortItems =
-  (getInfo: (identifier: string) => AssetInfo | null) =>
-  (
-    items: AssetBalance[],
-    sortBy: (keyof AssetBalance)[],
-    sortDesc: boolean[]
-  ): AssetBalance[] => {
+export function getSortItems<T extends AssetBalance>(getInfo: (identifier: string) => AssetInfo | null) {
+  return (items: T[], sortBy: (keyof AssetBalance)[], sortDesc: boolean[]): T[] => {
     const sortByElement = sortBy[0];
     const sortByDesc = sortDesc[0];
     return items.sort((a, b) => {
@@ -110,37 +92,12 @@ export const getSortItems =
         assert(aAsset && bAsset);
         const bSymbol = bAsset.symbol || '';
         const aSymbol = aAsset.symbol || '';
-        return sortByDesc
-          ? bSymbol.toLowerCase().localeCompare(aSymbol)
-          : aSymbol.toLowerCase().localeCompare(bSymbol);
+        return sortByDesc ? bSymbol.toLowerCase().localeCompare(aSymbol) : aSymbol.toLowerCase().localeCompare(bSymbol);
       }
 
       const aElement = a[sortByElement];
       const bElement = b[sortByElement];
-      return (
-        sortByDesc ? bElement.minus(aElement) : aElement.minus(bElement)
-      ).toNumber();
+      return (sortByDesc ? bElement.minus(aElement) : aElement.minus(bElement)).toNumber();
     });
   };
-
-export const isEvmIdentifier = (identifier?: string): boolean => {
-  if (!identifier) {
-    return false;
-  }
-  return identifier.startsWith('eip155');
-};
-
-export const getAddressFromEvmIdentifier = (identifier?: string): string => {
-  if (!identifier) {
-    return '';
-  }
-  return identifier.split(':')[2] ?? '';
-};
-
-export const createEvmIdentifierFromAddress = (
-  address: string,
-  chain = '1'
-): string => `eip155:${chain}/erc20:${address}`;
-
-export const getValidSelectorFromEvmAddress = (address: string): string =>
-  address.replace(/[^\da-z]/gi, '');
+}

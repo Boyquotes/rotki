@@ -1,16 +1,8 @@
-import {
-  afterAll,
-  beforeAll,
-  beforeEach,
-  expect,
-  test,
-  vi,
-  vitest
-} from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi, vitest } from 'vitest';
 import flushPromises from 'flush-promises';
 import { LimitedParallelizationQueue } from '@/utils/limited-parallelization-queue';
 
-describe('LimitedParallelizationQueue', () => {
+describe('limitedParallelizationQueue', () => {
   let queue: LimitedParallelizationQueue;
 
   beforeAll(() => {
@@ -25,7 +17,7 @@ describe('LimitedParallelizationQueue', () => {
     vitest.useRealTimers();
   });
 
-  test('runs up to 5 task in parallel', async () => {
+  it('runs up to 5 task in parallel', async () => {
     const listener = vi.fn().mockImplementation(() => {});
     queue.setOnCompletion(listener);
     queue.queue('1', () => wait(1500));
@@ -64,7 +56,7 @@ describe('LimitedParallelizationQueue', () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
-  test('new task with the same id becomes pending', async () => {
+  it('new task with the same id becomes pending', () => {
     queue.queue('1', () => wait(1500));
     queue.queue('1', () => wait(3000));
 
@@ -72,7 +64,7 @@ describe('LimitedParallelizationQueue', () => {
     expect(queue.pending).toBe(1);
   });
 
-  test('new pending task replaces pending task with the same id', async () => {
+  it('new pending task replaces pending task with the same id', async () => {
     queue.queue('1', () => wait(1500));
     queue.queue('1', () => wait(3000));
     queue.queue('1', () => wait(4000));
@@ -92,7 +84,7 @@ describe('LimitedParallelizationQueue', () => {
     expect(queue.running).toBe(1);
   });
 
-  test('clear will remove any pending tasks from the queue', () => {
+  it('clear will remove any pending tasks from the queue', () => {
     queue.queue('1', () => wait(1500));
     queue.queue('1', () => wait(3000));
 

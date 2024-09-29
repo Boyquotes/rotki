@@ -1,50 +1,49 @@
 <script setup lang="ts">
-const props = withDefaults(
-  defineProps<{
-    title: string;
-    message: string;
-    success?: boolean;
-  }>(),
-  {
-    success: false
-  }
-);
+import type { RuiIcons } from '@rotki/ui-library';
+
+const props = withDefaults(defineProps<{
+  title: string;
+  message: string;
+  success?: boolean;
+}>(), {
+  success: false,
+});
 
 const emit = defineEmits<{
-  (e: 'dismiss'): void;
+  dismiss: [];
 }>();
+
+const { message, success } = toRefs(props);
 
 const { t } = useI18n();
 
-const { message, success } = toRefs(props);
 const visible = ref<boolean>(false);
 
-watch(message, message => {
+const icon = computed<RuiIcons>(() => (get(success) ? 'checkbox-circle-line' : 'error-warning-line'));
+
+watch(message, (message) => {
   set(visible, message.length > 0);
 });
-
-const icon = computed<string>(() =>
-  get(success) ? 'checkbox-circle-line' : 'error-warning-line'
-);
 </script>
 
 <template>
-  <VDialog
-    :value="visible"
+  <RuiDialog
+    :model-value="visible"
     max-width="500"
     persistent
+    z-index="10000"
     @close="emit('dismiss')"
     @keydown.esc="emit('dismiss')"
     @keydown.enter="emit('dismiss')"
   >
     <RuiCard>
       <template #header>
-        <span
+        <h5
           :class="success ? 'text-rui-success' : 'text-rui-error'"
           class="text-h5"
         >
           {{ title }}
-        </span>
+        </h5>
       </template>
 
       <div class="flex flex-row items-center gap-2">
@@ -55,7 +54,10 @@ const icon = computed<string>(() =>
             :class="success ? 'text-rui-success' : 'text-rui-error'"
           />
         </div>
-        <div class="hyphens-auto break-words" data-cy="message-dialog__title">
+        <div
+          class="hyphens-auto break-words"
+          data-cy="message-dialog__title"
+        >
           {{ message }}
         </div>
       </div>
@@ -71,5 +73,5 @@ const icon = computed<string>(() =>
         </RuiButton>
       </template>
     </RuiCard>
-  </VDialog>
+  </RuiDialog>
 </template>

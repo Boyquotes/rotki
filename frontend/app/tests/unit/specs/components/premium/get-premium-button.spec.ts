@@ -1,10 +1,10 @@
-import { type Wrapper, mount } from '@vue/test-utils';
-import Vuetify from 'vuetify';
+import { type VueWrapper, mount } from '@vue/test-utils';
 import { type Pinia, setActivePinia } from 'pinia';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import GetPremiumButton from '@/components/premium/GetPremiumButton.vue';
 
-describe('GetPremiumButton.vue', () => {
-  let wrapper: Wrapper<GetPremiumButton>;
+describe('getPremiumButton.vue', () => {
+  let wrapper: VueWrapper<InstanceType<typeof GetPremiumButton>>;
   let store: ReturnType<typeof usePremiumStore>;
   let pinia: Pinia;
 
@@ -13,21 +13,24 @@ describe('GetPremiumButton.vue', () => {
     setActivePinia(pinia);
   });
 
-  const createWrapper = () => {
-    const vuetify = new Vuetify();
-    return mount(GetPremiumButton, {
-      pinia,
-      vuetify
-    });
-  };
+  afterEach(() => {
+    wrapper.unmount();
+  });
 
-  test('should show get premium button', () => {
+  const createWrapper = () =>
+    mount(GetPremiumButton, {
+      global: {
+        plugins: [pinia],
+      },
+    });
+
+  it('should show get premium button', () => {
     wrapper = createWrapper();
 
     expect(wrapper.find('[data-cy=get-premium-button]').exists()).toBeTruthy();
   });
 
-  test('should not show get premium button', () => {
+  it('should not show get premium button', () => {
     store = usePremiumStore();
     const { premium } = storeToRefs(store);
     set(premium, true);

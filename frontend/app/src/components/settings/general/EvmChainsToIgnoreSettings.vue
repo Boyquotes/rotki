@@ -1,121 +1,53 @@
 <script setup lang="ts">
-import { keyBy } from 'lodash-es';
-import { Blockchain } from '@rotki/common/lib/blockchain';
-import { Module } from '@/types/modules';
-
 const { t } = useI18n();
-const css = useCssModule();
-const { isModuleEnabled } = useModules();
 const { evmchainsToSkipDetection } = storeToRefs(useGeneralSettingsStore());
 
-const { getChainName, getEvmChainName, isEvm, evmChainsData, supportedChains } =
-  useSupportedChains();
+const { evmChainsData, evmLikeChainsData } = useSupportedChains();
 
-const skippedChains = computed(() => {
-  const savedNames = get(evmchainsToSkipDetection) ?? [];
-  const chainsData = get(evmChainsData) ?? [];
-  const chainsMap = keyBy(chainsData, 'evmChainName');
-
-  return savedNames.map(name => chainsMap[name]?.id as Blockchain);
-});
-
-const items = computed(() => {
-  const isEth2Enabled = get(isModuleEnabled(Module.ETH2));
-
-  let data: string[] = get(supportedChains).map(({ id }) => id);
-
-  data = data.filter(symbol => get(isEvm(symbol as Blockchain)));
-
-  if (!isEth2Enabled) {
-    data = data.filter(symbol => symbol !== Blockchain.ETH2);
-  }
-
-  return data;
-});
-
-const getChainNames = (chains: Blockchain[]) =>
-  (chains ?? []).map(getEvmChainName);
-
-const filter = (chain: Blockchain, queryText: string) => {
-  const item = get(supportedChains).find(blockchain => blockchain.id === chain);
-  if (!item) {
-    return false;
-  }
-
-  const query = queryText.toLocaleLowerCase();
-
-  const nameIncludes = item.name.toLocaleLowerCase().includes(query);
-
-  const idIncludes = item.id.toLocaleLowerCase().includes(query);
-
-  return nameIncludes || idIncludes;
-};
-
-const removeChain = (chain: Blockchain) =>
-  getChainNames(get(skippedChains).filter(c => c !== chain));
+const chains = computed(() => [...get(evmChainsData), ...get(evmLikeChainsData)]);
 </script>
 
 <template>
   <div>
-    <div class="text-base mb-3 mt-4">
+    <div class="text-rui-text-secondary text-body-1 mb-3">
       {{ t('general_settings.labels.chains_to_skip_detection') }}
     </div>
     <SettingsOption
-      #default="{ error, success, update, loading }"
+      #default="{ error, success, updateImmediate, loading }"
       setting="evmchainsToSkipDetection"
-      :error-message="
-        t('general_settings.validation.chains_to_skip_detection.error')
-      "
-      :success-message="
-        t('general_settings.validation.chains_to_skip_detection.success')
-      "
+      :error-message="t('general_settings.validation.chains_to_skip_detection.error')"
+      :success-message="t('general_settings.validation.chains_to_skip_detection.success')"
     >
-      <VAutocomplete
+      <RuiAutoComplete
         :disabled="loading"
-        :items="items"
-        :filter="filter"
+        :options="chains"
         :label="t('account_form.labels.blockchain', 2)"
-        :value="skippedChains"
+        :model-value="evmchainsToSkipDetection"
         :success-messages="success"
         :error-messages="error"
-        :class="css['chain-select']"
-        chips
-        small-chips
-        deletable-chips
-        multiple
-        clearable
+        class="general-settings__fields__account-chains-to-skip-detection"
         data-cy="account-chain-skip-detection-field"
-        outlined
+        variant="outlined"
+        key-attr="id"
+        text-attr="name"
+        chips
+        :item-height="56"
         auto-select-first
-        @input="update(getChainNames($event))"
+        @update:model-value="updateImmediate($event)"
       >
         <template #selection="{ item }">
-          <RuiChip
-            size="sm"
-            variant="filled"
-            dismissible
-            @remove="update(removeChain(item))"
-          >
-            <span class="flex gap-1 -ml-1">
-              <ChainIcon :chain="item" size="0.875rem" />
-              {{ getChainName(item).value }}
-            </span>
-          </RuiChip>
+          <ChainDisplay
+            dense
+            :chain="item.id"
+          />
         </template>
         <template #item="{ item }">
-          <ChainDisplay :chain="item" dense />
+          <ChainDisplay
+            dense
+            :chain="item.id"
+          />
         </template>
-      </VAutocomplete>
+      </RuiAutoComplete>
     </SettingsOption>
   </div>
 </template>
-
-<style lang="scss" module>
-/* stylelint-disable selector-class-pattern,selector-nested-pattern */
-
-.chain-select {
-  :global(.v-select__selections) {
-    @apply gap-3;
-  }
-}
-</style>

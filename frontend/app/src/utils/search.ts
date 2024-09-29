@@ -1,4 +1,4 @@
-import { type Nullable } from '@rotki/common';
+import type { Nullable } from '@rotki/common';
 
 interface SplitResult {
   key: string;
@@ -6,43 +6,45 @@ interface SplitResult {
   exclude?: boolean;
 }
 
-const defaultSplitResult = () => ({
-  key: '',
-  value: '',
-  exclude: undefined
-});
+function defaultSplitResult(): SplitResult {
+  return {
+    key: '',
+    value: '',
+    exclude: undefined,
+  };
+}
 
-export const splitSearch = (keyword: Nullable<string>): SplitResult => {
-  if (!keyword) {
+export function splitSearch(keyword: Nullable<string>): SplitResult {
+  if (!keyword)
     return defaultSplitResult();
-  }
+
   const negateOperatorIndex = keyword.indexOf('!=');
-  const equalOperatorIndex = Math.max(
-    keyword.indexOf('='),
-    keyword.indexOf(':')
-  );
+  const equalOperatorIndex = keyword.indexOf('=');
+  const colonOperatorIndex = keyword.indexOf(':');
+  const matchOperatorIndex
+    = equalOperatorIndex === -1 || colonOperatorIndex === -1
+      ? Math.max(equalOperatorIndex, colonOperatorIndex)
+      : Math.min(equalOperatorIndex, colonOperatorIndex);
 
   const exclude = negateOperatorIndex > -1;
 
-  if (!exclude && equalOperatorIndex < 0) {
+  if (!exclude && matchOperatorIndex < 0) {
     return {
       key: keyword.trim(),
       value: '',
-      exclude: undefined
+      exclude: undefined,
     };
   }
 
-  const separatorIndex = exclude ? negateOperatorIndex : equalOperatorIndex;
+  const separatorIndex = exclude ? negateOperatorIndex : matchOperatorIndex;
   const length = exclude ? 2 : 1;
 
   const key = keyword.slice(0, Math.max(0, separatorIndex)).trim();
-  const value = keyword
-    .substring(separatorIndex + length, keyword.length)
-    .trim();
+  const value = keyword.substring(separatorIndex + length, keyword.length).trim();
 
   return {
     key,
     value,
-    exclude
+    exclude,
   };
-};
+}

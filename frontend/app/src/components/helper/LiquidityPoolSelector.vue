@@ -1,96 +1,63 @@
 <script setup lang="ts">
-import { type LpType } from '@rotki/common/lib/defi';
-import { type XswapPool } from '@rotki/common/lib/defi/xswap';
+import type { LpType, XswapPool } from '@rotki/common';
 
 const props = withDefaults(
   defineProps<{
     pools: XswapPool[];
     type: LpType;
-    value: string[];
-    outlined?: boolean;
     dense?: boolean;
     noPadding?: boolean;
   }>(),
   {
-    outlined: false,
     dense: false,
-    noPadding: false
-  }
+    noPadding: false,
+  },
 );
 
-const emit = defineEmits<{ (e: 'input', value: string[]): void }>();
-const { value, type } = toRefs(props);
-const input = (value: string[]) => emit('input', value);
+const model = defineModel<string[]>({ required: true });
+
+const { type } = toRefs(props);
 
 const { getPoolName } = useLiquidityPosition();
 
-const filter = (item: XswapPool, queryText: string) => {
+function filter(item: XswapPool, queryText: string) {
   const searchString = queryText.toLocaleLowerCase();
   const name = getPoolName(get(type), item.assets).toLowerCase();
   return name.includes(searchString);
-};
-
-const remove = (asset: XswapPool) => {
-  const addresses = [...get(value)];
-  const index = addresses.indexOf(asset.address);
-  addresses.splice(index, 1);
-  input(addresses);
-};
+}
 
 const { t } = useI18n();
 </script>
 
 <template>
-  <VCard v-bind="$attrs" :outlined="false">
-    <div
-      :class="{
-        'mx-4 pt-2': !noPadding
-      }"
+  <RuiCard
+    variant="flat"
+    :no-padding="noPadding"
+    rounded="sm"
+    class="[&>div:last-child]:overflow-visible"
+  >
+    <RuiAutoComplete
+      v-model="model"
+      :label="t('liquidity_pool_selector.label')"
+      :options="pools"
+      :dense="dense"
+      variant="outlined"
+      :filter="filter"
+      clearable
+      hide-details
+      key-attr="address"
+      chips
+      hide-selected
+      :item-height="44"
     >
-      <VAutocomplete
-        :value="value"
-        :label="t('liquidity_pool_selector.label')"
-        :items="pools"
-        :dense="dense"
-        :outlined="outlined"
-        :filter="filter"
-        :menu-props="{ closeOnContentClick: true }"
-        multiple
-        clearable
-        deletable-chips
-        single-line
-        hide-details
-        hide-selected
-        item-value="address"
-        chips
-        @input="input($event)"
-      >
-        <template #selection="data">
-          <VChip
-            outlined
-            class="pa-2"
-            v-bind="data.attrs"
-            close
-            :input-value="data.selected"
-            @click="data.select"
-            @click:close="remove(data.item)"
-          >
-            <span class="font-medium">
-              {{ getPoolName(type, data.item.assets) }}
-            </span>
-          </VChip>
-        </template>
-        <template #item="{ item }">
-          <VListItemContent
-            :id="`ua-${item.address.toLocaleLowerCase()}`"
-            class="font-medium"
-          >
-            <VListItemTitle>
-              {{ getPoolName(type, item.assets) }}
-            </VListItemTitle>
-          </VListItemContent>
-        </template>
-      </VAutocomplete>
-    </div>
-  </VCard>
+      <template #selection="{ item }">
+        {{ getPoolName(type, item.assets) }}
+      </template>
+      <template #item="{ item }">
+        <div class="font-medium py-2">
+          {{ getPoolName(type, item.assets) }}
+        </div>
+      </template>
+    </RuiAutoComplete>
+  </RuiCard>
 </template>

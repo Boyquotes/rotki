@@ -2,6 +2,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from rotkehlchen.chain.evm.decoding.velodrome.constants import CPT_VELODROME
 from rotkehlchen.fval import FVal
 from rotkehlchen.tests.utils.ethereum import get_decoded_events_of_transaction
 from rotkehlchen.types import (
@@ -16,10 +17,12 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('load_global_caches', [[CPT_VELODROME]])
 @pytest.mark.parametrize('optimism_accounts', [['0x78C13393Aee675DD7ED07ce992210750D1F5dB88']])
 def test_optimism_balances(
         rotkehlchen_instance: 'Rotkehlchen',
         optimism_accounts: list[ChecksumEvmAddress],
+        load_global_caches: list[str],
 ):
     """
     Tests the balance of an account that has an asset both in wallet and staked in a gauge.
@@ -37,8 +40,8 @@ def test_optimism_balances(
     tx_hex = deserialize_evm_tx_hash('0xed7e13e4941bba33edbbd70c4f48c734629fd67fe4eac43ce1bed3ef8f3da7df')  # transaction that interacts with the gauge address  # noqa: E501
     get_decoded_events_of_transaction(  # decode events that interact with the gauge address. This is needed because the query_balances which is used later only queries balances for addresses interacted wth gauges. This also populates the global db with the event assets  # noqa: E501
         evm_inquirer=optimism_inquirer,
-        database=user_database,
         tx_hash=tx_hex,
+        load_global_caches=load_global_caches,
     )
     blockchain_result = rotkehlchen_instance.chains_aggregator.query_balances(
         blockchain=SupportedBlockchain.OPTIMISM,

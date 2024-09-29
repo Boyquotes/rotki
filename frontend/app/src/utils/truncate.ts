@@ -1,10 +1,26 @@
+import { XpubPrefix } from '@/utils/xpub';
+
 export const truncationPoints: Record<string, number> = {
-  xs: 3,
-  sm: 6,
-  md: 10,
-  lg: 20,
-  xl: 40
+  'xs': 4,
+  'sm': 6,
+  'md': 10,
+  'lg': 20,
+  'xl': 20,
+  '2xl': 30,
 };
+
+export function findAddressKnownPrefix(address: string): string {
+  const truncatePrefixExceptions = ['0x', ...Object.values(XpubPrefix)];
+
+  let knownPrefix = '';
+  for (const prefix of truncatePrefixExceptions) {
+    if (address.startsWith(prefix)) {
+      knownPrefix = prefix;
+      break;
+    }
+  }
+  return knownPrefix;
+}
 
 /**
  * Truncates blockchain hashes (addresses / txs) retaining `truncLength+2` characters
@@ -14,20 +30,13 @@ export const truncationPoints: Record<string, number> = {
  * @returns truncated address
  */
 export function truncateAddress(address: string, truncLength = 4): string {
-  const startPadding = address.startsWith('0x')
-    ? 2
-    : address.startsWith('xpub')
-    ? 4
-    : 0;
+  const knownPrefix = findAddressKnownPrefix(address);
+  const startPadding = knownPrefix.length;
 
   const length = address.length;
 
-  if (length <= truncLength * 2 + startPadding) {
+  if (length <= truncLength * 2 + startPadding)
     return address;
-  }
 
-  return `${address.slice(0, truncLength + startPadding)}...${address.slice(
-    length - truncLength,
-    length
-  )}`;
+  return `${address.slice(0, truncLength + startPadding)}...${address.slice(length - truncLength, length)}`;
 }

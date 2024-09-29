@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { type BigNumber, NumericString } from '@rotki/common';
-import { type AssetInfoWithId } from '@/types/asset';
+import { NumericString } from '@rotki/common';
+import type { AssetInfoWithId } from '@/types/asset';
 
 /**
  * It is like {@link AssetInfoWithId} but with two extra properties for
@@ -16,26 +16,29 @@ const NftCollectionInfo = z.object({
   bannerImage: z.string().nullable(),
   description: z.string().nullable(),
   name: z.string().nullable(),
-  largeImage: z.string().nullable()
+  largeImage: z.string().nullable(),
 });
+
 const Nft = z.object({
-  tokenIdentifier: z.string().nonempty(),
+  tokenIdentifier: z.string().min(1),
   name: z.string().nullable(),
   collection: NftCollectionInfo,
   backgroundColor: z.string().nullable(),
   imageUrl: z.string().nullable(),
-  externalLink: z.string().nullable(),
+  externalLink: z
+    .string()
+    .nullable()
+    .transform(item => item || undefined),
   permalink: z.string().nullable(),
-  priceEth: NumericString,
-  priceUsd: NumericString
+  priceUsd: NumericString,
+  priceInAsset: NumericString,
+  priceAsset: z.string(),
 });
 
 export type Nft = z.infer<typeof Nft>;
 
-export interface GalleryNft extends Omit<Nft, 'priceEth'> {
+export interface GalleryNft extends Nft {
   address: string;
-  priceInAsset: BigNumber;
-  priceAsset: string;
 }
 
 const Nfts = z.record(z.array(Nft));
@@ -45,7 +48,7 @@ export type Nfts = z.infer<typeof Nfts>;
 export const NftResponse = z.object({
   addresses: Nfts,
   entriesFound: z.number(),
-  entriesLimit: z.number()
+  entriesLimit: z.number(),
 });
 
 export type NftResponse = z.infer<typeof NftResponse>;

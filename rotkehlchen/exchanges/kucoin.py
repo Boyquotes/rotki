@@ -155,6 +155,7 @@ class Kucoin(ExchangeInterface):
             api_key=api_key,
             secret=secret,
             database=database,
+            msg_aggregator=msg_aggregator,
         )
         self.base_uri = base_uri
         self.api_passphrase = passphrase
@@ -163,7 +164,6 @@ class Kucoin(ExchangeInterface):
             'KC-API-KEY': self.api_key,
             'KC-API-KEY-VERSION': '2',
         })
-        self.msg_aggregator = msg_aggregator
 
     def update_passphrase(self, new_passphrase: str) -> None:
         self.api_passphrase = new_passphrase
@@ -404,7 +404,6 @@ class Kucoin(ExchangeInterface):
                 except (
                     DeserializationError,
                     KeyError,
-                    UnknownAsset,
                     UnprocessableTradePair,
                     UnsupportedAsset,
                 ) as e:
@@ -414,13 +413,18 @@ class Kucoin(ExchangeInterface):
                         error=error_msg,
                         raw_result=raw_result,
                     )
-                    if isinstance(e, UnknownAsset | UnsupportedAsset):
-                        asset_tag = 'unknown' if isinstance(e, UnknownAsset) else 'unsupported'
-                        error_msg = f'Found {asset_tag} kucoin asset {e.identifier}'
+                    if isinstance(e, UnsupportedAsset):
+                        error_msg = f'Found unsupported kucoin asset {e.identifier}'
 
                     self.msg_aggregator.add_error(
                         f'Failed to deserialize a kucoin {case} result. {error_msg}. Ignoring it. '
                         f'Check logs for more details')
+                    continue
+                except UnknownAsset as e:
+                    self.send_unknown_asset_message(
+                        asset_identifier=e.identifier,
+                        details=str(case),
+                    )
                     continue
 
                 results.append(result)  # type: ignore
@@ -491,15 +495,20 @@ class Kucoin(ExchangeInterface):
                     'Failed to deserialize a kucoin balance. Ignoring it.',
                 )
                 continue
-            except (UnknownAsset, UnsupportedAsset) as e:
-                asset_tag = 'unknown' if isinstance(e, UnknownAsset) else 'unsupported'
+            except UnsupportedAsset as e:
                 self.msg_aggregator.add_warning(
-                    f'Found {asset_tag} kucoin asset {e.identifier} while deserializing '
+                    f'Found unsupported kucoin asset {e.identifier} while deserializing '
                     f'a balance. Ignoring it.',
                 )
                 continue
+            except UnknownAsset as e:
+                self.send_unknown_asset_message(
+                    asset_identifier=e.identifier,
+                    details='balance deserialization',
+                )
+                continue
             try:
-                usd_price = Inquirer().find_usd_price(asset=asset)
+                usd_price = Inquirer.find_usd_price(asset=asset)
             except RemoteError:
                 self.msg_aggregator.add_error(
                     f'Failed to deserialize a kucoin balance after failing to '

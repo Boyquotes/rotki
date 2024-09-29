@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { type ComputedRef, type Ref } from 'vue';
 import { cloneDeep } from 'lodash-es';
-import {
-  type Watcher,
-  type WatcherOpTypes,
-  WatcherType
-} from '@/types/session';
+import { type Watcher, type WatcherOpTypes, WatcherType } from '@/types/session';
+import type { RuiIcons } from '@rotki/ui-library';
+
+interface WatcherOperation {
+  op: WatcherOpTypes;
+  value: WatcherOpTypes;
+  text: string;
+}
 
 const props = withDefaults(
   defineProps<{
@@ -21,20 +23,19 @@ const props = withDefaults(
     watcherValueLabel: 'Watcher Value',
     watcherContentId: undefined,
     preselectWatcherType: undefined,
-    existingWatchers: () => []
-  }
+    existingWatchers: () => [],
+  },
 );
 
 const emit = defineEmits<{ (e: 'cancel'): void }>();
 
-const { display, preselectWatcherType, existingWatchers, watcherContentId } =
-  toRefs(props);
-const watcherType: Ref<typeof WatcherType | null> = ref(null);
-const watcherOperation: Ref<WatcherOpTypes | null> = ref(null);
-const watcherValue: Ref<string | null> = ref(null);
-const validationMessage: Ref<string> = ref('');
-const validationStatus: Ref<'success' | 'error' | ''> = ref('');
-const existingWatchersEdit: Ref<Record<string, boolean>> = ref({});
+const { display, preselectWatcherType, existingWatchers, watcherContentId } = toRefs(props);
+const watcherType = ref<typeof WatcherType>();
+const watcherOperation = ref<WatcherOpTypes>();
+const watcherValue = ref<string>('');
+const validationMessage = ref<string>('');
+const validationStatus = ref<'success' | 'error' | ''>('');
+const existingWatchersEdit = ref<Record<string, boolean>>({});
 
 const { t } = useI18n();
 
@@ -42,65 +43,59 @@ const store = useWatchersStore();
 const { watchers } = storeToRefs(store);
 const { addWatchers, editWatchers, deleteWatchers } = store;
 
-const loadedWatchers: ComputedRef<Watcher[]> = computed(() => {
+const loadedWatchers = computed<Watcher[]>(() => {
   const id = get(watcherContentId)?.toString();
-  return cloneDeep(get(watchers)).filter(
-    watcher => watcher.args.vaultId === id
-  );
+  return cloneDeep(get(watchers)).filter(watcher => watcher.args.vaultId === id);
 });
 
 const watcherTypes = computed(() => [
   {
     text: t('watcher_dialog.types.make_collateralization_ratio'),
     type: WatcherType,
-    value: WatcherType
-  }
+    value: WatcherType,
+  },
 ]);
 
-const watcherOperations = computed(() => ({
+const watcherOperations = computed<{ [WatcherType]: WatcherOperation[] }>(() => ({
   makervault_collateralization_ratio: [
     {
       op: 'gt',
       value: 'gt',
-      text: t('watcher_dialog.ratio.gt')
+      text: t('watcher_dialog.ratio.gt'),
     },
     {
       op: 'ge',
       value: 'ge',
-      text: t('watcher_dialog.ratio.ge')
+      text: t('watcher_dialog.ratio.ge'),
     },
     {
       op: 'lt',
       value: 'lt',
-      text: t('watcher_dialog.ratio.lt')
+      text: t('watcher_dialog.ratio.lt'),
     },
     {
       op: 'le',
       value: 'le',
-      text: t('watcher_dialog.ratio.le')
-    }
-  ]
+      text: t('watcher_dialog.ratio.le'),
+    },
+  ],
 }));
 
-const operations = computed(() => {
+const operations = computed<WatcherOperation[]>(() => {
   const operations = get(watcherOperations);
   const type = get(watcherType);
-  if (!type) {
+  if (!type)
     return [];
-  }
+
   return operations[type] ?? [];
 });
 
-const existingWatchersIcon = (identifier: string): string => {
+function existingWatchersIcon(identifier: string): RuiIcons {
   const edit = get(existingWatchersEdit);
   return edit[identifier] ? 'check-line' : 'pencil-line';
-};
+}
 
-const validateSettingChange = (
-  targetState: string,
-  message = '',
-  timeOut = 5500
-) => {
+function validateSettingChange(targetState: string, message = '', timeOut = 5500) {
   if (targetState === 'success' || targetState === 'error') {
     setTimeout(() => {
       set(validationMessage, message);
@@ -111,117 +106,116 @@ const validateSettingChange = (
       set(validationStatus, '');
     }, timeOut);
   }
-};
+}
 
-const changeEditMode = (identifier: string) => {
+function changeEditMode(identifier: string) {
   const edit = get(existingWatchersEdit);
   set(existingWatchersEdit, {
     ...edit,
-    [identifier]: !edit[identifier]
+    [identifier]: !edit[identifier],
   });
-};
+}
 
-const addWatcher = async () => {
+async function addWatcher() {
   const type = get(watcherType);
   const value = get(watcherValue);
   const operation = get(watcherOperation);
   const contentId = get(watcherContentId);
-  if (!(type && value && operation && contentId)) {
+  if (!(type && value && operation && contentId))
     return;
-  }
 
   const watcherData: Omit<Watcher, 'identifier'> = {
     type,
     args: {
       ratio: value,
       op: operation,
-      vaultId: contentId.toString()
-    }
+      vaultId: contentId.toString(),
+    },
   };
 
   try {
     await addWatchers([watcherData]);
     validateSettingChange('success', t('watcher_dialog.add_success'));
     clear();
-  } catch (e: any) {
-    validateSettingChange(
-      'error',
-      t('watcher_dialog.add_error', { message: e.message })
-    );
   }
-};
+  catch (error: any) {
+    validateSettingChange('error', t('watcher_dialog.add_error', { message: error.message }));
+  }
+}
 
-const editWatcher = async (watcher: Watcher) => {
+async function editWatcher(watcher: Watcher) {
   const edit = get(existingWatchersEdit);
   if (!edit[watcher.identifier]) {
     // If we're not in edit mode, just go into edit mode
     changeEditMode(watcher.identifier);
-  } else {
+  }
+  else {
     // If we're in edit mode, check to see if the values have changed before
     // sending an API call
     const existingWatcherArgs = get(existingWatchers).find(
-      existingWatcher => existingWatcher.identifier === watcher.identifier
+      existingWatcher => existingWatcher.identifier === watcher.identifier,
     )!.args;
     const modifiedWatcherArgs = watcher.args;
 
-    if (
-      existingWatcherArgs.op !== modifiedWatcherArgs.op ||
-      existingWatcherArgs.ratio !== modifiedWatcherArgs.ratio
-    ) {
+    if (existingWatcherArgs.op !== modifiedWatcherArgs.op || existingWatcherArgs.ratio !== modifiedWatcherArgs.ratio) {
       try {
         await editWatchers([watcher]);
         validateSettingChange('success', t('watcher_dialog.edit_success'));
         changeEditMode(watcher.identifier);
-      } catch (e: any) {
+      }
+      catch (error: any) {
         validateSettingChange(
           'error',
           t('watcher_dialog.edit_error', {
-            message: e.message
-          })
+            message: error.message,
+          }),
         );
       }
-    } else {
+    }
+    else {
       changeEditMode(watcher.identifier);
     }
   }
-};
+}
 
-const deleteWatcher = async (identifier: string) => {
+async function deleteWatcher(identifier: string) {
   try {
     await deleteWatchers([identifier]);
     validateSettingChange('success', t('watcher_dialog.delete_success'));
     clear();
-  } catch (e: any) {
+  }
+  catch (error: any) {
     validateSettingChange(
       'error',
       t('watcher_dialog.delete_error', {
-        message: e.message
-      })
+        message: error.message,
+      }),
     );
   }
-};
+}
 
-const clear = () => {
+function clear() {
   set(watcherValue, null);
   set(watcherOperation, null);
-};
+}
 
-watch(display, display => {
+watch(display, (display) => {
   if (display) {
     set(watcherType, get(preselectWatcherType));
 
     const edit = { ...get(existingWatchersEdit) };
-    get(loadedWatchers).forEach(watcher => {
+    get(loadedWatchers).forEach((watcher) => {
       edit[watcher.identifier] = false;
     });
     set(existingWatchersEdit, edit);
-  } else {
+  }
+  else {
     set(watcherType, null);
     set(existingWatchersEdit, {});
   }
 });
 
-const cancel = () => {
+function cancel() {
   emit('cancel');
   const edit = { ...get(existingWatchersEdit) };
   for (const index in edit) {
@@ -231,156 +225,169 @@ const cancel = () => {
   // Reset unsaved changes to the current saved state
   set(existingWatchersEdit, edit);
   clear();
-};
+}
 
 const [CreateLabel, ReuseLabel] = createReusableTemplate<{ label: string }>();
-const percent = '%';
 </script>
 
 <template>
-  <VDialog
-    :value="display"
+  <RuiDialog
+    :model-value="display"
     persistent
     max-width="650"
     class="watcher-dialog"
-    @keydown.esc.stop="cancel()"
   >
     <CreateLabel #default="{ label }">
       <div class="flex justify-center items-center gap-4">
         <RuiDivider class="flex-grow" />
-        <div class="text-center">{{ label }}</div>
+        <div class="text-center">
+          {{ label }}
+        </div>
         <RuiDivider class="flex-grow" />
       </div>
     </CreateLabel>
 
     <RuiCard>
-      <template #header> {{ title }} </template>
-      <template #subheader>{{ message }}</template>
+      <template #header>
+        {{ title }}
+      </template>
+      <template #subheader>
+        {{ message }}
+      </template>
 
-      <VSelect
+      <RuiMenuSelect
         v-if="!preselectWatcherType"
         v-model="watcherType"
-        :items="watcherTypes"
+        :options="watcherTypes"
         :label="t('watcher_dialog.labels.type')"
         dense
-        outlined
+        variant="outlined"
         required
       />
 
-      <div v-if="loadedWatchers.length > 0" class="flex flex-col gap-4">
-        <ReuseLabel :label="t('watcher_dialog.edit')" />
+      <div class="flex flex-col gap-6">
         <div
-          v-for="(watcher, key) in loadedWatchers"
-          :key="key"
-          class="flex items-center gap-4"
+          v-if="loadedWatchers.length > 0"
+          class="flex flex-col gap-4"
         >
-          <div class="grid grid-cols-2 gap-4">
-            <VSelect
-              :class="{
-                'bg-rui-grey-100 dark:bg-rui-grey-800':
-                  !existingWatchersEdit[watcher.identifier]
-              }"
-              :items="operations"
-              :label="t('watcher_dialog.labels.operation')"
-              :readonly="!existingWatchersEdit[watcher.identifier]"
-              :value="loadedWatchers[key].args.op"
-              dense
-              hide-details
-              outlined
-              required
-              @input="loadedWatchers[key].args.op = $event"
-            />
+          <ReuseLabel :label="t('watcher_dialog.edit')" />
+          <div
+            v-for="(watcher, key) in loadedWatchers"
+            :key="key"
+            class="flex items-center gap-4"
+          >
+            <div class="grid grid-cols-2 gap-4">
+              <RuiMenuSelect
+                v-model="loadedWatchers[key].args.op"
+                :options="operations"
+                :label="t('watcher_dialog.labels.operation')"
+                :disabled="!existingWatchersEdit[watcher.identifier]"
+                key-attr="value"
+                text-attr="text"
+                dense
+                hide-details
+                variant="outlined"
+              />
 
-            <RuiTextField
-              :class="{
-                'bg-rui-grey-100 dark:bg-rui-grey-800':
-                  !existingWatchersEdit[watcher.identifier]
-              }"
-              :label="watcherValueLabel"
-              :readonly="!existingWatchersEdit[watcher.identifier]"
-              :value="loadedWatchers[key].args.ratio"
-              dense
-              color="primary"
-              hide-details
-              variant="outlined"
-              @input="loadedWatchers[key].args.ratio = $event"
-            >
-              <template #append>{{ percent }}</template>
-            </RuiTextField>
-          </div>
+              <RuiTextField
+                v-model="loadedWatchers[key].args.ratio"
+                :label="watcherValueLabel"
+                :disabled="!existingWatchersEdit[watcher.identifier]"
+                dense
+                color="primary"
+                hide-details
+                variant="outlined"
+              >
+                <template #append>
+                  {{ t('percentage_display.symbol') }}
+                </template>
+              </RuiTextField>
+            </div>
 
-          <div class="flex items-center gap-2 justify-end">
-            <RuiButton
-              variant="text"
-              size="sm"
-              icon
-              @click="editWatcher(loadedWatchers[key])"
-            >
-              <RuiIcon :name="existingWatchersIcon(watcher.identifier)" />
-            </RuiButton>
-            <RuiButton
-              variant="text"
-              icon
-              size="sm"
-              @click="deleteWatcher(watcher.identifier)"
-            >
-              <RuiIcon name="delete-bin-5-line" />
-            </RuiButton>
+            <div class="flex items-center gap-2 justify-end">
+              <RuiButton
+                variant="text"
+                icon
+                @click="editWatcher(loadedWatchers[key])"
+              >
+                <RuiIcon
+                  :name="existingWatchersIcon(watcher.identifier)"
+                  size="20"
+                />
+              </RuiButton>
+              <RuiButton
+                variant="text"
+                icon
+                @click="deleteWatcher(watcher.identifier)"
+              >
+                <RuiIcon
+                  name="delete-bin-5-line"
+                  size="20"
+                />
+              </RuiButton>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="flex flex-col gap-4 mt-4">
-        <ReuseLabel :label="t('watcher_dialog.add_watcher')" />
-        <div class="flex items-center justify-between gap-4">
-          <div class="grid grid-cols-2 gap-4">
-            <VSelect
-              v-model="watcherOperation"
-              :disabled="!watcherType"
-              :items="operations"
-              :label="t('watcher_dialog.labels.operation')"
-              dense
-              hide-details
-              outlined
-              required
-            />
+        <div class="flex flex-col gap-4">
+          <ReuseLabel :label="t('watcher_dialog.add_watcher')" />
+          <div class="flex items-center gap-4">
+            <div class="grid grid-cols-2 gap-4">
+              <RuiMenuSelect
+                v-model="watcherOperation"
+                :disabled="!watcherType"
+                :options="operations"
+                :label="t('watcher_dialog.labels.operation')"
+                key-attr="value"
+                text-attr="text"
+                dense
+                hide-details
+                variant="outlined"
+                required
+              />
 
-            <RuiTextField
-              v-model="watcherValue"
-              :label="watcherValueLabel"
-              color="primary"
-              dense
-              hide-details
-              variant="outlined"
+              <RuiTextField
+                v-model="watcherValue"
+                :label="watcherValueLabel"
+                color="primary"
+                dense
+                hide-details
+                variant="outlined"
+              >
+                <template #append>
+                  {{ t('percentage_display.symbol') }}
+                </template>
+              </RuiTextField>
+            </div>
+
+            <RuiButton
+              :disabled="watcherOperation === null || watcherValue === null"
+              variant="text"
+              icon
+              @click="addWatcher()"
             >
-              <template #append> {{ percent }} </template>
-            </RuiTextField>
+              <RuiIcon name="add-line" />
+            </RuiButton>
           </div>
-
-          <RuiButton
-            :disabled="watcherOperation === null || watcherValue === null"
-            variant="text"
-            icon
-            size="sm"
-            @click="addWatcher()"
-          >
-            <RuiIcon name="add-line" />
-          </RuiButton>
         </div>
       </div>
 
       <template #footer>
-        <div class="text-caption flex-grow py-2 px-4 mb-4">
+        <RuiAlert
+          v-if="validationStatus"
+          :type="validationStatus"
+        >
           {{ validationMessage }}
-        </div>
+        </RuiAlert>
+        <div class="grow" />
         <RuiButton
           color="primary"
-          class="watcher-dialog__buttons__close"
+          class="watcher-dialog__buttons__close mt-4"
           @click="cancel()"
         >
           {{ t('common.actions.close') }}
         </RuiButton>
       </template>
     </RuiCard>
-  </VDialog>
+  </RuiDialog>
 </template>

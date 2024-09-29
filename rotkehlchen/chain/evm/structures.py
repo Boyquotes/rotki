@@ -12,7 +12,6 @@ class EvmTxReceiptLog:
     log_index: int
     data: bytes
     address: ChecksumEvmAddress
-    removed: bool
     topics: list[bytes] = dataclasses.field(default_factory=list)
 
 
@@ -22,7 +21,7 @@ class EvmTxReceipt:
     chain_id: ChainID
     contract_address: ChecksumEvmAddress | None
     status: bool
-    type: int
+    tx_type: int
     logs: list[EvmTxReceiptLog] = dataclasses.field(default_factory=list)
 
 

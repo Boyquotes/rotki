@@ -1,20 +1,19 @@
-import random
 import warnings as test_warnings
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 import requests
-from flaky import flaky
 
 from rotkehlchen.accounting.structures.balance import Balance
 from rotkehlchen.assets.asset import EvmToken
 from rotkehlchen.chain.ethereum.interfaces.ammswap.types import LiquidityPoolAsset
 from rotkehlchen.chain.ethereum.modules.nft.constants import FREE_NFT_LIMIT
 from rotkehlchen.chain.ethereum.modules.nft.structures import NftLpHandling
-from rotkehlchen.chain.ethereum.modules.uniswap.v3.types import NFTLiquidityPool
+from rotkehlchen.chain.evm.decoding.uniswap.v3.types import NFTLiquidityPool
 from rotkehlchen.chain.evm.types import string_to_evm_address
 from rotkehlchen.constants import ZERO
+from rotkehlchen.constants.assets import A_ETH
 from rotkehlchen.db.queried_addresses import QueriedAddresses
 from rotkehlchen.externalapis.opensea import NFT, Collection
 from rotkehlchen.fval import FVal
@@ -22,7 +21,7 @@ from rotkehlchen.tests.conftest import TestEnvironment, requires_env
 from rotkehlchen.tests.utils.api import (
     api_url_for,
     assert_ok_async_response,
-    assert_proper_response_with_result,
+    assert_proper_sync_response_with_result,
     wait_for_async_task,
 )
 from rotkehlchen.tests.utils.mock import MockResponse
@@ -31,22 +30,25 @@ from rotkehlchen.types import Price
 TEST_ACC1 = '0x2B888954421b424C5D3D9Ce9bB67c9bD47537d12'  # lefteris.eth
 TEST_ACC2 = '0x3Ba6eB0e4327B96aDe6D4f3b578724208a590CEF'
 TEST_ACC3 = '0xC21A5ee89D306353e065a6dd5779470DE395DBaC'
-TEST_ACC4 = '0xc37b40ABdB939635068d3c5f13E7faF686F03B65'  # yabir.eth
+TEST_ACC4 = '0xc37b40ABdB939635068d3c5f13E7faF686F03B65'  # yabir.eth, gashawk nft
 TEST_ACC5 = '0x4bBa290826C253BD854121346c370a9886d1bC26'  # nebolax.eth
-TEST_ACC6 = '0x3e649c5Eac6BBEE8a4F2A2945b50d8e582faB3bf'  # contains a uniswap-v3 nft
-NFT_ID_FOR_TEST_ACC4 = '_nft_0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85_26612040215479394739615825115912800930061094786769410446114278812336794170041'  # noqa: E501
-NFT_ID_FOR_TEST_ACC5 = '_nft_0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85_73552724610198397480670284492690114609730214421511097849210414928326607694469'  # noqa: E501
-NFT_ID_FOR_TEST_ACC6_1 = '_nft_0xc36442b4a4522e871399cd717abdd847ab11fe88_360680'
-NFT_ID_FOR_TEST_ACC6_2 = '_nft_0xc36442b4a4522e871399cd717abdd847ab11fe88_360762'
+TEST_ACC6 = '0x3e649c5Eac6BBEE8a4F2A2945b50d8e582faB3bf'  # contains uniswap-v3 nft
+NFT_ID_FOR_TEST_ACC4 = '_nft_0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85_26612040215479394739615825115912800930061094786769410446114278812336794170041'  # noqa: E501
+NFT_ID_FOR_TEST_ACC4_2 = '_nft_0xfd9d8036F899ed5a9fD8cac7968E5F24D3db2A64_1_0xc37b40ABdB939635068d3c5f13E7faF686F03B65'  # noqa: E501
+NFT_ID_FOR_TEST_ACC5 = '_nft_0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85_73552724610198397480670284492690114609730214421511097849210414928326607694469'  # noqa: E501
+NFT_ID_FOR_TEST_ACC6_1 = '_nft_0xC36442b4a4522E871399CD717aBDD847Ab11FE88_360680'
+NFT_ID_FOR_TEST_ACC6_2 = '_nft_0xC36442b4a4522E871399CD717aBDD847Ab11FE88_360762'
+NFT_ID_FOR_TEST_ACC6_3 = '_nft_0xC36442b4a4522E871399CD717aBDD847Ab11FE88_530086'
 
 TEST_NFT_NEBOLAX_ETH = NFT(
-    token_identifier='_nft_0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85_73552724610198397480670284492690114609730214421511097849210414928326607694469',
+    token_identifier='_nft_0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85_73552724610198397480670284492690114609730214421511097849210414928326607694469',
     background_color=None,
     image_url='https://openseauserdata.com/files/8fd18b22e4c81aff3998956e7a712d93.svg',
     name='nebolax.eth',
-    external_link='https://app.ens.domains/name/nebolax.eth',
+    external_link='https://metadata.ens.domains/mainnet/0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85/73552724610198397480670284492690114609730214421511097849210414928326607694469',
     permalink='https://opensea.io/assets/ethereum/0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85/73552724610198397480670284492690114609730214421511097849210414928326607694469',
-    price_eth=FVal(0.0012),
+    price_in_asset=FVal(0.0012),
+    price_asset=A_ETH,
     price_usd=FVal(1.2379458),
     collection=Collection(
         name='ENS: Ethereum Name Service',
@@ -54,17 +56,19 @@ TEST_NFT_NEBOLAX_ETH = NFT(
         description='Ethereum Name Service (ENS) domains are secure domain names for the decentralized world. ENS domains provide a way for users to map human readable names to blockchain and non-blockchain resources, like Ethereum addresses, IPFS hashes, or website URLs. ENS domains can be bought and sold on secondary markets.',  # noqa: E501
         large_image='https://i.seadn.io/gae/BBj09xD7R4bBtg1lgnAAS9_TfoYXKwMtudlk-0fVljlURaK7BWcARCpkM-1LGNGTAcsGO6V1TgrtmQFvCo8uVYW_QEfASK-9j6Nr?w=500&auto=format',
         floor_price=FVal(0.00098),
+        floor_price_asset=A_ETH,
     ),
 )
 
 TEST_NFT_YABIR_ETH = NFT(
-    token_identifier='_nft_0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85_26612040215479394739615825115912800930061094786769410446114278812336794170041',
+    token_identifier='_nft_0x57f1887a8BF19b14fC0dF6Fd9B2acc9Af147eA85_26612040215479394739615825115912800930061094786769410446114278812336794170041',
     background_color=None,
     image_url='https://openseauserdata.com/files/3f7c0c7d1ba51e61fe05ef53875f9f7e.svg',
     name='yabir.eth',
-    external_link='https://app.ens.domains/name/yabir.eth',
+    external_link='https://metadata.ens.domains/mainnet/0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85/26612040215479394739615825115912800930061094786769410446114278812336794170041',
     permalink='https://opensea.io/assets/ethereum/0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85/26612040215479394739615825115912800930061094786769410446114278812336794170041',
-    price_eth=FVal(0.00098),
+    price_in_asset=FVal(0.00098),
+    price_asset=A_ETH,
     price_usd=FVal(1.2379458),
     collection=Collection(
         name='ENS: Ethereum Name Service',
@@ -72,28 +76,26 @@ TEST_NFT_YABIR_ETH = NFT(
         description='Ethereum Name Service (ENS) domains are secure domain names for the decentralized world. ENS domains provide a way for users to map human readable names to blockchain and non-blockchain resources, like Ethereum addresses, IPFS hashes, or website URLs. ENS domains can be bought and sold on secondary markets.',  # noqa: E501
         large_image='https://i.seadn.io/gae/BBj09xD7R4bBtg1lgnAAS9_TfoYXKwMtudlk-0fVljlURaK7BWcARCpkM-1LGNGTAcsGO6V1TgrtmQFvCo8uVYW_QEfASK-9j6Nr?w=500&auto=format',
         floor_price=FVal(0.00098),
+        floor_price_asset=A_ETH,
     ),
 )
 
 
-@requires_env([TestEnvironment.NIGHTLY, TestEnvironment.NFTS])
-@flaky(max_runs=3, min_passes=1)  # all opensea calls have become quite flaky
+@pytest.mark.vcr(
+    filter_query_parameters=['apikey'], filter_headers=['X-API-KEY'],
+)
 @pytest.mark.parametrize('ethereum_accounts', [[TEST_ACC1]])
-@pytest.mark.parametrize('start_with_valid_premium', [bool(random.getrandbits(1))])
+@pytest.mark.parametrize('start_with_valid_premium', [True, False])
 @pytest.mark.parametrize('ethereum_modules', [['nfts']])
 def test_nft_query(rotkehlchen_api_server, start_with_valid_premium):
-    async_query = bool(random.getrandbits(1))
     response = requests.get(api_url_for(
         rotkehlchen_api_server,
         'nftsresource',
-    ), json={'async_query': async_query})
-    if async_query:
-        task_id = assert_ok_async_response(response)
-        outcome = wait_for_async_task(rotkehlchen_api_server, task_id, timeout=60)
-        assert outcome['message'] == ''
-        result = outcome['result']
-    else:
-        result = assert_proper_response_with_result(response)
+    ), json={'async_query': True})
+    task_id = assert_ok_async_response(response)
+    outcome = wait_for_async_task(rotkehlchen_api_server, task_id, timeout=60)
+    assert outcome['message'] == ''
+    result = outcome['result']
 
     if len(result['addresses']) == 0:
         test_warnings.warn(UserWarning(f'Test account {TEST_ACC1} has no NFTs'))
@@ -113,11 +115,11 @@ def test_nft_query(rotkehlchen_api_server, start_with_valid_premium):
     nfts = result['addresses'][TEST_ACC1]
     nft_found = False
     for entry in nfts:
-        if entry['token_identifier'] == '_nft_0xc3f733ca98e0dad0386979eb96fb1722a1a05e69_129':
+        if entry['token_identifier'] == '_nft_0xc3f733ca98E0daD0386979Eb96fb1722A1A05E69_129':
             assert entry['name'] == 'MoonCat #129: 0x0082206dcb'
-            assert entry['external_link'] == 'https://purrse.mooncat.community/129'
+            assert entry['external_link'] == 'https://api.mooncat.community/traits/129'
             assert 'image_url' in entry
-            assert FVal(entry['price_eth']) > ZERO
+            assert FVal(entry['price_in_asset']) > ZERO
             assert FVal(entry['price_usd']) > ZERO
             assert entry['collection']['name'] == 'MoonCats'
             assert entry['collection']['banner_image'].startswith('https://')
@@ -130,7 +132,7 @@ def test_nft_query(rotkehlchen_api_server, start_with_valid_premium):
 
 
 @requires_env([TestEnvironment.NIGHTLY, TestEnvironment.NFTS])
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [[]])
 @pytest.mark.parametrize('start_with_valid_premium', [True])
 @pytest.mark.parametrize('ethereum_modules', [['nfts']])
@@ -147,7 +149,7 @@ def test_nft_query_after_account_add(rotkehlchen_api_server):
         rotkehlchen_api_server,
         'nftsresource',
     ))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
 
     if len(result['addresses']) == 0:
         test_warnings.warn(UserWarning(f'Test account {TEST_ACC1} has no NFTs'))
@@ -168,13 +170,13 @@ def test_nft_query_after_account_add(rotkehlchen_api_server):
             'nftsresource',
         ), json={'ignore_cache': True},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert TEST_ACC1 in result['addresses']
     assert TEST_ACC2 in result['addresses']
 
 
 @requires_env([TestEnvironment.NIGHTLY, TestEnvironment.NFTS])
-@pytest.mark.vcr()
+@pytest.mark.vcr
 @pytest.mark.parametrize('ethereum_accounts', [[TEST_ACC2, TEST_ACC3]])
 @pytest.mark.parametrize('start_with_valid_premium', [True])
 @pytest.mark.parametrize('ethereum_modules', [['nfts']])
@@ -185,12 +187,12 @@ def test_nft_ids_are_unique(rotkehlchen_api_server):
         'nftsresource',
     ), json={'async_query': False})
 
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     # get the ids from the query result
     ids_1 = [nft['token_identifier'] for nft in result['addresses'][TEST_ACC2]]
     ids_2 = [nft['token_identifier'] for nft in result['addresses'][TEST_ACC3]]
     # Check that two possible duplicates are between the NFT ids
-    expected_id = '_nft_0xfaff15c6cdaca61a4f87d329689293e07c98f578_1'
+    expected_id = '_nft_0xFAFf15C6cDAca61a4F87D329689293E07c98f578_1'
     assert any(expected_id in nft_id for nft_id in ids_1)
     assert any(expected_id in nft_id for nft_id in ids_2)
     all_ids = ids_1 + ids_2
@@ -209,20 +211,25 @@ def test_nft_balances_and_prices(rotkehlchen_api_server):
         rotkehlchen_api_server,
         'nftsbalanceresource',
     ), json={'async_query': False, 'ignore_cache': False})
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries'] == [], 'nothing should be returned with ignore_cache=False until nfts are queried'  # noqa: E501
     response = requests.get(api_url_for(
         rotkehlchen_api_server,
         'nftsbalanceresource',
     ), json={'async_query': False, 'ignore_cache': True})
-    result_ignored_cache = assert_proper_response_with_result(response)
-    assert result_ignored_cache['entries_found'] == 4
+    result_ignored_cache = assert_proper_sync_response_with_result(response)
+    assert result_ignored_cache['entries_found'] == 5
     for nft_balance in result_ignored_cache['entries']:
         if nft_balance['id'] == NFT_ID_FOR_TEST_ACC4:
             assert nft_balance['name'] == 'yabir.eth'
             assert nft_balance['collection_name'] == 'ENS: Ethereum Name Service'
             assert nft_balance['is_lp'] is False
             assert FVal(nft_balance['usd_price']) > ZERO
+        elif nft_balance['id'] == NFT_ID_FOR_TEST_ACC4_2:
+            assert nft_balance['name'] == 'GasHawk Nest NFT'
+            assert nft_balance['collection_name'] == 'GasHawk NFTs'
+            assert nft_balance['is_lp'] is False
+            assert FVal(nft_balance['usd_price']) >= ZERO
         elif nft_balance['id'] == NFT_ID_FOR_TEST_ACC5:
             assert nft_balance['name'] == 'nebolax.eth'
             assert nft_balance['collection_name'] == 'ENS: Ethereum Name Service'
@@ -236,6 +243,11 @@ def test_nft_balances_and_prices(rotkehlchen_api_server):
         elif nft_balance['id'] == NFT_ID_FOR_TEST_ACC6_2:
             assert nft_balance['name'] == 'Uniswap - 0.3% - SHIB/WETH - 79010000<>166260000'
             assert nft_balance['collection_name'] == 'Uniswap V3 Positions'
+            assert nft_balance['is_lp'] is False
+            assert FVal(nft_balance['usd_price']) > ZERO
+        elif nft_balance['id'] == NFT_ID_FOR_TEST_ACC6_3:
+            assert nft_balance['name'] == 'Uniswap - 1% - SHIB/WETH - 201050000<>546470000'
+            assert nft_balance['collection_name'] == 'Uniswap V3 Positions'
             assert nft_balance['is_lp'] is True
             assert FVal(nft_balance['usd_price']) > ZERO
         else:
@@ -245,7 +257,7 @@ def test_nft_balances_and_prices(rotkehlchen_api_server):
         rotkehlchen_api_server,
         'nftsbalanceresource',
     ), json={'async_query': False, 'ignore_cache': False})
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == result_ignored_cache, 'after querying nfts should be returned even with ignore_cache=False'  # noqa: E501
 
     # Check that search by name works
@@ -253,7 +265,7 @@ def test_nft_balances_and_prices(rotkehlchen_api_server):
         rotkehlchen_api_server,
         'nftsbalanceresource',
     ), json={'async_query': False, 'ignore_cache': False, 'name': 'nebolax'})
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries_found'] == 1
     assert result['entries'][0]['id'] == NFT_ID_FOR_TEST_ACC5
 
@@ -268,9 +280,9 @@ def test_nft_balances_and_prices(rotkehlchen_api_server):
         'limit': 2,
         'offset': 2,
     })
-    result = assert_proper_response_with_result(response)
-    assert result['entries_found'] == 4
-    assert result['entries_total'] == 4
+    result = assert_proper_sync_response_with_result(response)
+    assert result['entries_found'] == 5
+    assert result['entries_total'] == 5
 
     # ignore an nft
     response = requests.put(
@@ -278,7 +290,7 @@ def test_nft_balances_and_prices(rotkehlchen_api_server):
             rotkehlchen_api_server,
             'ignoredassetsresource',
         ),
-        json={'assets': [NFT_ID_FOR_TEST_ACC4, NFT_ID_FOR_TEST_ACC6_2]},
+        json={'assets': [NFT_ID_FOR_TEST_ACC4, NFT_ID_FOR_TEST_ACC6_2, NFT_ID_FOR_TEST_ACC4_2]},
     )
 
     # Make sure that ignoring cache doesn't remove any NFTs from the app
@@ -290,18 +302,19 @@ def test_nft_balances_and_prices(rotkehlchen_api_server):
         rotkehlchen_api_server,
         'nftsbalanceresource',
     ), json={'async_query': False, 'ignore_cache': True, 'ignored_assets_handling': 'none'})
-    result_with_cache = assert_proper_response_with_result(response_with_cache)
-    result_ignored_cache = assert_proper_response_with_result(response_ignored_cache)
+    result_with_cache = assert_proper_sync_response_with_result(response_with_cache)
+    result_ignored_cache = assert_proper_sync_response_with_result(response_ignored_cache)
     assert result_with_cache == result_ignored_cache
 
     # Check that filtering ignored nfts works
-    assert result_with_cache['entries_found'] == 4
-    assert result_with_cache['entries_total'] == 4
+    assert result_with_cache['entries_found'] == 5
+    assert result_with_cache['entries_total'] == 5
     assert {entry['id'] for entry in result_with_cache['entries']} == {
         NFT_ID_FOR_TEST_ACC4,
+        NFT_ID_FOR_TEST_ACC4_2,
         NFT_ID_FOR_TEST_ACC5,
         NFT_ID_FOR_TEST_ACC6_1,
-        NFT_ID_FOR_TEST_ACC6_2,
+        NFT_ID_FOR_TEST_ACC6_3,
     }
 
     # Make sure that after invalidating NFTs cache ignored NFTs remain ignored
@@ -309,36 +322,36 @@ def test_nft_balances_and_prices(rotkehlchen_api_server):
         rotkehlchen_api_server,
         'nftsbalanceresource',
     ), json={'async_query': False, 'ignore_cache': False, 'ignored_assets_handling': 'exclude'})
-    result_with_cache = assert_proper_response_with_result(response_with_cache)
+    result_with_cache = assert_proper_sync_response_with_result(response_with_cache)
     response_ignored_cache = requests.get(api_url_for(
         rotkehlchen_api_server,
         'nftsbalanceresource',
     ), json={'async_query': False, 'ignore_cache': False, 'ignored_assets_handling': 'exclude'})
-    result_ignored_cache = assert_proper_response_with_result(response_ignored_cache)
+    result_ignored_cache = assert_proper_sync_response_with_result(response_ignored_cache)
     assert result_with_cache == result_ignored_cache
 
     # Check that the response is correct
-    assert result_with_cache['entries_found'] == 2
-    assert result_with_cache['entries_total'] == 4
-    expected_nfts_without_ignored = {NFT_ID_FOR_TEST_ACC5, NFT_ID_FOR_TEST_ACC6_1}
+    assert result_with_cache['entries_found'] == 3
+    assert result_with_cache['entries_total'] == 5
+    expected_nfts_without_ignored = {NFT_ID_FOR_TEST_ACC5, NFT_ID_FOR_TEST_ACC6_1, NFT_ID_FOR_TEST_ACC6_3}  # noqa: E501
     assert {entry['id'] for entry in result_with_cache['entries']} == expected_nfts_without_ignored
     response = requests.get(api_url_for(
         rotkehlchen_api_server,
         'nftsbalanceresource',
     ), json={'async_query': False, 'ignore_cache': False, 'ignored_assets_handling': 'show only'})
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries_found'] == 2
-    assert result['entries_total'] == 4
+    assert result['entries_total'] == 5
     assert {entry['id'] for entry in result['entries']} == {
         NFT_ID_FOR_TEST_ACC4,
-        NFT_ID_FOR_TEST_ACC6_2,
+        NFT_ID_FOR_TEST_ACC4_2,
     }
 
     response = requests.post(api_url_for(
         rotkehlchen_api_server,
         'nftspricesresource',
     ))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     for nft in result:
         if nft['asset'] == NFT_ID_FOR_TEST_ACC5:
             expected_result = {
@@ -359,11 +372,11 @@ def test_nft_balances_and_prices(rotkehlchen_api_server):
     ), json={
         'identifiers': [NFT_ID_FOR_TEST_ACC4],
     })
-    result = assert_proper_response_with_result(response)['assets'][NFT_ID_FOR_TEST_ACC4]
+    result = assert_proper_sync_response_with_result(response)['assets'][NFT_ID_FOR_TEST_ACC4]
     assert result == {
         'name': 'yabir.eth',
         'asset_type': 'nft',
-        'image_url': 'https://openseauserdata.com/files/238f73fa1bbea518eec64f9c9d5ed7fe.svg',
+        'image_url': 'https://metadata.ens.domains/mainnet/0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85/0x3ad5e1887ef8024efa6d5070ccfda4868783a5343e1089e47fda9b4f7ce4f2b9/image',
         'collection_name': 'ENS: Ethereum Name Service',
     }
 
@@ -380,7 +393,7 @@ def test_edit_delete_nft(rotkehlchen_api_server):
     }
 
     def mock_get_all_nft_data(addresses, **kwargs):  # pylint: disable=unused-argument
-        return nft_map, sum([len(x) for x in nft_map.values()])
+        return nft_map, sum(len(x) for x in nft_map.values())
 
     get_all_nft_data_patch = patch(
         'rotkehlchen.chain.ethereum.modules.nft.nfts.Nfts._get_all_nft_data',
@@ -396,7 +409,7 @@ def test_edit_delete_nft(rotkehlchen_api_server):
             ),
             json={'async_query': False, 'ignore_cache': True},
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert result['entries_found'] == 2
         assert result['entries'][1]['price_in_asset'] == '0.0012'
         assert result['entries'][1]['image_url'] == 'https://openseauserdata.com/files/8fd18b22e4c81aff3998956e7a712d93.svg'
@@ -419,9 +432,10 @@ def test_edit_delete_nft(rotkehlchen_api_server):
             background_color=None,
             image_url='https://openseauserdata.com/files/3f7c0c7d1ba51e61fe05ef53875f9f7e.svg',
             name='nebolax.eth',
-            external_link='https://app.ens.domains/name/nebolax.eth',
+            external_link='https://metadata.ens.domains/mainnet/0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85/73552724610198397480670284492690114609730214421511097849210414928326607694469',
             permalink='https://opensea.io/assets/ethereum/0x57f1887a8bf19b14fc0df6fd9b2acc9af147ea85/73552724610198397480670284492690114609730214421511097849210414928326607694469',
-            price_eth=FVal(0.5),
+            price_in_asset=FVal(0.5),
+            price_asset=A_ETH,
             price_usd=FVal(1.2379458),
             collection=Collection(
                 name='ENS: Ethereum Name Service',
@@ -438,7 +452,7 @@ def test_edit_delete_nft(rotkehlchen_api_server):
             ),
             json={'async_query': False, 'ignore_cache': True},
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert result['entries_found'] == 2
         assert result['entries'][1]['price_in_asset'] == '0.5'
         assert result['entries'][1]['image_url'] == 'https://openseauserdata.com/files/3f7c0c7d1ba51e61fe05ef53875f9f7e.svg'
@@ -465,7 +479,7 @@ def test_edit_delete_nft(rotkehlchen_api_server):
             ),
             json={'async_query': False, 'ignore_cache': True},
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert result['entries_found'] == 1 and result['entries'][0]['name'] == 'yabir.eth'
 
         # Also check that db was updated properly
@@ -497,8 +511,8 @@ def test_nfts_ignoring_works(rotkehlchen_api_server, endpoint):
         ),
         json={'assets': [NFT_ID_FOR_TEST_ACC4]},
     )
-    result = assert_proper_response_with_result(response)
-    assert NFT_ID_FOR_TEST_ACC4 in result
+    result = assert_proper_sync_response_with_result(response)
+    assert NFT_ID_FOR_TEST_ACC4 in result['successful']
 
     # query the nfts endpoint and verify that the nft is not present
     with get_all_nft_data_patch:
@@ -509,7 +523,7 @@ def test_nfts_ignoring_works(rotkehlchen_api_server, endpoint):
             ),
             json={'async_query': False},
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         if endpoint == 'nftsresource':
             all_nfts_ids = {nft['token_identifier'] for nft in result['addresses'][TEST_ACC4]}
             assert NFT_ID_FOR_TEST_ACC4 not in all_nfts_ids
@@ -529,8 +543,8 @@ def test_nfts_ignoring_works(rotkehlchen_api_server, endpoint):
         ),
         json={'assets': [NFT_ID_FOR_TEST_ACC4]},
     )
-    result = assert_proper_response_with_result(response)
-    assert NFT_ID_FOR_TEST_ACC4 not in result
+    result = assert_proper_sync_response_with_result(response)
+    assert result['successful'] == [NFT_ID_FOR_TEST_ACC4]
 
     # query the nfts endpoint again and verify that the nft is present
     with get_all_nft_data_patch:
@@ -541,7 +555,7 @@ def test_nfts_ignoring_works(rotkehlchen_api_server, endpoint):
             ),
             json={'async_query': False, 'ignore_cache': True},
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         if endpoint == 'nftsresource':
             all_nfts_ids = {nft['token_identifier'] for nft in result['addresses'][TEST_ACC4]}
         else:
@@ -559,126 +573,49 @@ def test_nft_no_price(rotkehlchen_api_server):
     nft_module = rotki.chains_aggregator.get_module('nfts')
 
     def mock_session_get(url, params, timeout):  # pylint: disable=unused-argument
-        if 'assets' in url:
+        if '/nfts' in url:
             response = """
-        {"assets":[{
-        "animation_original_url": "https://resources.smarttokenlabs.com/devcon6/Comp_ETH.mp4",
-        "animation_url": "https://openseauserdata.com/files/8ce39e632261c0d61bb122c314f49ef7.mp4",
-        "asset_contract": {
-            "address": "0x7522dc5a357891b4daec194e285551ea5ea66d09",
-            "asset_contract_type": "non-fungible",
-            "buyer_fee_basis_points": 0,
-            "created_date": "2022-10-14T22:45:02.644744",
-            "default_to_fiat": false,
-            "description": "bla bla",
-            "dev_buyer_fee_basis_points": 0,
-            "dev_seller_fee_basis_points": 0,
-            "external_link": "https://devcon-vi.attest.tickets/",
-            "image_url": "https://i.seadn.io/gae/ED1IC2aJj9RlHheixOlc3CH_oV4I1egLchaDAkqccx5EEC-foJcG0CUZNt9QhkIyLKOS1ZDqvkhPQcxSyvLDCWeytSv-Flv8acRM8g?w=500&auto=format",
-            "name": "Unidentified contract",
-            "nft_version": null,
-            "only_proxied_transfers": false,
-            "opensea_buyer_fee_basis_points": 0,
-            "opensea_seller_fee_basis_points": 250,
-            "opensea_version": null,
-            "owner": null,
-            "payout_address": null,
-            "schema_name": "ERC721",
-            "seller_fee_basis_points": 250,
-            "symbol": "",
-            "total_supply": null
-        },
-        "background_color": null,
-        "collection": {
-            "banner_image_url": null,
-            "chat_url": null,
-            "created_date": "2022-10-15T01:30:47.057694+00:00",
-            "default_to_fiat": false,
-            "description": "bla bla",
-            "dev_buyer_fee_basis_points": "0",
-            "dev_seller_fee_basis_points": "0",
-            "discord_url": null,
-            "display_data": {"card_display_style": "contain", "images": []},
-            "external_url": "https://devcon-vi.attest.tickets/",
-            "featured": false,
-            "featured_image_url": null,
-            "fees": {"opensea_fees": {"0x0000a26b00c1f0df003000390027140000faa719": 250}, "seller_fees": {}},
-            "hidden": false,
-            "image_url": "https://i.seadn.io/gae/ED1IC2aJj9RlHheixOlc3CH_oV4I1egLchaDAkqccx5EEC-foJcG0CUZNt9QhkIyLKOS1ZDqvkhPQcxSyvLDCWeytSv-Flv8acRM8g?w=500&auto=format",
-            "instagram_username": null,
-            "is_nsfw": false,
-            "is_rarity_enabled": false,
-            "is_subject_to_whitelist": false,
-            "large_image_url": "https://i.seadn.io/gae/ED1IC2aJj9RlHheixOlc3CH_oV4I1egLchaDAkqccx5EEC-foJcG0CUZNt9QhkIyLKOS1ZDqvkhPQcxSyvLDCWeytSv-Flv8acRM8g?w=500&auto=format",
-            "medium_username": null,
-            "name": "Devcon VI Souvenir V4",
-            "only_proxied_transfers": false,
-            "opensea_buyer_fee_basis_points": "0",
-            "opensea_seller_fee_basis_points": "250",
-            "payout_address": null,
-            "require_email": false,
-            "safelist_request_status": "not_requested",
-            "short_description": null,
-            "slug": "devcon-vi-souvenir-v4",
-            "telegram_url": null,
-            "twitter_username": null,
-            "wiki_url": null
-        },
-        "creator": {
-            "address": "0xff3efd475907f5c6dc173fe42c2dd3a58ef740bf",
-            "config": "",
-            "profile_img_url": "https://storage.googleapis.com/opensea-static/opensea-profile/10.png",
-            "user": {"username": null}
-        },
-        "decimals": null,
-        "description": "bla bla",
-        "external_link": null,
-        "id": 724471261,
-        "image_original_url": "https://resources.smarttokenlabs.com/devcon6/ETH.webp",
-        "image_preview_url": "https://i.seadn.io/gae/-N3ctyPYwIF0s-pShI-Zcg96KJr7dYG05KyFtI25WG0yIZeOpBxjAIIUBiBmHcbviAFkY57Xfo0-MRaonHHx4a53LS-q2yOoEwzF?w=500&auto=format",
-        "image_thumbnail_url": "https://i.seadn.io/gae/-N3ctyPYwIF0s-pShI-Zcg96KJr7dYG05KyFtI25WG0yIZeOpBxjAIIUBiBmHcbviAFkY57Xfo0-MRaonHHx4a53LS-q2yOoEwzF?w=500&auto=format",
-        "image_url": "https://i.seadn.io/gae/-N3ctyPYwIF0s-pShI-Zcg96KJr7dYG05KyFtI25WG0yIZeOpBxjAIIUBiBmHcbviAFkY57Xfo0-MRaonHHx4a53LS-q2yOoEwzF?w=500&auto=format",
-        "is_nsfw": false,
-        "is_presale": false,
-        "last_sale": null,
-        "listing_date": null,
-        "name": "Devcon VI Souvenir",
-        "num_sales": 0,
-        "owner": {
-            "address": "0x0000000000000000000000000000000000000000",
-            "config": "",
-            "profile_img_url": "https://storage.googleapis.com/opensea-static/opensea-profile/1.png",
-            "user": {"username": "NullAddress"}
-        },
-        "permalink": "https://opensea.io/assets/ethereum/0x7522dc5a357891b4daec194e285551ea5ea66d09/336510496872176433120578",
-        "rarity_data": null,
-        "seaport_sell_orders": null,
-        "supports_wyvern": true,
-        "token_id": "336510496872176433120578",
-        "token_metadata": "https://resources.smarttokenlabs.com/1/0x7522dc5a357891b4daec194e285551ea5ea66d09/336510496872176433120578",
-        "top_bid": null,
-        "traits": [],
-        "transfer_fee": null,
-        "transfer_fee_payment_token": null}]}
-        """  # noqa: E501
-        elif 'collections' in url:
-            response = """[{
-                "primary_asset_contracts": [1, 2, 3],
-                "name": "Devcon VI Souvenir V4",
-                "slug": "devconsouvenir",
-                "banner_image_url": "url",
-                "large_image_url": "url",
-                "description": "bla bla"
-            }]"""
+            {
+                "nfts": [
+                    {
+                    "identifier": "336510496872176433120578",
+                    "collection": "devcon-vi-souvenir-v4",
+                    "contract": "0x7522dc5a357891b4daec194e285551ea5ea66d09",
+                    "token_standard": "erc721",
+                    "name": "Devcon VI Souvenir",
+                    "description": "Devcon is the Ethereum conference for developers, researchers, thinkers, and makers.An intensive introduction for new Ethereum explorers, a global family reunion for those already a part of our ecosystem, and a source of energy and creativity for all. This ticket NFT serves as a souvenir for Devcon Bogota. With a symbolic focus on LATAM, and the beautiful destination of Bogota Colombia. The bird of paradise is known as the ultimate symbol of paradise and freedom. Due to its tropical nature, this flower symbolizes freedom and joy.",
+                    "image_url": "https://resources.smarttokenlabs.com/devcon6/ETH.webp",
+                    "metadata_url": "https://resources.smarttokenlabs.com/1/0x7522dc5a357891b4daec194e285551ea5ea66d09/336510496872176433120578",
+                    "opensea_url": "https://opensea.io/assets/ethereum/0x7522dc5a357891b4daec194e285551ea5ea66d09/336510496872176433120578",
+                    "updated_at": "2022-10-17T06:36:48.750908",
+                    "is_disabled": false,
+                    "is_nsfw": false
+                    }
+                ]
+            }"""  # noqa: E501
         elif '/stats' in url:
             response = """{
-                "stats": {
-                    "floor_price": null
+                "total": {
+                    "volume": 0,
+                    "sales": 0,
+                    "average_price": 0,
+                    "num_owners": 435,
+                    "market_cap": 0,
+                    "floor_price": 0,
+                    "floor_price_symbol": ""
                 }
+            }"""
+        elif '/collections/' in url:
+            response = """{
+                "contracts": [{"address":1,"chain":"ethereum"}, {"address":2,"chain":"ethereum"}],
+                "name": "Devcon VI Souvenir V4",
+                "collection": "devcon-vi-souvenir-v4",
+                "banner_image_url": "url",
+                "image_url": "url",
+                "description": "bla bla"
             }"""
         else:
             raise AssertionError(f'Unexpected url {url} queried in test')
-
         return MockResponse(200, response)
 
     patched_opensea = patch.object(nft_module.opensea.session, 'get', wraps=mock_session_get)
@@ -689,18 +626,21 @@ def test_nft_no_price(rotkehlchen_api_server):
                 'nftsbalanceresource',
             ), json={'ignore_cache': True},
         )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result == {
-        'entries': [{
-            'collection_name': 'Devcon VI Souvenir V4',
-            'id': '_nft_0x7522dc5a357891b4daec194e285551ea5ea66d09_336510496872176433120578',
-            'image_url': 'https://i.seadn.io/gae/-N3ctyPYwIF0s-pShI-Zcg96KJr7dYG05KyFtI25WG0yIZeOpBxjAIIUBiBmHcbviAFkY57Xfo0-MRaonHHx4a53LS-q2yOoEwzF?w=500&auto=format',
-            'is_lp': False,
-            'manually_input': False,
-            'name': 'Devcon VI Souvenir',
-            'price_asset': 'ETH',
-            'price_in_asset': '0',
-            'usd_price': '0.0'}],
+        'entries': [
+            {
+                'id': '_nft_0x7522dC5A357891B4dAEC194E285551EA5ea66d09_336510496872176433120578',
+                'name': 'Devcon VI Souvenir',
+                'price_in_asset': '0',
+                'price_asset': 'ETH',
+                'manually_input': False,
+                'is_lp': False,
+                'image_url': 'https://resources.smarttokenlabs.com/devcon6/ETH.webp',
+                'usd_price': '0.0',
+                'collection_name': 'Devcon VI Souvenir V4',
+            },
+        ],
         'entries_found': 1,
         'entries_total': 1,
         'total_usd_value': '0.0',
@@ -720,13 +660,14 @@ def test_lp_nfts_filtering(rotkehlchen_api_server):
             '0xc37b40ABdB939635068d3c5f13E7faF686F03B65': [TEST_NFT_YABIR_ETH],
             '0x3e649c5Eac6BBEE8a4F2A2945b50d8e582faB3bf': [
                 NFT(
-                    token_identifier='_nft_0xc36442b4a4522e871399cd717abdd847ab11fe88_360762',
+                    token_identifier='_nft_0xC36442b4a4522E871399CD717aBDD847Ab11FE88_360762',
                     background_color=None,
                     image_url='https://openseauserdata.com/files/99b67e38e2d1abc16d6d843f478b5224.svg',
                     name='Uniswap - 0.3% - SHIB/WETH - 79010000<>166260000',
                     external_link=None,
                     permalink='https://opensea.io/assets/ethereum/0xc36442b4a4522e871399cd717abdd847ab11fe88/360762',
-                    price_eth=ZERO,
+                    price_in_asset=ZERO,
+                    price_asset=A_ETH,
                     price_usd=ZERO,
                     collection=Collection(
                         name='Uniswap V3 Positions',
@@ -737,13 +678,14 @@ def test_lp_nfts_filtering(rotkehlchen_api_server):
                     ),
                 ),
                 NFT(
-                    token_identifier='_nft_0xc36442b4a4522e871399cd717abdd847ab11fe88_360680',
+                    token_identifier='_nft_0xC36442b4a4522E871399CD717aBDD847Ab11FE88_360680',
                     background_color=None,
                     image_url='https://openseauserdata.com/files/53f418fceab543a174d22efd0a55782c.svg',
                     name='Uniswap - 0.3% - USDT/WETH - 224.56<>2445.5',
                     external_link=None,
                     permalink='https://opensea.io/assets/ethereum/0xc36442b4a4522e871399cd717abdd847ab11fe88/360680',
-                    price_eth=ZERO,
+                    price_in_asset=ZERO,
+                    price_asset=A_ETH,
                     price_usd=ZERO,
                     collection=Collection(
                         name='Uniswap V3 Positions',
@@ -786,7 +728,7 @@ def test_lp_nfts_filtering(rotkehlchen_api_server):
                         amount=ZERO,
                         usd_value=FVal(297.0392367052748141486963890),
                     ),
-                    nft_id='_nft_0xc36442b4a4522e871399cd717abdd847ab11fe88_360680',
+                    nft_id='_nft_0xC36442b4a4522E871399CD717aBDD847Ab11FE88_360680',
                     price_range=(
                         FVal(0.0004089111961461131970577658069),
                         FVal(0.004453201773423214426045068107),
@@ -818,7 +760,7 @@ def test_lp_nfts_filtering(rotkehlchen_api_server):
                         amount=ZERO,
                         usd_value=FVal(22489551.72233307186978042562),
                     ),
-                    nft_id='_nft_0xc36442b4a4522e871399cd717abdd847ab11fe88_360762',
+                    nft_id='_nft_0xC36442b4a4522E871399CD717aBDD847Ab11FE88_360762',
                     price_range=(
                         FVal(79010456.35648359278851139208),
                         FVal(166258366.8407051322948007978),
@@ -837,7 +779,7 @@ def test_lp_nfts_filtering(rotkehlchen_api_server):
             ),
             json={'async_query': False, 'ignore_cache': True},
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert result['entries_found'] == 4
 
     # test that only lp works
@@ -852,7 +794,7 @@ def test_lp_nfts_filtering(rotkehlchen_api_server):
             'lps_handling': NftLpHandling.ONLY_LPS.serialize(),
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries_found'] == 2
     for entry in result['entries']:
         assert entry['is_lp'] is True
@@ -870,7 +812,7 @@ def test_lp_nfts_filtering(rotkehlchen_api_server):
             'name': 'yabir',
         },
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert result['entries_found'] == 1
 
     # test the handling in the prices endpoint
@@ -878,7 +820,7 @@ def test_lp_nfts_filtering(rotkehlchen_api_server):
         rotkehlchen_api_server,
         'nftspricesresource',
     ), json={'lps_handling': NftLpHandling.ONLY_LPS.serialize()})
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     for nft in result:
         assert nft['asset'] in (NFT_ID_FOR_TEST_ACC6_1, NFT_ID_FOR_TEST_ACC6_2)
 
@@ -886,7 +828,7 @@ def test_lp_nfts_filtering(rotkehlchen_api_server):
         rotkehlchen_api_server,
         'nftspricesresource',
     ), json={'lps_handling': NftLpHandling.EXCLUDE_LPS.serialize()})
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result) == 2
     for nft in result:
         assert nft['asset'] not in (NFT_ID_FOR_TEST_ACC6_1, NFT_ID_FOR_TEST_ACC6_2)
@@ -895,7 +837,7 @@ def test_lp_nfts_filtering(rotkehlchen_api_server):
         rotkehlchen_api_server,
         'nftspricesresource',
     ))
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result) == 4
 
 
@@ -925,7 +867,7 @@ def test_customized_queried_addresses(rotkehlchen_api_server):
             ),
             json={'async_query': False, 'ignore_cache': True},
         )
-        result = assert_proper_response_with_result(response)
+        result = assert_proper_sync_response_with_result(response)
         assert result['entries_found'] == 2
 
     # Make NFTs queried for only one of the addresses
@@ -940,5 +882,24 @@ def test_customized_queried_addresses(rotkehlchen_api_server):
         ),
         json={'async_query': False, 'ignore_cache': False},
     )
-    result = assert_proper_response_with_result(response)
+    result = assert_proper_sync_response_with_result(response)
     assert len(result['entries']) == 1 and result['entries'][0]['name'] == TEST_NFT_NEBOLAX_ETH.name  # noqa: E501
+
+
+@pytest.mark.vcr(filter_query_parameters=['apikey'])
+@pytest.mark.parametrize('ethereum_accounts', [['0xF73e7772113Cf4a6a8749dF5e4e32b27B449B85D']])
+@pytest.mark.parametrize('start_with_valid_premium', [True])
+@pytest.mark.parametrize('ethereum_modules', [['nfts', 'uniswap']])
+def test_uniswap_v3_exited_positions(rotkehlchen_api_server):
+    """Test for https://github.com/rotki/rotki/issues/8137
+    Ensure that positions that have been exited in uniswap v3 don't end up in the nft balances
+    """
+    response = requests.get(api_url_for(
+        rotkehlchen_api_server,
+        'nftsbalanceresource',
+    ), json={
+        'ignore_cache': True,
+        'lps_handling': NftLpHandling.ALL_NFTS.serialize(),
+    })
+    result = assert_proper_sync_response_with_result(response)
+    assert all(entry['collection_name'] != 'Uniswap V3 Positions' for entry in result['entries'])

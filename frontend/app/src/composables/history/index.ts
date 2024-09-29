@@ -1,12 +1,12 @@
-import { type EntryMeta } from '@/types/history/meta';
 import {
   type CommonIgnorePayload,
   type EvmTransaction,
   type EvmTxIgnorePayload,
   IgnoreActionType,
-  type IgnorePayload
+  type IgnorePayload,
 } from '@/types/history/ignored';
-import { type ActionStatus } from '@/types/action';
+import type { EntryMeta } from '@/types/history/meta';
+import type { ActionStatus } from '@/types/action';
 
 interface EvmTxIgnoreAction<T extends EntryMeta> {
   actionType: IgnoreActionType.EVM_TRANSACTIONS;
@@ -18,45 +18,46 @@ interface CommonIgnoreAction<T extends EntryMeta> {
   toData: (t: T) => string;
 }
 
-export const useIgnore = <T extends EntryMeta>(
+interface UseIgnoreReturn<T extends EntryMeta> {
+  ignore: (ignored: boolean) => Promise<void>;
+  ignoreSingle: (item: T, ignored: boolean) => Promise<void>;
+  toggle: (item: T) => Promise<void>;
+}
+
+export function useIgnore<T extends EntryMeta>(
   { actionType, toData }: EvmTxIgnoreAction<T> | CommonIgnoreAction<T>,
   selected: Ref<T[]>,
-  refresh: () => any
-) => {
+  refresh: () => any,
+): UseIgnoreReturn<T> {
   const { setMessage } = useMessageStore();
   const { t } = useI18n();
   const api = useHistoryIgnoringApi();
 
-  const ignoreInAccounting = async (
-    payload: IgnorePayload,
-    ignore: boolean
-  ): Promise<ActionStatus> => {
+  const ignoreInAccounting = async (payload: IgnorePayload, ignore: boolean): Promise<ActionStatus> => {
     try {
-      ignore
-        ? await api.ignoreActions(payload)
-        : await api.unignoreActions(payload);
-    } catch (e: any) {
+      ignore ? await api.ignoreActions(payload) : await api.unignoreActions(payload);
+    }
+    catch (error: any) {
       let title: string;
       let description: string;
-      if (ignore) {
+      if (ignore)
         title = t('actions.ignore.error.title');
-      } else {
-        title = t('actions.unignore.error.title');
-      }
+      else title = t('actions.unignore.error.title');
 
       if (ignore) {
         description = t('actions.ignore.error.description', {
-          error: e.message
+          error: error.message,
         }).toString();
-      } else {
+      }
+      else {
         description = t('actions.unignore.error.description', {
-          error: e.message
+          error: error.message,
         }).toString();
       }
       setMessage({
         success: false,
         title,
-        description
+        description,
       });
       return { success: false, message: 'failed' };
     }
@@ -67,14 +68,13 @@ export const useIgnore = <T extends EntryMeta>(
   const ignoreActions = async (payload: IgnorePayload): Promise<ActionStatus> =>
     await ignoreInAccounting(payload, true);
 
-  const unignoreActions = async (
-    payload: IgnorePayload
-  ): Promise<ActionStatus> => await ignoreInAccounting(payload, false);
+  const unignoreActions = async (payload: IgnorePayload): Promise<ActionStatus> =>
+    await ignoreInAccounting(payload, false);
 
-  const ignore = async (ignored: boolean) => {
+  const ignore = async (ignored: boolean): Promise<void> => {
     let payload: IgnorePayload;
 
-    const data = get(selected).filter(item => {
+    const data = get(selected).filter((item) => {
       const { ignoredInAccounting } = item;
       return ignored ? !ignoredInAccounting : ignoredInAccounting;
     });
@@ -82,12 +82,13 @@ export const useIgnore = <T extends EntryMeta>(
     if (actionType === IgnoreActionType.EVM_TRANSACTIONS) {
       payload = {
         data: data.map(toData),
-        actionType
+        actionType,
       } satisfies EvmTxIgnorePayload;
-    } else {
+    }
+    else {
       payload = {
         data: data.map(toData),
-        actionType
+        actionType,
       } satisfies CommonIgnorePayload;
     }
 
@@ -98,16 +99,15 @@ export const useIgnore = <T extends EntryMeta>(
       setMessage({
         success: false,
         title: t('ignore.no_items.title', choice),
-        description: t('ignore.no_items.description', choice)
+        description: t('ignore.no_items.description', choice),
       });
       return;
     }
 
-    if (ignored) {
+    if (ignored)
       status = await ignoreActions(payload);
-    } else {
+    else
       status = await unignoreActions(payload);
-    }
 
     if (status.success) {
       refresh();
@@ -115,7 +115,19 @@ export const useIgnore = <T extends EntryMeta>(
     }
   };
 
+  async function toggle(item: T): Promise<void> {
+    set(selected, [item]);
+    await ignore(!item.ignoredInAccounting);
+  }
+
+  async function ignoreSingle(item: T, ignored: boolean): Promise<void> {
+    set(selected, [item]);
+    await ignore(ignored);
+  }
+
   return {
-    ignore
+    ignore,
+    ignoreSingle,
+    toggle,
   };
-};
+}

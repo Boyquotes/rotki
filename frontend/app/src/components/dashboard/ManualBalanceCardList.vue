@@ -1,40 +1,47 @@
 <script setup lang="ts">
-import { type BigNumber } from '@rotki/common';
-import { toSentenceCase } from '@/utils/text';
 import { Routes } from '@/router/routes';
+import type { BigNumber } from '@rotki/common';
 
-defineProps<{
+const props = defineProps<{
   name: string;
   amount: BigNumber;
 }>();
 
+const { name } = toRefs(props);
+
 const { currencySymbol } = storeToRefs(useGeneralSettingsStore());
 
 const manualBalancesRoute = Routes.ACCOUNTS_BALANCES_MANUAL;
+
+const { locationData } = useLocations();
+const location = locationData(name);
 </script>
 
 <template>
-  <VListItem
-    :ripple="false"
-    data-cy="manual-balance__summary"
-    :data-location="name"
-    class="min-h-[2.25rem] group"
-    :to="manualBalancesRoute"
-  >
-    <VListItemAvatar tile class="grayscale group-hover:grayscale-0 m-0 mr-1">
-      <LocationDisplay :identifier="name" icon size="30px" />
-    </VListItemAvatar>
-    <VListItemContent>
-      <div class="flex flex-wrap justify-between gap-2">
-        <span>
-          {{ toSentenceCase(name) }}
-        </span>
+  <RouterLink :to="manualBalancesRoute">
+    <ListItem
+      data-cy="manual-balance__summary"
+      class="group py-1 px-6"
+      :data-location="name"
+    >
+      <template #avatar>
+        <div class="grayscale group-hover:grayscale-0">
+          <LocationDisplay
+            :identifier="name"
+            icon
+            size="26px"
+          />
+        </div>
+      </template>
+      <div class="flex flex-wrap justify-between gap-1 text-rui-text">
+        {{ location?.name || toCapitalCase(name) }}
         <AmountDisplay
           show-currency="symbol"
           :fiat-currency="currencySymbol"
           :value="amount"
+          class="font-medium"
         />
       </div>
-    </VListItemContent>
-  </VListItem>
+    </ListItem>
+  </RouterLink>
 </template>

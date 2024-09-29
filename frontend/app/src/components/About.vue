@@ -1,52 +1,46 @@
 <script setup lang="ts">
-import { type SystemVersion } from '@/electron-main/ipc';
-import { type WebVersion } from '@/types';
-
-const css = useCssModule();
+import type { SystemVersion } from '@shared/ipc';
+import type { WebVersion } from '@/types';
 
 const store = useMainStore();
 const { version: getVersion, isPackaged, openPath } = useInterop();
 const { t } = useI18n();
 
 const { version, dataDirectory } = toRefs(store);
-const versionInfo = asyncComputed<SystemVersion | WebVersion>(() =>
-  getVersion()
-);
+const versionInfo = asyncComputed<SystemVersion | WebVersion>(() => getVersion());
 
 const premium = usePremium();
 const componentsVersion = computed(() => {
-  if (!get(premium)) {
+  if (!get(premium))
     return null;
-  }
 
-  // @ts-ignore
+  // @ts-expect-error components are not typed
   const cmp = window.PremiumComponents;
-  if (!cmp) {
+  if (!cmp)
     return null;
-  }
+
   return {
     version: cmp.version as string,
-    build: cmp.build as number
+    build: cmp.build as number,
   };
 });
 
 const webVersion = computed<WebVersion | null>(() => {
   const info = get(versionInfo);
-  if (!info || !('userAgent' in info)) {
+  if (!info || !('userAgent' in info))
     return null;
-  }
+
   return info;
 });
 
 const electronVersion = computed<SystemVersion | null>(() => {
   const info = get(versionInfo);
-  if (!info || 'userAgent' in info) {
+  if (!info || 'userAgent' in info)
     return null;
-  }
+
   return info;
 });
 
-// eslint-disable-next-line no-undef
 const frontendVersion = __APP_VERSION__;
 
 const versionText = computed(() => {
@@ -65,7 +59,8 @@ const versionText = computed(() => {
     const userAgent = t('about.user_agent');
     versionText += `${platform} ${web.platform}\r\n`;
     versionText += `${userAgent} ${web.userAgent}\r\n`;
-  } else if (app) {
+  }
+  else if (app) {
     const electron = t('about.electron');
     versionText += `${platform} ${app.os} ${app.arch} ${app.osVersion}\r\n`;
     versionText += `${electron} ${app.electron}\r\n`;
@@ -85,33 +80,37 @@ const versionText = computed(() => {
   return versionText;
 });
 
-const remoteAboutLogo =
-  'https://raw.githubusercontent.com/rotki/data/main/assets/icons/about_logo.png';
-
 const { copy } = useClipboard({ source: versionText });
 </script>
 
 <template>
-  <!-- TODO: Remove bg class when https://github.com/rotki/ui-library/issues/124 is resolved -->
-  <RuiCard variant="flat" class="dark:bg-[#1E1E1E]">
+  <RuiCard
+    variant="flat"
+    class="overflow-hidden"
+  >
     <template #custom-header>
       <div class="p-6 bg-rui-primary text-white">
-        <RuiLogo :custom-src="remoteAboutLogo" />
-        <h4 class="text-h4">{{ t('app.name') }}</h4>
+        <RotkiLogo
+          logo="about"
+          unique-key="00"
+        />
+        <h4 class="text-h4">
+          {{ t('app.name') }}
+        </h4>
         <span class="text-body-1">
           {{ t('app.moto') }}
         </span>
       </div>
     </template>
-    <div class="flex items-center justify-between" :class="css.version">
-      <div class="flex items-center">
-        <div class="font-bold">{{ version.version }}</div>
-        <div class="ml-4">
-          <BaseExternalLink
-            :href="`https://github.com/rotki/rotki/releases/tag/v${version.version}`"
-            :text="t('about.release_notes')"
-          />
+    <div class="flex items-center justify-between py-2">
+      <div class="flex items-center flex-wrap gap-x-4">
+        <div class="font-bold">
+          {{ version.version }}
         </div>
+        <ExternalLink
+          :url="`https://github.com/rotki/rotki/releases/tag/v${version.version}`"
+          :text="t('about.release_notes')"
+        />
       </div>
       <AppUpdateIndicator />
     </div>
@@ -119,26 +118,35 @@ const { copy } = useClipboard({ source: versionText });
       <table class="w-full">
         <tbody>
           <tr>
-            <td :class="css.label">
+            <td :class="$style.label">
               {{ t('about.data_directory') }}
             </td>
             <td>
-              <div class="flex flex-row justify-between">
-                <RuiTooltip :popper="{ placement: 'top' }" open-delay="400">
+              <div class="flex items-center justify-between">
+                <RuiTooltip
+                  :popper="{ placement: 'top' }"
+                  :open-delay="400"
+                >
                   <template #activator>
                     <div
-                      class="text-truncate text-rui-text-secondary"
-                      :class="css.directory"
+                      class="truncate text-rui-text-secondary"
+                      :class="$style.directory"
                     >
                       {{ dataDirectory }}
                     </div>
                   </template>
-                  <span :class="css.directory">
+                  <span :class="$style.directory">
                     {{ dataDirectory }}
                   </span>
                 </RuiTooltip>
-                <div v-if="isPackaged" class="ml-2">
-                  <RuiTooltip :popper="{ placement: 'top' }" open-delay="400">
+                <div
+                  v-if="isPackaged"
+                  class="ml-2"
+                >
+                  <RuiTooltip
+                    :popper="{ placement: 'top' }"
+                    :open-delay="400"
+                  >
                     <template #activator>
                       <RuiButton
                         icon
@@ -146,7 +154,10 @@ const { copy } = useClipboard({ source: versionText });
                         variant="text"
                         @click="openPath(dataDirectory)"
                       >
-                        <RuiIcon size="18" name="folder-open-line" />
+                        <RuiIcon
+                          size="18"
+                          name="folder-open-line"
+                        />
                       </RuiButton>
                     </template>
                     <span>{{ t('about.open_data_dir_tooltip') }}</span>
@@ -163,7 +174,7 @@ const { copy } = useClipboard({ source: versionText });
             </td>
           </tr>
           <tr>
-            <td :class="css.label">
+            <td :class="$style.label">
               {{ t('about.frontend_version') }}
             </td>
             <td class="text-rui-text-secondary">
@@ -172,7 +183,7 @@ const { copy } = useClipboard({ source: versionText });
           </tr>
           <template v-if="webVersion">
             <tr>
-              <td :class="css.label">
+              <td :class="$style.label">
                 {{ t('about.platform') }}
               </td>
               <td class="text-rui-text-secondary">
@@ -180,7 +191,7 @@ const { copy } = useClipboard({ source: versionText });
               </td>
             </tr>
             <tr>
-              <td :class="css.label">
+              <td :class="$style.label">
                 {{ t('about.user_agent') }}
               </td>
               <td class="text-rui-text-secondary">
@@ -190,7 +201,7 @@ const { copy } = useClipboard({ source: versionText });
           </template>
           <template v-if="electronVersion">
             <tr>
-              <td :class="css.label">
+              <td :class="$style.label">
                 {{ t('about.platform') }}
               </td>
               <td class="text-rui-text-secondary">
@@ -199,7 +210,7 @@ const { copy } = useClipboard({ source: versionText });
               </td>
             </tr>
             <tr>
-              <td :class="css.label">
+              <td :class="$style.label">
                 {{ t('about.electron') }}
               </td>
               <td class="text-rui-text-secondary">
@@ -216,7 +227,7 @@ const { copy } = useClipboard({ source: versionText });
               </td>
             </tr>
             <tr v-if="componentsVersion.version">
-              <td :class="css.label">
+              <td :class="$style.label">
                 {{ t('about.components.version') }}
               </td>
               <td class="text-rui-text-secondary">
@@ -224,7 +235,7 @@ const { copy } = useClipboard({ source: versionText });
               </td>
             </tr>
             <tr v-if="componentsVersion.build">
-              <td :class="css.label">
+              <td :class="$style.label">
                 {{ t('about.components.build') }}
               </td>
               <td class="text-rui-text-secondary">
@@ -236,10 +247,16 @@ const { copy } = useClipboard({ source: versionText });
       </table>
     </div>
     <template #footer>
-      <div class="p-3 flex justify-end w-full">
-        <RuiButton color="primary" @click="copy()">
+      <div class="flex justify-end w-full">
+        <RuiButton
+          color="primary"
+          @click="copy()"
+        >
           <template #prepend>
-            <RuiIcon size="20" name="file-copy-line" />
+            <RuiIcon
+              size="20"
+              name="file-copy-line"
+            />
           </template>
           {{ t('about.copy_information_tooltip') }}
         </RuiButton>
@@ -249,16 +266,12 @@ const { copy } = useClipboard({ source: versionText });
 </template>
 
 <style module lang="scss">
-.version {
-  height: 36px;
-}
-
 .label {
-  min-width: 130px;
   @apply font-medium py-0.5;
+  min-width: 150px;
 }
 
 .directory {
-  max-width: 200px;
+  max-width: 280px;
 }
 </style>

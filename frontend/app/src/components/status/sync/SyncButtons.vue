@@ -1,9 +1,5 @@
 <script setup lang="ts">
-import {
-  SYNC_DOWNLOAD,
-  SYNC_UPLOAD,
-  type SyncAction
-} from '@/types/session/sync';
+import { SYNC_DOWNLOAD, SYNC_UPLOAD, type SyncAction } from '@/types/session/sync';
 
 defineProps<{ pending: boolean }>();
 
@@ -13,21 +9,26 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-const { premium } = storeToRefs(usePremiumStore());
+const premium = usePremium();
 const UPLOAD: SyncAction = SYNC_UPLOAD;
 const DOWNLOAD: SyncAction = SYNC_DOWNLOAD;
 
-const action = (action: SyncAction) => {
+function action(action: SyncAction) {
   emit('action', action);
-};
+}
+
+const { uploadStatus } = useSync();
 </script>
 
 <template>
   <div class="flex flex-row justify-between gap-1">
-    <RuiTooltip open-delay="400" class="w-full">
+    <RuiTooltip
+      :open-delay="400"
+      class="w-full"
+    >
       <template #activator>
         <RuiButton
-          variant="outlined"
+          :variant="uploadStatus ? 'default' : 'outlined'"
           color="primary"
           class="w-full"
           :disabled="!premium || pending"
@@ -42,13 +43,16 @@ const action = (action: SyncAction) => {
       <span>{{ t('sync_buttons.upload_tooltip') }}</span>
     </RuiTooltip>
 
-    <RuiTooltip open-delay="400" class="w-full">
+    <RuiTooltip
+      :open-delay="400"
+      class="w-full"
+    >
       <template #activator>
         <RuiButton
           variant="outlined"
           color="primary"
           class="w-full"
-          :disabled="!premium || pending"
+          :disabled="!premium || pending || !!uploadStatus"
           @click="action(DOWNLOAD)"
         >
           <template #prepend>

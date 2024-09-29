@@ -1,26 +1,38 @@
 import { setupServer } from 'msw/node';
-import assetMovementHandlers from './handlers/asset-movements';
-import binanceSavings from './handlers/binance-savings';
-import historyEventsHandlers from './handlers/history-events';
-import nfts from './handlers/nfts';
-import supportedChains from './handlers/supported-chains';
-import tradeHandlers from './handlers/trades';
-import historyTypeMappingHandlers from './handlers/history-type-mappings';
-import historyEventCounterpartiesHandlers from './handlers/history-event-counterparties';
-import historyEventProductsHandlers from './handlers/history-event-products';
-import infoHandlers from './handlers/info';
+import {
+  allEvmChainsHandlers,
+  assetMovementHandlers,
+  assetsHandlers,
+  binanceSavingsHandlers,
+  historyEventCounterpartiesHandlers,
+  historyEventProductsHandlers,
+  historyEventsHandlers,
+  historyTypeMappingHandlers,
+  infoHandlers,
+  nftsHandlers,
+  settingsHandlers,
+  skippedExternalEventsHandlers,
+  stakingHandlers,
+  supportedChainsHandlers,
+  tradesHandlers,
+} from './handlers';
 
 const server = setupServer(
-  ...tradeHandlers,
+  ...tradesHandlers,
   ...assetMovementHandlers,
   ...historyEventsHandlers,
-  ...nfts,
-  ...binanceSavings,
+  ...nftsHandlers,
+  ...binanceSavingsHandlers,
   ...infoHandlers,
-  ...supportedChains,
+  ...supportedChainsHandlers,
+  ...allEvmChainsHandlers,
   ...historyTypeMappingHandlers,
   ...historyEventCounterpartiesHandlers,
-  ...historyEventProductsHandlers
+  ...historyEventProductsHandlers,
+  ...stakingHandlers,
+  ...settingsHandlers,
+  ...skippedExternalEventsHandlers,
+  ...assetsHandlers,
 );
 
 export { server };

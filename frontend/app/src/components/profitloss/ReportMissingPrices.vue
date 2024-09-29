@@ -1,14 +1,9 @@
 <script setup lang="ts">
-import { type BigNumber } from '@rotki/common';
-import { type Ref } from 'vue';
-import { type DataTableHeader } from '@/types/vuetify';
-import { type EditableMissingPrice, type MissingPrice } from '@/types/reports';
-import {
-  type HistoricalPrice,
-  type HistoricalPriceDeletePayload,
-  type HistoricalPriceFormPayload
-} from '@/types/prices';
 import { ApiValidationError } from '@/types/api/errors';
+import type { BigNumber } from '@rotki/common';
+import type { DataTableColumn, DataTableSortData } from '@rotki/ui-library';
+import type { EditableMissingPrice, MissingPrice } from '@/types/reports';
+import type { HistoricalPrice, HistoricalPriceDeletePayload, HistoricalPriceFormPayload } from '@/types/prices';
 
 const props = defineProps<{
   items: MissingPrice[];
@@ -16,140 +11,130 @@ const props = defineProps<{
 }>();
 
 const { t } = useI18n();
-const { items } = toRefs(props);
+const { items, isPinned } = toRefs(props);
 const prices = ref<HistoricalPrice[]>([]);
-const errorMessages: Ref<Record<string, string[]>> = ref({});
-const {
-  fetchHistoricalPrices,
-  addHistoricalPrice,
-  editHistoricalPrice,
-  deleteHistoricalPrice
-} = useAssetPricesApi();
+const errorMessages = ref<Record<string, string[]>>({});
+const { fetchHistoricalPrices, addHistoricalPrice, editHistoricalPrice, deleteHistoricalPrice } = useAssetPricesApi();
 
-const createKey = (item: MissingPrice) =>
-  item.fromAsset + item.toAsset + item.time;
+function createKey(item: MissingPrice) {
+  return item.fromAsset + item.toAsset + item.time;
+}
 
-const getHistoricalPrices = async () => {
+async function getHistoricalPrices() {
   set(prices, await fetchHistoricalPrices());
-};
+}
 
 onMounted(async () => {
   await getHistoricalPrices();
 });
 
-const refreshedHistoricalPrices: Ref<Record<string, BigNumber>> = ref({});
+const refreshedHistoricalPrices = ref<Record<string, BigNumber>>({});
+const sort = ref<DataTableSortData<EditableMissingPrice>>([]);
 
 const formattedItems = computed<EditableMissingPrice[]>(() =>
-  get(items).map(item => {
+  get(items).map((item) => {
     const savedHistoricalPrice = get(prices).find(
-      price =>
-        price.fromAsset === item.fromAsset &&
-        price.toAsset === item.toAsset &&
-        price.timestamp === item.time
+      price => price.fromAsset === item.fromAsset && price.toAsset === item.toAsset && price.timestamp === item.time,
     );
 
     const key = createKey(item);
     const savedPrice = savedHistoricalPrice?.price;
     const refreshedHistoricalPrice = get(refreshedHistoricalPrices)[key];
 
-    const useRefreshedHistoricalPrice =
-      !savedPrice && !!refreshedHistoricalPrice;
+    const useRefreshedHistoricalPrice = !savedPrice && !!refreshedHistoricalPrice;
 
-    const price =
-      (useRefreshedHistoricalPrice
-        ? refreshedHistoricalPrice
-        : savedPrice
-      )?.toFixed() ?? '';
+    const price = (useRefreshedHistoricalPrice ? refreshedHistoricalPrice : savedPrice)?.toFixed() ?? '';
 
     return {
       ...item,
       saved: !!savedPrice,
       price,
-      useRefreshedHistoricalPrice
+      useRefreshedHistoricalPrice,
     };
-  })
+  }),
 );
 
-const updatePrice = async (item: EditableMissingPrice) => {
-  if (item.useRefreshedHistoricalPrice) {
+async function updatePrice(item: EditableMissingPrice) {
+  if (item.useRefreshedHistoricalPrice)
     return;
-  }
 
   const payload: HistoricalPriceDeletePayload = {
     fromAsset: item.fromAsset,
     toAsset: item.toAsset,
-    timestamp: item.time
+    timestamp: item.time,
   };
 
   try {
     if (item.price) {
       const formPayload: HistoricalPriceFormPayload = {
         ...payload,
-        price: item.price
+        price: item.price,
       };
 
-      if (item.saved) {
+      if (item.saved)
         await editHistoricalPrice(formPayload);
-      } else {
-        await addHistoricalPrice(formPayload);
-      }
-    } else if (item.saved) {
+      else await addHistoricalPrice(formPayload);
+    }
+    else if (item.saved) {
       await deleteHistoricalPrice(payload);
     }
-  } catch (e: any) {
-    let errorMessage = e.message;
-    if (e instanceof ApiValidationError) {
-      const errors = e.getValidationErrors({ price: '' });
-      errorMessage = typeof errors === 'string' ? e.message : errors.price[0];
+  }
+  catch (error: any) {
+    let errorMessage = error.message;
+    if (error instanceof ApiValidationError) {
+      const errors = error.getValidationErrors({ price: '' });
+      errorMessage = typeof errors === 'string' ? error.message : errors.price[0];
     }
 
     set(errorMessages, {
       ...get(errorMessages),
-      [createKey(item)]: errorMessage
+      [createKey(item)]: errorMessage,
     });
   }
 
   await getHistoricalPrices();
-};
+}
 
-const tableRef = ref<any>(null);
+const tableRef = ref();
 
 const tableContainer = computed(() => get(tableRef)?.$el);
 
-const headers = computed<DataTableHeader[]>(() => [
+const headers = computed<DataTableColumn<EditableMissingPrice>[]>(() => [
   {
-    text: t(
-      'profit_loss_report.actionable.missing_prices.headers.from_asset'
-    ).toString(),
-    value: 'fromAsset'
+    label: t('profit_loss_report.actionable.missing_prices.headers.from_asset'),
+    key: 'fromAsset',
+    sortable: true,
   },
   {
-    text: t(
-      'profit_loss_report.actionable.missing_prices.headers.to_asset'
-    ).toString(),
-    value: 'toAsset'
+    label: t('profit_loss_report.actionable.missing_prices.headers.to_asset'),
+    key: 'toAsset',
+    cellClass: get(isPinned) ? 'px-2' : '',
+    sortable: true,
   },
   {
-    text: t('common.datetime').toString(),
-    value: 'time'
+    label: t('common.datetime'),
+    key: 'time',
+    cellClass: get(isPinned) ? 'px-2' : '',
+    sortable: true,
   },
   {
-    text: t('common.price').toString(),
-    value: 'price',
-    sortable: false
-  }
+    label: t('common.price'),
+    key: 'price',
+    cellClass: `pb-1 ${get(isPinned) ? '' : ''}`,
+    align: 'end',
+  },
 ]);
 
 const { getHistoricPrice } = useBalancePricesStore();
 
 const refreshing = ref<boolean>(false);
 
-const refreshHistoricalPrice = async (item: EditableMissingPrice) => {
+async function refreshHistoricalPrice(item: EditableMissingPrice) {
   set(refreshing, true);
   const rateFromHistoricPrice = await getHistoricPrice({
     timestamp: item.time,
     fromAsset: item.fromAsset,
-    toAsset: item.toAsset
+    toAsset: item.toAsset,
   });
 
   const key = createKey(item);
@@ -157,103 +142,96 @@ const refreshHistoricalPrice = async (item: EditableMissingPrice) => {
     const refreshedHistoricalPricesVal = get(refreshedHistoricalPrices);
     refreshedHistoricalPricesVal[key] = rateFromHistoricPrice;
     set(refreshedHistoricalPrices, refreshedHistoricalPricesVal);
-  } else {
+  }
+  else {
     set(errorMessages, {
       ...get(errorMessages),
-      [key]: t('profit_loss_report.actionable.missing_prices.price_not_found')
+      [key]: t('profit_loss_report.actionable.missing_prices.price_not_found'),
     });
   }
   set(refreshing, false);
-};
+}
 </script>
 
 <template>
   <div>
-    <DataTable
+    <RuiDataTable
       ref="tableRef"
+      v-model:sort="sort"
       class="table-inside-dialog"
       :class="{
-        [$style['table--pinned']]: isPinned
+        [$style['table--pinned']]: isPinned,
       }"
-      :headers="headers"
-      :items="formattedItems"
-      :container="tableContainer"
+      :cols="headers"
+      :rows="formattedItems"
+      :scroller="tableContainer"
       :dense="isPinned"
-      disable-floating-header
-      flat
+      row-attr="fromAsset"
     >
-      <template #item="{ item }">
-        <tr :key="createKey(item)">
-          <td>
-            <AssetDetails link :asset="item.fromAsset" />
-          </td>
-          <td :class="isPinned ? 'px-2' : ''">
-            <AssetDetails link :asset="item.toAsset" />
-          </td>
-          <td :class="isPinned ? 'px-2' : ''">
-            <DateDisplay :timestamp="item.time" />
-          </td>
-          <td :class="isPinned ? 'px-2 py-1' : 'py-3'">
-            <AmountInput
-              v-model="item.price"
-              :class="$style.input"
-              class="mb-n2"
-              dense
-              :disabled="item.useRefreshedHistoricalPrice"
-              :placeholder="
-                t('profit_loss_report.actionable.missing_prices.input_price')
-              "
-              outlined
-              :success-messages="
-                item.saved
-                  ? [
-                      t(
-                        'profit_loss_report.actionable.missing_prices.price_is_saved'
-                      )
-                    ]
-                  : []
-              "
-              :error-messages="errorMessages[createKey(item)]"
-              @focus="delete errorMessages[createKey(item)]"
-              @input="delete errorMessages[createKey(item)]"
-              @blur="updatePrice(item)"
-            >
-              <template #append>
-                <RuiTooltip
-                  v-if="item.rateLimited"
-                  :popper="{ placement: 'top' }"
-                  open-delay="400"
-                  tooltip-class="max-w-[16rem]"
-                  :disabled="refreshing"
-                >
-                  <template #activator="{ on }">
-                    <RuiButton
-                      :disabled="!!item.price || refreshing"
-                      :loading="refreshing"
-                      class="-mr-3 !py-[0.625rem]"
-                      size="sm"
-                      color="primary"
-                      v-on="on"
-                      @click="refreshHistoricalPrice(item)"
-                    >
-                      <RuiIcon size="20" name="refresh-line" />
-                    </RuiButton>
-                  </template>
-                  <span>
-                    {{
-                      t(
-                        'profit_loss_report.actionable.missing_prices.refresh_price_hint'
-                      )
-                    }}
-                  </span>
-                </RuiTooltip>
-              </template>
-            </AmountInput>
-          </td>
-        </tr>
+      <template #item.fromAsset="{ row }">
+        <AssetDetails
+          link
+          :asset="row.fromAsset"
+        />
       </template>
-    </DataTable>
-    <slot name="actions" :items="formattedItems" />
+      <template #item.toAsset="{ row }">
+        <AssetDetails
+          link
+          :asset="row.toAsset"
+        />
+      </template>
+      <template #item.time="{ row }">
+        <DateDisplay :timestamp="row.time" />
+      </template>
+      <template #item.price="{ row }">
+        <AmountInput
+          v-model="row.price"
+          :class="$style.input"
+          dense
+          :disabled="row.useRefreshedHistoricalPrice"
+          :label="t('profit_loss_report.actionable.missing_prices.input_price')"
+          variant="outlined"
+          :success-messages="row.saved ? [t('profit_loss_report.actionable.missing_prices.price_is_saved')] : []"
+          :error-messages="errorMessages[createKey(row)]"
+          @focus="delete errorMessages[createKey(row)]"
+          @update:model-value="delete errorMessages[createKey(row)]"
+          @blur="updatePrice(row)"
+        >
+          <template #append>
+            <RuiTooltip
+              v-if="row.rateLimited"
+              :popper="{ placement: 'top' }"
+              :open-delay="400"
+              tooltip-class="max-w-[16rem]"
+              :disabled="refreshing"
+            >
+              <template #activator>
+                <RuiButton
+                  :disabled="!!row.price || refreshing"
+                  :loading="refreshing"
+                  class="-mr-3 !py-[0.625rem] rounded-l-none"
+                  size="sm"
+                  color="primary"
+                  @click="refreshHistoricalPrice(row)"
+                >
+                  <RuiIcon
+                    size="20"
+                    name="refresh-line"
+                  />
+                </RuiButton>
+              </template>
+              <span>
+                {{ t('profit_loss_report.actionable.missing_prices.refresh_price_hint') }}
+              </span>
+            </RuiTooltip>
+          </template>
+        </AmountInput>
+      </template>
+    </RuiDataTable>
+    <slot
+      name="actions"
+      :items="formattedItems"
+    />
   </div>
 </template>
 
@@ -261,22 +239,12 @@ const refreshHistoricalPrice = async (item: EditableMissingPrice) => {
 .table {
   &--pinned {
     max-height: 100%;
-    height: calc(100vh - 230px);
+    height: calc(100vh - 250px);
   }
 }
 
 .input {
-  min-width: 150px;
-
-  :global {
-    .v-input {
-      &__append-inner {
-        display: flex !important;
-        align-self: stretch !important;
-        align-items: center;
-        margin-top: 0 !important;
-      }
-    }
-  }
+  @apply text-left;
+  min-width: 120px;
 }
 </style>
